@@ -1,0 +1,7 @@
+.vscode/
+ckpt/
+__pycache__/
+*.pyc
+.gradio/
+blendedmvs_processed/
+checkpoints/

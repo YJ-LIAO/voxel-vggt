@@ -1,0 +1,625 @@
+import datetime
+import json
+import math
+import os
+import random
+import shutil
+import sys
+import time
+import traceback
+import builtins
+from datetime import timedelta
+from pathlib import Path
+from typing import Sized
+
+import hydra
+import numpy as np
+import torch
+import torch.backends.cudnn as cudnn
+import torch.multiprocessing
+from accelerate import Accelerator
+from accelerate import DistributedDataParallelKwargs, InitProcessGroupKwargs
+from accelerate.logging import get_logger
+from omegaconf import OmegaConf
+from torch.utils.tensorboard import SummaryWriter
+
+import croco.utils.misc as misc
+import dust3r.utils.path_to_croco  # noqa: F401
+from croco.utils.misc import NativeScalerWithGradNormCount as NativeScaler
+from dust3r.datasets import get_data_loader
+from dust3r.inference import sample_query_points
+from ovggt.losses.frontend_distill import FrontendDistillLoss
+from ovggt.models.ovggt import OVGGT
+from ovggt.utils.pose_enc import REL_POSE_ENCODING
+from vggt.models.vggt import VGGT
+
+torch.backends.cuda.matmul.allow_tf32 = True
+torch.multiprocessing.set_sharing_strategy("file_system")
+
+printer = get_logger(__name__, log_level="DEBUG")
+
+
+def setup_for_distributed(accelerator: Accelerator):
+    builtin_print = builtins.print
+
+    def print(*args, **kwargs):
+        force = kwargs.pop("force", False)
+        force = force or (accelerator.num_processes > 8)
+        if accelerator.is_main_process or force:
+            now = datetime.datetime.now().time()
+            builtin_print(f"[{now}] ", end="")
+            builtin_print(*args, **kwargs)
+
+    builtins.print = print
+
+
+def save_current_code(outdir: str) -> str:
+    now = datetime.datetime.now()
+    date_time = now.strftime("%m_%d-%H:%M:%S")
+    dst_dir = os.path.join(outdir, "code", date_time)
+    os.makedirs(dst_dir, exist_ok=True)
+
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    for dirname in ("src", "config"):
+        src_path = os.path.join(project_root, dirname)
+        if not os.path.exists(src_path):
+            continue
+        shutil.copytree(
+            src_path,
+            os.path.join(dst_dir, dirname),
+            ignore=shutil.ignore_patterns(
+                "*__pycache__*",
+                "*.pyc",
+                "*.png",
+                "*.jpg",
+                "*.zip",
+            ),
+            dirs_exist_ok=True,
+        )
+    return dst_dir
+
+
+def resolve_state_dict(checkpoint_path: str, map_location="cpu") -> dict:
+    checkpoint = torch.load(checkpoint_path, map_location=map_location, weights_only=False)
+    if isinstance(checkpoint, dict) and "model" in checkpoint and isinstance(checkpoint["model"], dict):
+        return checkpoint["model"]
+    return checkpoint
+
+
+def freeze_frontend_stage_a_parameters(model: OVGGT) -> None:
+    for _, param in model.named_parameters():
+        param.requires_grad = True
+
+    if hasattr(model.aggregator, "patch_embed"):
+        for param in model.aggregator.patch_embed.parameters():
+            param.requires_grad = False
+    if hasattr(model.aggregator, "camera_token"):
+        model.aggregator.camera_token.requires_grad = False
+    if hasattr(model.aggregator, "register_token"):
+        model.aggregator.register_token.requires_grad = False
+
+
+def summarize_trainable_parameters(model: OVGGT) -> None:
+    total_params = 0
+    frozen_params = 0
+    frozen_names = []
+    for name, param in model.named_parameters():
+        total_params += param.numel()
+        if not param.requires_grad:
+            frozen_params += param.numel()
+            frozen_names.append(name)
+
+    printer.info(
+        "Frozen %s parameters out of %s total parameters. (%.2f%%)",
+        f"{frozen_params:,}",
+        f"{total_params:,}",
+        100.0 * frozen_params / max(total_params, 1),
+    )
+    printer.info(
+        "Trainable parameters: %s (%.2f%%)",
+        f"{total_params - frozen_params:,}",
+        100.0 * (total_params - frozen_params) / max(total_params, 1),
+    )
+    if frozen_names:
+        preview = ", ".join(frozen_names[:5])
+        suffix = "..." if len(frozen_names) > 5 else ""
+        printer.info("Example frozen parameters: %s%s", preview, suffix)
+
+
+def build_dataset(dataset, batch_size, num_workers, accelerator, fixed_length=False):
+    printer.info("Building train data loader for dataset: %s", dataset)
+    return get_data_loader(
+        dataset,
+        batch_size=batch_size,
+        num_workers=num_workers,
+        pin_mem=True,
+        shuffle=True,
+        drop_last=True,
+        accelerator=accelerator,
+        fixed_length=fixed_length,
+    )
+
+
+def normalize_batch_images_(batch):
+    if isinstance(batch, dict) and "img" in batch:
+        batch["img"] = (batch["img"] + 1.0) / 2.0
+        return
+    if isinstance(batch, list):
+        for view in batch:
+            if isinstance(view, dict) and "img" in view:
+                view["img"] = (view["img"] + 1.0) / 2.0
+
+
+def build_query_points(batch, num_query_points: int = 64):
+    if int(num_query_points or 0) <= 0:
+        return None
+    if not isinstance(batch, list) or not batch or "valid_mask" not in batch[0]:
+        return None
+    valid_mask = torch.as_tensor(batch[0]["valid_mask"])
+    if valid_mask.dim() == 2:
+        valid_mask = valid_mask.unsqueeze(0)
+    return sample_query_points(valid_mask, M=int(num_query_points)).to(device=batch[0]["img"].device)
+
+
+def normalize_resume_step(resume_step: int, steps_per_epoch: int) -> int:
+    resume_step = int(resume_step or 0)
+    if resume_step < 0:
+        return 0
+    if steps_per_epoch <= 0:
+        return 0
+    if resume_step < steps_per_epoch:
+        return resume_step
+    # Backward compatibility: old checkpoints may store global step here.
+    return resume_step % steps_per_epoch
+
+
+def frontend_loss_of_one_batch(
+    batch,
+    model,
+    teacher,
+    criterion,
+    use_amp=False,
+    num_query_points: int = 64,
+    use_gradient_checkpointing: bool = False,
+):
+    query_points = build_query_points(batch, num_query_points=num_query_points)
+    autocast_enabled = bool(use_amp) and torch.cuda.is_available()
+    autocast_dtype = (
+        torch.bfloat16
+        if torch.cuda.is_available() and torch.cuda.get_device_capability()[0] >= 8
+        else torch.float16
+    )
+    autocast_device_type = "cuda" if torch.cuda.is_available() else "cpu"
+
+    with torch.amp.autocast(
+        device_type=autocast_device_type,
+        enabled=autocast_enabled,
+        dtype=autocast_dtype,
+    ):
+        with torch.inference_mode():
+            teacher_outputs = teacher.inference(batch, query_points=query_points)
+
+        # Run student forward pass with optional gradient checkpointing.
+        # Gradient checkpointing reduces activation memory by recomputing during backward,
+        # trading compute for memory (can reduce activation memory by 40-60%).
+        if use_gradient_checkpointing:
+            # Use checkpoint on the student forward pass
+            from torch.utils.checkpoint import checkpoint
+
+            def student_forward_fn(views, qp):
+                return model(views, query_points=qp)
+
+            student_outputs = checkpoint(
+                student_forward_fn,
+                batch,
+                query_points,
+                use_reentrant=False,
+            )
+        else:
+            student_outputs = model(batch, query_points=query_points)
+
+    if student_outputs.keyframe_schedule is None:
+        raise RuntimeError("Frontend training output is missing keyframe_schedule")
+
+    # `views` are not consumed by FrontendDistillLoss; dropping references here
+    # reduces peak memory in long-sequence training.
+    teacher_outputs.views = None
+    student_outputs.views = None
+
+    with torch.amp.autocast(device_type=autocast_device_type, enabled=False):
+        loss = criterion(
+            batch,
+            teacher_outputs,
+            student_outputs,
+            student_outputs.keyframe_schedule,
+        )
+    # The loss tensor already owns the autograd graph it needs. Dropping the
+    # large output containers here avoids keeping extra references alive across
+    # the rest of the training step, which is important for DDP memory headroom.
+    del teacher_outputs
+    del student_outputs
+    del query_points
+    return loss
+
+
+def save_final_model(accelerator, args, epoch, model_without_ddp):
+    output_dir = Path(args.output_dir)
+    checkpoint_path = output_dir / "checkpoint-final.pth"
+    to_save = {
+        "args": args,
+        "model": model_without_ddp.state_dict(),
+        "epoch": epoch,
+    }
+    printer.info(">> Saving model to %s ...", checkpoint_path)
+    misc.save_on_master(accelerator, to_save, checkpoint_path)
+
+
+def train_one_epoch(
+    model: torch.nn.Module,
+    teacher: torch.nn.Module,
+    criterion: torch.nn.Module,
+    data_loader: Sized,
+    optimizer: torch.optim.Optimizer,
+    accelerator: Accelerator,
+    epoch: int,
+    loss_scaler,
+    args,
+    log_writer=None,
+):
+    model.train(True)
+    metric_logger = misc.MetricLogger(delimiter="  ")
+    metric_logger.add_meter("lr", misc.SmoothedValue(window_size=1, fmt="{value:.6f}"))
+    header = f"Epoch: [{epoch}]"
+    accum_iter = args.accum_iter
+
+    def save_model(epoch, fname, step):
+        unwrapped_model = accelerator.unwrap_model(model)
+        misc.save_model(
+            accelerator=accelerator,
+            args=args,
+            model_without_ddp=unwrapped_model,
+            optimizer=optimizer,
+            loss_scaler=loss_scaler,
+            epoch=epoch,
+            step=step,
+            fname=fname,
+        )
+
+    if log_writer is not None:
+        printer.info("log_dir: %s", log_writer.log_dir)
+
+    if hasattr(data_loader, "dataset") and hasattr(data_loader.dataset, "set_epoch"):
+        data_loader.dataset.set_epoch(epoch)
+    if (
+        hasattr(data_loader, "batch_sampler")
+        and hasattr(data_loader.batch_sampler, "batch_sampler")
+        and hasattr(data_loader.batch_sampler.batch_sampler, "set_epoch")
+    ):
+        data_loader.batch_sampler.batch_sampler.set_epoch(epoch)
+
+    optimizer.zero_grad()
+    data_iter = metric_logger.log_every(data_loader, args.print_freq, accelerator, header)
+
+    save_iter_freq = int(getattr(args, "save_iter_freq", 0) or 0)
+    keep_iter_freq = int(getattr(args, "keep_iter_freq", 0) or 0)
+    resume_step_raw = int(getattr(args, "start_step", 0) or 0)
+    resume_epoch = int(getattr(args, "start_epoch", 0) or 0)
+    resume_step = normalize_resume_step(resume_step_raw, len(data_loader))
+    if resume_step != resume_step_raw and accelerator.is_main_process:
+        printer.warning(
+            "Normalizing resume step from %d to %d (steps_per_epoch=%d).",
+            resume_step_raw,
+            resume_step,
+            len(data_loader),
+        )
+
+    for data_iter_step, batch in enumerate(data_iter):
+        if epoch == resume_epoch and data_iter_step < resume_step:
+            continue
+
+        with accelerator.accumulate(model):
+            normalize_batch_images_(batch)
+
+            epoch_f = epoch + data_iter_step / len(data_loader)
+            if data_iter_step % accum_iter == 0:
+                misc.adjust_learning_rate(optimizer, epoch_f, args)
+
+            step = int(epoch_f * len(data_loader))
+
+            # Log GPU memory before forward pass (every print_freq steps)
+            if data_iter_step % args.print_freq == 0 and torch.cuda.is_available():
+                allocated = torch.cuda.memory_allocated() / 1024**3
+                reserved = torch.cuda.memory_reserved() / 1024**3
+                printer.info(
+                    "[Memory] Step %d: Allocated=%.2fGB, Reserved=%.2fGB",
+                    step, allocated, reserved
+                )
+
+            loss, loss_details = frontend_loss_of_one_batch(
+                batch=batch,
+                model=model,
+                teacher=teacher,
+                criterion=criterion,
+                use_amp=bool(args.amp),
+                num_query_points=int(getattr(args, "n_corres_train", 64) or 0),
+                use_gradient_checkpointing=bool(getattr(args, "gradient_checkpointing", False)),
+            )
+            loss_value = float(loss)
+
+            if not math.isfinite(loss_value):
+                printer.error("Loss is %s, stopping training. Details: %s", loss_value, loss_details)
+                sys.exit(1)
+
+            loss_scaler(
+                loss,
+                optimizer,
+                parameters=model.parameters(),
+                update_grad=accelerator.sync_gradients,
+                clip_grad=1.0,
+            )
+            if accelerator.sync_gradients:
+                optimizer.zero_grad()
+
+            lr = optimizer.param_groups[0]["lr"]
+            metric_logger.update(epoch=epoch_f)
+            metric_logger.update(lr=lr)
+            metric_logger.update(step=step)
+            metric_logger.update(loss=loss_value, **loss_details)
+
+            if (data_iter_step + 1) % accum_iter == 0 and (
+                (data_iter_step + 1) % (accum_iter * args.print_freq)
+            ) == 0:
+                loss_value_reduce = accelerator.gather(
+                    torch.tensor(loss_value, device=accelerator.device)
+                ).mean()
+                if log_writer is not None:
+                    log_writer.add_scalar("train_loss", loss_value_reduce, step)
+                    log_writer.add_scalar("train_lr", lr, step)
+                    log_writer.add_scalar("train_iter", int(epoch_f * 1000), step)
+                    for name, val in loss_details.items():
+                        if isinstance(val, dict):
+                            continue
+                        if isinstance(val, torch.Tensor) and val.ndim > 0:
+                            continue
+                        log_writer.add_scalar("train_" + name, val, step)
+
+        global_step = epoch * len(data_loader) + data_iter_step + 1
+        step_in_epoch = data_iter_step + 1
+        if data_iter_step != len(data_loader) - 1:
+            if save_iter_freq > 0 and global_step % save_iter_freq == 0:
+                save_model(epoch - 1, "last", step_in_epoch)
+            if keep_iter_freq > 0 and global_step % keep_iter_freq == 0:
+                save_model(epoch - 1, f"iter{global_step:07d}", step_in_epoch)
+
+        save_every_steps = int(args.save_freq * len(data_loader))
+        if (
+            save_every_steps > 0
+            and data_iter_step % save_every_steps == 0
+            and data_iter_step != 0
+            and data_iter_step != len(data_loader) - 1
+        ):
+            save_model(epoch - 1, "last", step_in_epoch)
+
+    metric_logger.synchronize_between_processes(accelerator)
+    printer.info("Averaged stats: %s", metric_logger)
+    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
+
+
+def train(args):
+    if int(args.batch_size) != 1:
+        raise ValueError(
+            f"Frontend training currently supports batch_size=1 only, got batch_size={args.batch_size}. "
+            "Please set batch_size=1 in config."
+        )
+
+    accelerator = Accelerator(
+        gradient_accumulation_steps=args.accum_iter,
+        mixed_precision="bf16",
+        kwargs_handlers=[
+            DistributedDataParallelKwargs(find_unused_parameters=True),
+            InitProcessGroupKwargs(timeout=timedelta(seconds=6000)),
+        ],
+    )
+    device = accelerator.device
+
+    setup_for_distributed(accelerator)
+
+    printer.info("output_dir: %s", args.output_dir)
+    if args.output_dir:
+        Path(args.output_dir).mkdir(parents=True, exist_ok=True)
+
+    if accelerator.is_main_process:
+        dst_dir = save_current_code(outdir=args.output_dir)
+        printer.info("Saving current code to %s", dst_dir)
+
+    auto_resume_enabled = bool(getattr(args, "auto_resume", True))
+    auto_resume = auto_resume_enabled and not args.resume
+    if auto_resume:
+        last_ckpt_fname = os.path.join(args.output_dir, "checkpoint-last.pth")
+        args.resume = last_ckpt_fname if os.path.isfile(last_ckpt_fname) else None
+    elif not args.resume:
+        args.resume = None
+
+    printer.info("job dir: %s", os.path.dirname(os.path.realpath(__file__)))
+
+    seed = args.seed + accelerator.state.process_index
+    printer.info("Setting seed to %s for process %s", seed, accelerator.state.process_index)
+    torch.manual_seed(seed)
+    np.random.seed(seed)
+    random.seed(seed)
+    cudnn.benchmark = args.benchmark
+
+    data_loader_train = build_dataset(
+        args.train_dataset,
+        args.batch_size,
+        args.num_workers,
+        accelerator=accelerator,
+        fixed_length=args.fixed_length,
+    )
+
+    printer.info("Loading frontend student model")
+    frontend_total_budget = int(getattr(args, "frontend_total_budget", 200000))
+    frontend_camera_budget = int(getattr(args, "frontend_camera_budget", 384))
+    anchor_overflow_policy = str(getattr(args, "anchor_overflow_policy", "recent"))
+    model = OVGGT(
+        mode=args.frontend_mode,
+        frontend_pose_encoding_type=args.frontend_pose_encoding_type,
+        total_budget=frontend_total_budget,
+        camera_budget=frontend_camera_budget,
+        anchor_overflow_policy=anchor_overflow_policy,
+    )
+    printer.info(
+        "Frontend budgets: total_budget=%d, camera_budget=%d, anchor_overflow_policy=%s",
+        frontend_total_budget,
+        frontend_camera_budget,
+        anchor_overflow_policy,
+    )
+    printer.info("All model parameters: %s", sum(p.numel() for p in model.parameters()))
+
+    # Teacher使用OVGGT Legacy模式（流式处理），比VGGT更省显存
+    # VGGT一次性处理所有帧，attention矩阵为[B,H,S*P,S*P]，内存消耗巨大
+    # OVGGT Legacy逐帧处理+KV Cache，内存更可控
+    # 关键：Teacher也需要设置total_budget来限制KV Cache大小
+    teacher_total_budget = int(getattr(args, "teacher_total_budget", frontend_total_budget))
+    printer.info(
+        "Loading teacher model (OVGGT Legacy mode, total_budget=%d)",
+        teacher_total_budget,
+    )
+    teacher = OVGGT(
+        mode="legacy",
+        total_budget=teacher_total_budget,
+    )
+
+    printer.info("Creating train criterion = %s", args.train_criterion)
+    train_criterion = eval(args.train_criterion).to(device)
+
+    model.to(device)
+    teacher.to(device)
+
+    if args.gradient_checkpointing:
+        printer.warning(
+            "gradient_checkpointing=True was requested, but OVGGT does not expose gradient_checkpointing_enable(); ignoring."
+        )
+
+    if args.pretrained and not args.resume:
+        printer.info("Loading student pretrained weights from %s", args.pretrained)
+        pretrained_state = resolve_state_dict(args.pretrained, map_location="cpu")
+        printer.info(model.load_state_dict(pretrained_state, strict=True))
+        del pretrained_state
+
+    teacher_path = args.teacher or args.pretrained
+    if teacher_path:
+        printer.info("Loading teacher weights from %s", teacher_path)
+        teacher_state = resolve_state_dict(teacher_path, map_location="cpu")
+        teacher.load_state_dict(teacher_state, strict=True)
+        del teacher_state
+
+    for param in teacher.parameters():
+        param.requires_grad = False
+    teacher.eval()
+
+    freeze_frontend_stage_a_parameters(model)
+    summarize_trainable_parameters(model)
+
+    param_groups = misc.get_parameter_groups(model, args.weight_decay)
+    optimizer = torch.optim.AdamW(param_groups, lr=args.lr, betas=(0.9, 0.95))
+    loss_scaler = NativeScaler(accelerator=accelerator)
+
+    try:
+        best_so_far = misc.load_model(
+            args=args,
+            model_without_ddp=model,
+            optimizer=optimizer,
+            loss_scaler=loss_scaler,
+        )
+    except Exception as exc:
+        if not auto_resume:
+            raise
+        printer.warning(
+            "Skipping auto-resume from %s after load failure: %s",
+            args.resume,
+            exc,
+        )
+        args.resume = None
+        best_so_far = None
+    if best_so_far is None:
+        best_so_far = float("inf")
+
+    accelerator.even_batches = False
+    optimizer, model, data_loader_train = accelerator.prepare(
+        optimizer, model, data_loader_train
+    )
+
+    log_writer = SummaryWriter(log_dir=args.output_dir) if accelerator.is_main_process else None
+
+    def save_model(epoch, fname, step):
+        misc.save_model(
+            accelerator=accelerator,
+            args=args,
+            model_without_ddp=accelerator.unwrap_model(model),
+            optimizer=optimizer,
+            loss_scaler=loss_scaler,
+            epoch=epoch,
+            step=step,
+            fname=fname,
+            best_so_far=best_so_far,
+        )
+
+    printer.info("Start frontend training for %s epochs", args.epochs)
+    start_time = time.time()
+    for epoch in range(args.start_epoch, args.epochs + 1):
+        if epoch > args.start_epoch:
+            should_save = (
+                args.save_freq
+                and np.allclose(epoch / args.save_freq, int(epoch / args.save_freq))
+            ) or epoch == args.epochs
+            if should_save:
+                save_model(epoch - 1, "last", 0)
+            if args.keep_freq and epoch % args.keep_freq == 0:
+                save_model(epoch - 1, str(epoch), 0)
+
+        if epoch >= args.epochs:
+            break
+
+        train_one_epoch(
+            model=model,
+            teacher=teacher,
+            criterion=train_criterion,
+            data_loader=data_loader_train,
+            optimizer=optimizer,
+            accelerator=accelerator,
+            epoch=epoch,
+            loss_scaler=loss_scaler,
+            args=args,
+            log_writer=log_writer,
+        )
+
+    total_time = time.time() - start_time
+    printer.info("Training time %s", str(datetime.timedelta(seconds=int(total_time))))
+    save_final_model(accelerator, args, args.epochs, accelerator.unwrap_model(model))
+
+
+@hydra.main(
+    version_base=None,
+    config_path=str(os.path.dirname(os.path.abspath(__file__))) + "/../config",
+    config_name="train_frontend_blendedmvs.yaml",
+)
+def run(cfg: OmegaConf):
+    OmegaConf.resolve(cfg)
+    logdir = Path(cfg.logdir)
+    logdir.mkdir(parents=True, exist_ok=True)
+    try:
+        train(cfg)
+    except Exception:
+        output_dir = Path(cfg.output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        rank = os.environ.get("RANK", "unknown")
+        local_rank = os.environ.get("LOCAL_RANK", "unknown")
+        crash_path = output_dir / f"crash_rank{rank}_local{local_rank}.log"
+        with open(crash_path, "w", encoding="utf-8") as f:
+            f.write(traceback.format_exc())
+        raise
+
+
+if __name__ == "__main__":
+    run()
