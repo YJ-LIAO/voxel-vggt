@@ -26,6 +26,9 @@ class FrontendCacheConfig:
     export_keyframe_packets: bool = False
     depth_conf_weight: float = 0.5
     importance_weight: float = 0.5
+    dedup_cooldown_frames: int = 0
+    intra_frame_dedup_enabled: bool = True
+    fifo_keep_topk: int = 0  # Retain top-K tokens by score when demoting oldest anchor (0=disable)
 
 
 @dataclass
@@ -149,6 +152,7 @@ class LayerCacheState:
     protected_count: int = 0
     max_history_anchors: int = 3
     slot_to_active: Optional[Dict[int, Tensor]] = None
+    needs_reorder_: bool = False
 
     def as_past_key_values(self):
         if self.k is None or self.v is None:
@@ -346,6 +350,23 @@ class LayerCacheState:
             self.metadata = self.metadata.append(metadata_new)
         self.protected_count = self._compute_protected_count()
 
+    def protect_topk_on_demotion_(self, demoted_slot: int, keep_count: int) -> None:
+        """Before FIFO_SWAP demotion, reassign top-K tokens from the demoted
+        anchor to slot 0 (global anchor) so they survive eviction."""
+        if self.metadata is None or self.num_tokens() == 0 or keep_count <= 0:
+            return
+        for b_idx in range(self.metadata.anchor_slot.shape[0]):
+            slot_mask = self.metadata.anchor_slot[b_idx] == demoted_slot
+            indices = torch.nonzero(slot_mask, as_tuple=False).squeeze(-1)
+            if indices.numel() <= keep_count:
+                continue
+            scores = self.metadata.importance[b_idx, indices]
+            _, top_local = torch.topk(scores, k=keep_count)
+            top_indices = indices[top_local]
+            # Reassign top-K to slot 0 so they survive the FIFO demotion
+            self.metadata.anchor_slot[b_idx, top_indices] = 0
+        self.protected_count = self._compute_protected_count()
+
     def apply_keyframe_event_(self, event) -> None:
         slot_pose_updates = getattr(event, "slot_pose_updates", None)
         if slot_pose_updates:
@@ -440,6 +461,11 @@ class LayerCacheState:
             & valid_xyz_mask
         )  # [B, N]
 
+        # Cooldown: recently promoted anchors skip dedup for N frames
+        if config.dedup_cooldown_frames > 0:
+            frames_since = current_frame_id - metadata.frame_id
+            protected_patch_mask = protected_patch_mask & (frames_since > config.dedup_cooldown_frames)
+
         # 当前帧的patch tokens
         current_patch_mask = (
             (metadata.frame_id == current_frame_id)
@@ -518,54 +544,77 @@ class LayerCacheState:
         current_patch_voxels = torch.floor(current_patch_xyz / config.voxel_size).to(torch.long)
 
         # 检测与保护token的冲突
+        # Build per-voxel best score map from protected tokens, then compare
+        # with current-frame tokens: only discard current tokens that are worse.
+        protected_patch_indices = torch.empty(0, dtype=torch.long, device=device)
         if protected_patch_mask.any():
             protected_patch_indices = torch.nonzero(protected_patch_mask, as_tuple=False).squeeze(-1)
-            protected_patch_xyz = projected_xyz[protected_patch_indices]
-            protected_voxels = torch.floor(protected_patch_xyz / config.voxel_size).to(torch.long)
 
-            all_voxels = torch.cat([protected_voxels, current_patch_voxels], dim=0)
-            _, inverse = torch.unique(all_voxels, dim=0, return_inverse=True)
+        if protected_patch_indices.numel() > 0:
+            protected_xyz = projected_xyz[protected_patch_indices]
+            protected_voxels = torch.floor(protected_xyz / config.voxel_size).to(torch.long)
+            protected_scores = scores[protected_patch_indices]
 
-            num_protected = protected_voxels.shape[0]
-            protected_group_ids = inverse[:num_protected].unique()
-            current_group_ids = inverse[num_protected:]
+            # Map voxel key → best protected score using scatter
+            voxel_hash = (protected_voxels * torch.tensor([1, 1000, 1000000], device=device, dtype=torch.long)).sum(-1)
+            unique_vhash, inv = torch.unique(voxel_hash, return_inverse=True)
+            num_v = unique_vhash.shape[0]
+            # Initialize with -inf so any real score wins
+            best_protected = torch.full((num_v,), float('-inf'), device=device)
+            best_protected.scatter_reduce_(0, inv, protected_scores, reduce='amax', include_self=True)
 
-            protected_group_mask = torch.zeros(
-                int(inverse.max().item()) + 1,
-                dtype=torch.bool,
-                device=device,
-            )
-            protected_group_mask[protected_group_ids] = True
-            protected_conflict_mask = protected_group_mask[current_group_ids]
+            # For each current token, check if it conflicts with a protected voxel
+            current_voxel_hash = (current_patch_voxels * torch.tensor([1, 1000, 1000000], device=device, dtype=torch.long)).sum(-1)
+            protected_conflict_mask = torch.zeros(current_patch_indices.shape[0], dtype=torch.bool, device=device)
+            discard_current_mask = torch.zeros(current_patch_indices.shape[0], dtype=torch.bool, device=device)
+
+            # Map current voxel hash to the best_protected index
+            current_to_best = torch.full((current_voxel_hash.shape[0],), -1, dtype=torch.long, device=device)
+            sort_idx = torch.searchsorted(unique_vhash.sort()[0], current_voxel_hash)
+            sort_idx = sort_idx.clamp(0, num_v - 1)
+            matched = unique_vhash[sort_idx] == current_voxel_hash
+            current_to_best[matched] = sort_idx[matched]
+
+            has_match = current_to_best >= 0
+            if has_match.any():
+                protected_conflict_mask[has_match] = True
+                # Only discard current token if its score is worse than protected
+                worse = current_patch_scores[has_match] < best_protected[current_to_best[has_match]]
+                discard_idx = torch.nonzero(has_match, as_tuple=False).squeeze(-1)
+                discard_current_mask[discard_idx[worse]] = True
+
+            if discard_current_mask.any():
+                keep_mask[current_patch_indices[discard_current_mask]] = False
+
+            _, current_group_ids = torch.unique(current_patch_voxels, dim=0, return_inverse=True)
         else:
             _, current_group_ids = torch.unique(current_patch_voxels, dim=0, return_inverse=True)
             protected_conflict_mask = torch.zeros_like(current_group_ids, dtype=torch.bool)
-
-        # 标记冲突token为丢弃
-        if protected_conflict_mask.any():
-            keep_mask[current_patch_indices[protected_conflict_mask]] = False
+            discard_current_mask = torch.zeros_like(current_group_ids, dtype=torch.bool)
 
         # 帧内去重：保留每个体素中评分最高的token
-        survivor_mask = ~protected_conflict_mask
-        survivor_indices = current_patch_indices[survivor_mask]
-        survivor_group_ids = current_group_ids[survivor_mask]
-        survivor_scores = current_patch_scores[survivor_mask]
+        if config.intra_frame_dedup_enabled:
+            # Only exclude tokens that were actually discarded, not all conflicting ones
+            survivor_mask = ~discard_current_mask if protected_patch_indices.numel() > 0 else torch.ones(current_patch_indices.shape[0], dtype=torch.bool, device=device)
+            survivor_indices = current_patch_indices[survivor_mask]
+            survivor_group_ids = current_group_ids[survivor_mask]
+            survivor_scores = current_patch_scores[survivor_mask]
 
-        if survivor_indices.numel() > 0:
-            # 按评分降序排序，再按组ID稳定排序
-            order_by_score = torch.argsort(survivor_scores, descending=True, stable=True)
-            grouped_order = torch.argsort(survivor_group_ids[order_by_score], stable=True)
-            final_order = order_by_score[grouped_order]
-            ordered_group_ids = survivor_group_ids[final_order]
+            if survivor_indices.numel() > 0:
+                # 按评分降序排序，再按组ID稳定排序
+                order_by_score = torch.argsort(survivor_scores, descending=True, stable=True)
+                grouped_order = torch.argsort(survivor_group_ids[order_by_score], stable=True)
+                final_order = order_by_score[grouped_order]
+                ordered_group_ids = survivor_group_ids[final_order]
 
-            # 检测重复：同一组内第一个保留，其余丢弃
-            keep_first = torch.ones_like(ordered_group_ids, dtype=torch.bool)
-            if ordered_group_ids.numel() > 1:
-                keep_first[1:] = ordered_group_ids[1:] != ordered_group_ids[:-1]
+                # 检测重复：同一组内第一个保留，其余丢弃
+                keep_first = torch.ones_like(ordered_group_ids, dtype=torch.bool)
+                if ordered_group_ids.numel() > 1:
+                    keep_first[1:] = ordered_group_ids[1:] != ordered_group_ids[:-1]
 
-            duplicate_indices = survivor_indices[final_order[~keep_first]]
-            if duplicate_indices.numel() > 0:
-                keep_mask[duplicate_indices] = False
+                duplicate_indices = survivor_indices[final_order[~keep_first]]
+                if duplicate_indices.numel() > 0:
+                    keep_mask[duplicate_indices] = False
 
         return torch.nonzero(keep_mask, as_tuple=False).squeeze(-1)
 
@@ -829,7 +878,7 @@ def sample_patch_local_xyz(
     grid_y, grid_x = grid
 
     patch_depth = depth_2d[:, grid_y, grid_x].reshape(B, -1)
-    patch_conf = depth_conf[:, grid_y, grid_x].reshape(B, -1)
+    patch_conf = depth_conf.reshape(B, patch_h, patch_size, patch_w, patch_size).sum(dim=(2, 4)).reshape(B, -1)
 
     pose_batched = pose_enc.unsqueeze(1)
     extrinsics, intrinsics = pose_encoding_to_extri_intri(pose_batched, image_size_hw)

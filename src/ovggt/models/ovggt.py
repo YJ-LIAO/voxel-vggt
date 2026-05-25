@@ -494,6 +494,14 @@ class OVGGT(nn.Module, PyTorchModelHubMixin):
             for layer_idx, pending_update in enumerate(pending_updates):
                 if pending_update is None:
                     continue
+                is_fifo_swap = str(getattr(event, "event_type", None)).endswith("FIFO_SWAP")
+                if is_fifo_swap and self.frontend_cache_config.fifo_keep_topk > 0:
+                    demoted_slot = getattr(event, "demoted_slot", None)
+                    if demoted_slot is not None:
+                        cache_states[layer_idx].protect_topk_on_demotion_(
+                            demoted_slot=demoted_slot,
+                            keep_count=self.frontend_cache_config.fifo_keep_topk,
+                        )
                 cache_states[layer_idx].apply_keyframe_event_(event)
                 if (
                     frame_metadata_base is None

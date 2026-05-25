@@ -172,7 +172,7 @@ class Block(nn.Module):
                     pos=pos,
                     past_key_values=past_key_values,
                     use_cache=True,
-                    cache_budget=None,
+                    cache_budget=cache_budget,
                     importance_scores=prev_importance,
                     defer_eviction=True,
                     anchor_token_count_inner=anchor_token_count,
