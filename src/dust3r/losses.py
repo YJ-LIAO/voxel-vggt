@@ -1269,6 +1269,12 @@ class DepthOrPmapLoss(nn.Module):
         return (loss_dx + loss_dy) / 2
 
     def forward(self, pred, gt, sigma_p, sigma_g, valid_mask):
+        # Sanitize: clamp extreme values to prevent inf/nan propagation
+        pred = torch.nan_to_num(pred, nan=0.0, posinf=1e4, neginf=-1e4)
+        gt = torch.nan_to_num(gt, nan=0.0, posinf=1e4, neginf=-1e4)
+        pred = pred.clamp(-1e4, 1e4)
+        gt = gt.clamp(-1e4, 1e4)
+
         if self.training:
             pred_normalized, _ = normalize_pointcloud(pred, valid_mask)
             gt_normalized, _ = normalize_pointcloud(gt, valid_mask)
@@ -1294,7 +1300,10 @@ class DepthOrPmapLoss(nn.Module):
             grad_loss = self.gradient_loss_multi_scale(pred_aligned, gt_normalized, valid_mask)
         reg_loss = -self.alpha * torch.log(sigma.clamp(min=1e-6))[valid_mask].mean()
         # return main + reg
-        return self.gamma * main_loss + grad_loss + reg_loss
+        loss = self.gamma * main_loss + grad_loss + reg_loss
+        # Safety: replace NaN/Inf with zero while preserving autograd graph
+        loss = torch.where(torch.isfinite(loss), loss, torch.zeros_like(loss))
+        return loss
 
 class TrackLoss(nn.Module):
     def __init__(self):
