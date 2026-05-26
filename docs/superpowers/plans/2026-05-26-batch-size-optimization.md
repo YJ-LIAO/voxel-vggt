@@ -108,16 +108,51 @@ python -m pytest tests/test_frontend_batch_training.py::test_collate_mixed_types
 ```
 Expected: PASS
 
-- [ ] **Step 5: Register collate_fn in DataLoader**
+- [ ] **Step 5: Add `collate_fn` parameter to `get_data_loader` and register**
 
-In `src/dust3r/datasets/__init__.py`, the `get_data_loader` function already accepts `collate_fn` parameter. In `build_dataset` (`train_frontend.py`), pass `collate_fn=frontend_collate_fn` when `batch_size > 1`:
+`get_data_loader` does NOT currently accept `collate_fn`. Two changes required:
 
 ```python
-# train_frontend.py — build_dataset or get_data_loader call site
+# src/dust3r/datasets/__init__.py — get_data_loader signature
+def get_data_loader(
+    dataset,
+    batch_size,
+    num_workers=8,
+    shuffle=True,
+    drop_last=True,
+    pin_mem=True,
+    accelerator: Accelerator = None,
+    fixed_length=False,
+    collate_fn=None,  # NEW — pass through to DataLoader
+):
+```
+
+Pass `collate_fn=collate_fn` in both DataLoader constructors (lines 67–72 and 77–84):
+
+```python
+# try branch (line 67):
+data_loader = torch.utils.data.DataLoader(
+    dataset, batch_sampler=sampler, num_workers=num_workers,
+    pin_memory=pin_mem, collate_fn=collate_fn,
+)
+# except branch (line 77):
+data_loader = torch.utils.data.DataLoader(
+    dataset, batch_size=batch_size, shuffle=shuffle,
+    num_workers=num_workers, pin_memory=pin_mem,
+    drop_last=drop_last, collate_fn=collate_fn,
+)
+```
+
+Then in `build_dataset` (`train_frontend.py:162`), pass `collate_fn` when `batch_size > 1`:
+
+```python
+# train_frontend.py — build_dataset function
 from dust3r.datasets.collate import frontend_collate_fn
 ...
-loader = get_data_loader(
-    dataset, batch_size=batch_size, ...,
+return get_data_loader(
+    dataset, batch_size=batch_size, num_workers=num_workers,
+    pin_mem=True, shuffle=shuffle, drop_last=drop_last,
+    accelerator=accelerator, fixed_length=fixed_length,
     collate_fn=frontend_collate_fn if batch_size > 1 else None,
 )
 ```
@@ -135,7 +170,7 @@ git commit -m "feat: add frontend_collate_fn for B>1 mixed-type view dicts"
 
 **Files:**
 - Modify: `src/ovggt/models/ovggt.py:815-834`
-- Modify: `src/train_frontend.py:653-658`
+- Modify: `src/train_frontend.py:674-678`
 - Modify: `src/finetune_frontend.py:251-255`
 
 - [ ] **Step 1: Remove guard in ovggt.py**
@@ -152,7 +187,7 @@ to:
 
 - [ ] **Step 2: Remove guard in train_frontend.py**
 
-Delete lines 653-658 (`if int(args.batch_size) != 1: raise ValueError(...)`).
+Delete lines 674–678 in `train()` function (`if int(args.batch_size) != 1: raise ValueError(...)`).
 
 - [ ] **Step 3: Remove guard in finetune_frontend.py**
 
@@ -183,41 +218,48 @@ git commit -m "feat: remove batch_size=1 guards in ovggt, train_frontend, finetu
 
 **Goal:** Eliminate 3 `.item()` GPU sync points in LayerCacheState, replacing with cached-on-mutation pattern.
 
-- [ ] **Step 1: Add cached attributes to LayerCacheState**
+- [ ] **Step 1: Add cached attribute to LayerCacheState**
 
-In `LayerCacheState.__init__` (after existing `__init__` or as class-level defaults):
+`LayerCacheState` is a plain class (NOT `@dataclass`) with class-level defaults at line 148. Add a new field:
 
 ```python
-# frontend_cache.py — LayerCacheState class
-def __init__(self, ...):
+# frontend_cache.py — LayerCacheState class (line 148)
+class LayerCacheState:
+    k: Optional[Tensor] = None
     ...
-    self._cached_protected_count: int = 0
-    self._cached_has_anchor: bool = False
+    _cached_protected_count: int = 0  # NEW — cache for _compute_protected_count
 ```
 
-- [ ] **Step 2: Replace has_anchor_tokens (line 103-104)**
+- [ ] **Step 2: Keep has_anchor_tokens unchanged (on TokenMetadata, line 103–104)**
+
+`has_anchor_tokens` is on `TokenMetadata` (a separate dataclass from `LayerCacheState`). It's already cheap and doesn't need caching. No changes needed.
 
 ```python
-# BEFORE:
+# TokenMetadata.has_anchor_tokens — keep as-is (line 103-104)
 def has_anchor_tokens(self) -> bool:
     return bool((self.anchor_slot >= 0).any().item())
-
-# AFTER:
-def has_anchor_tokens(self) -> bool:
-    return self._cached_has_anchor
 ```
 
-- [ ] **Step 3: Replace _compute_protected_count (line 670-673)**
+- [ ] **Step 3: Rename and cache `_compute_protected_count` (line 670–673)**
+
+Rename the existing method to `_compute_protected_count_raw`, then create a cached wrapper:
 
 ```python
-# BEFORE:
+# BEFORE (line 670):
 def _compute_protected_count(self) -> int:
     if self.metadata is None or self.metadata.anchor_slot.numel() == 0:
         return 0
     return int((self.metadata.anchor_slot[0] >= 0).sum().item())
 
 # AFTER:
+def _compute_protected_count_raw(self) -> int:
+    """Original computation — called only at mutation points."""
+    if self.metadata is None or self.metadata.anchor_slot.numel() == 0:
+        return 0
+    return int((self.metadata.anchor_slot[0] >= 0).sum().item())
+
 def _compute_protected_count(self) -> int:
+    """Cached version — returns pre-computed value, no GPU sync."""
     return self._cached_protected_count
 ```
 
@@ -237,14 +279,15 @@ if not counts or min(c.numel() for c in counts) == 0 or len(set(c.item() for c i
 
 - [ ] **Step 5: Update caches at mutation points**
 
-In `gather_` (line 167), `gather_per_batch_` (line 200), `append_` (line 342), and `apply_keyframe_event_` (line 370), add after mutation:
+In `_gather_single_batch_` (line 180-198), `gather_per_batch_` (line 200), `append_` (line 342), and `apply_keyframe_event_` (line 370), add after mutation:
 
 ```python
-self._cached_protected_count = self._compute_protected_count_raw()  # keep raw method
-self._cached_has_anchor = self.metadata is not None and (self.metadata.anchor_slot >= 0).any().item()
+self._cached_protected_count = self._compute_protected_count_raw()
 ```
 
-Note: this still has `.item()` but only at mutation points (per-frame, not per-query). The `.item()` is unavoidable here due to tensor → int conversion but frequency drops from ~240/step to ~24/step (once per layer per frame, not once per query).
+> **Order matters**: `_gather_single_batch_` at line 198 internally sets `self.protected_count = self._compute_protected_count()`. After the rename (Step 3), this calls the CACHED getter — which is stale because `_gather_single_batch_` just changed the data. Fix: change line 198 to `self._cached_protected_count = self._compute_protected_count_raw()` and then `self.protected_count = self._cached_protected_count`. This ensures the cache is updated before the value is read.
+
+Note: this still has `.item()` inside `_compute_protected_count_raw`, but only at mutation points (per-frame, not per-query). Frequency drops from ~240/step to ~24/step.
 
 - [ ] **Step 6: Commit**
 
@@ -262,10 +305,15 @@ git commit -m "perf: cache-on-mutation for .item() sync points in LayerCacheStat
 
 **This is the main change.** Converts single-sequence inference loop to multi-sequence with per-batch independent state and sequential aggregator + batched heads.
 
-- [ ] **Step 1: Per-batch state initialization (replaces lines 385-392)**
+- [ ] **Step 1: Compute B and initialize per-batch state (replaces lines 385–392)**
 
 ```python
-# AFTER — per-batch independent state (B copies of each singleton)
+# Compute batch size from input frames
+B = self._frame_batch_size(frames[0]["img"])  # e.g. frames[0]["img"].shape[0]
+for f in frames[1:]:
+    assert self._frame_batch_size(f["img"]) == B, "All frames must have same batch size"
+
+# Per-batch independent state (B copies of each singleton)
 keyframe_managers = [
     FrontendKeyframeManager(frontend_keyframe_config)
     for _ in range(B)
@@ -317,6 +365,9 @@ for i, frame in enumerate(frames):
     self.aggregator.last_scores = saved_last_scores
 
     # Average distill_loss across B (Review-18)
+    # Assumes all B sequences produce non-None distill_loss. If some don't,
+    # denominator varies per frame (non-uniform weighting). In practice all
+    # sequences should produce distill_loss when token_scorer is enabled.
     if frame_distill_losses:
         avg_fdl = sum(frame_distill_losses) / len(frame_distill_losses)
         total_distill_loss = avg_fdl if total_distill_loss is None else total_distill_loss + avg_fdl
@@ -353,17 +404,27 @@ for i, frame in enumerate(frames):
             rel_pose_enc_batch.append(pose_enc_dict_b["rel_pose_enc"][:, 0, :])
     camera_pose = torch.cat(pose_enc_batch, dim=0)  # [B, 9]
 
-    # Absolute pose composition (Review-16, Review-35)
+    # Compute camera_pose_rel for BOTH encoding paths
+    # This must happen outside the per-batch loop for efficiency
+    camera_pose_rel = None  # default, overwritten below
     with self._disabled_autocast_context():
-        if self.frontend_pose_encoding_type != ABS_POSE_ENCODING:
+        if i == 0 or self.frontend_pose_encoding_type == ABS_POSE_ENCODING:
+            camera_pose_rel = relative_from_absolute_pose_encoding(
+                camera_pose.unsqueeze(1),
+                camera_pose.unsqueeze(1),
+                image_size_hw=(img_h, img_w),
+            )[:, 0, :]
+        else:
             active_poses = torch.stack([
                 keyframe_managers[b].get_active_pose_encoding()
                 for b in range(B)
             ], dim=0)  # [B, 9]
             rel_pose_enc = torch.cat(rel_pose_enc_batch, dim=0).unsqueeze(1)  # [B, 1, 9]
-            camera_pose_abs = compose_absolute_from_relative(
+            # Overwrite camera_pose with composed absolute pose (not raw abs_pose_enc)
+            camera_pose = compose_absolute_from_relative(
                 active_poses.unsqueeze(1), rel_pose_enc, image_size_hw=(img_h, img_w)
             )[:, 0, :]
+            camera_pose_rel = rel_pose_enc[:, 0, :]
 ```
 
 - [ ] **Step 4: Batched depth/point heads (Review-36)**
@@ -373,11 +434,26 @@ for i, frame in enumerate(frames):
     def depth_head_forward(*layer_tokens):
         return self.depth_head(list(layer_tokens), images=images_all, patch_start_idx=patch_start_idx)
     depth, depth_conf = maybe_checkpoint_head(depth_head_forward, *aggregated_tokens_list)
+    depth = depth[:, 0]       # [B, 1, H, W] → [B, H, W] — slice off sequence dim
+    depth_conf = depth_conf[:, 0]
 
     # Point head — batched
     def point_head_forward(*layer_tokens):
         return self.point_head(list(layer_tokens), images=images_all, patch_start_idx=patch_start_idx)
     pts3d, pts3d_conf = maybe_checkpoint_head(point_head_forward, *aggregated_tokens_list)
+    pts3d = pts3d[:, 0]       # [B, 1, H, W] → [B, H, W]
+    pts3d_conf = pts3d_conf[:, 0]
+```
+
+> **Note:** DPT heads output `[B, S, 1, H, W]` where S is sequence length. For single-image inference S=1, so `[:, 0]` extracts the correct slice. This matches the current code at ovggt.py:471–472, 482–483.
+
+- [ ] **Step 4b: Track head for B>1 (Phase 1: skip)**
+
+```python
+    # Phase 1 assumes track_head is None for B>1.
+    # Future: batch track_head by stacking query_points per-batch element.
+    if self.track_head is not None and current_query_points is not None:
+        raise NotImplementedError("track_head with B>1 not yet supported. Set batch_size=1 or remove query_points.")
 ```
 
 - [ ] **Step 5: Per-batch keyframe events + cache commit (Review-17, Review-37)**
@@ -388,7 +464,7 @@ for i, frame in enumerate(frames):
     for b in range(B):
         event = keyframe_managers[b].update(
             frame_idx=i,
-            depth=depth[b],
+            depth=depth[b],          # [H, W] — already sliced by [:, 0] in Step 4
             pose_abs_enc=camera_pose[b],
             image_size_hw=(img_h, img_w),
         )
@@ -414,8 +490,8 @@ for i, frame in enumerate(frames):
                 frame_id=i,
                 keyframe_id=slot_id,
                 slot_id=slot_id,
-                anchor_slot=events[b].anchor_slot,  # Review-37: attribute, not method
-                importance=pending.importance_current,
+                anchor_slot=events[b].anchor_slot,
+                total_tokens=pending.importance_current.shape[1],
                 active_local_to_world=current_local_to_world,
             )
             current_metadata = frame_metadata_base.with_importance(pending.importance_current)
@@ -424,7 +500,7 @@ for i, frame in enumerate(frames):
                 pending_update=pending,
                 current_metadata=current_metadata,
                 config=self.frontend_cache_config,
-                intra_frame_keep_ratio=intra_frame_keep_ratio,
+                intra_frame_keep_ratio=self.aggregator.intra_frame_keep_ratio,
                 attn_module=self.aggregator.global_blocks[layer_idx].attn,
             )
             if score is not None:
@@ -442,20 +518,46 @@ for i, frame in enumerate(frames):
             num_cam_iters=self.camera_num_iters,
         )
 
-    # Build per-frame result
+    # Per-batch KeyframePacket (export_packets path)
+    if export_packets:
+        for b in range(B):
+            if events[b].anchor_slot >= 0 and frame_metadata_base is not None:
+                patch_features = aggregated_tokens_list[-1][b:b+1, :, patch_start_idx:]
+                keyframe_packets.append(
+                    KeyframePacket(
+                        frame_idx=i,
+                        keyframe_id=keyframe_managers[b].get_active_keyframe_id(),
+                        anchor_slot=events[b].anchor_slot,
+                        pose_abs=camera_pose[b].detach().cpu(),
+                        local_to_world=keyframe_managers[b].get_active_local_to_world().detach().cpu(),
+                        patch_local_xyz=frame_metadata_base.slot_local_xyz[:, patch_start_idx:].detach().cpu(),
+                        patch_depth_conf=frame_metadata_base.depth_conf[:, patch_start_idx:].detach().cpu(),
+                        patch_features=patch_features.detach().cpu(),
+                    )
+                )
+
+    # Build per-frame result — field names must match current code exactly
     res_gpu = {
+        "pts3d_in_other_view": pts3d,
+        "conf": pts3d_conf,
         "depth": depth,
         "depth_conf": depth_conf,
-        "pts3d": pts3d,
-        "pts3d_conf": pts3d_conf,
         "camera_pose": camera_pose,
-        "camera_pose_rel": rel_pose_enc[:, 0, :] if rel_pose_enc_batch else None,
+        "camera_pose_rel": camera_pose_rel,
+        **({"valid_mask": frame["valid_mask"]} if "valid_mask" in frame else {}),
+        **(
+            {"track": track, "vis": vis, "track_conf": track_conf}
+            if self.track_head is not None and current_query_points is not None
+            else {}
+        ),
     }
     if frame_writer is not None:
         frame_writer(i, frame, res_gpu)
     if cache_results:
         res_out = self._maybe_move_dict_to_cpu(res_gpu) if move_to_cpu else res_gpu
         all_ress.append(res_out)
+        if return_views:
+            processed_frames.append(self._maybe_move_dict_to_cpu(frame) if move_to_cpu else frame)
 
     del aggregated_tokens_list
     del frame_pending_updates
@@ -494,6 +596,8 @@ git commit -m "feat: multi-sequence B>1 support in _inference_frontend
 **Files:**
 - Modify: `config/train_frontend_finetune.yaml`
 - Modify: `config/train_token_scorer.yaml`
+
+> **Memory risk**: Changing from `batch_size=1, accum_iter=4` to `batch_size=4, accum_iter=1` keeps the effective batch size at 4 but increases peak GPU memory up to 4× (B independent cache states + batched activations). If OOM, fall back to `batch_size=2, accum_iter=2` or enable `gradient_checkpointing=True`. The spec's §6 Phase 2 memory monitoring will surface this.
 
 - [ ] **Step 1: Update train_frontend_finetune.yaml**
 
@@ -572,6 +676,8 @@ def test_batch2_forward_no_error():
 python -m pytest tests/test_frontend_batch_training.py::test_batch2_forward_no_error -v
 ```
 Expected: PASS (model completes forward without crash)
+
+> **Note:** This test calls `model.inference()` directly. The actual training path is `model(frames) → forward() → forward_frontend_train() → _inference_frontend()`. For full integration coverage, add a test that calls `model(frames, frame_processor=callback_fn)` to exercise the `forward_frontend_train` path including `accumulate_student_frame` callback and loss computation.
 
 - [ ] **Step 3: Write B=1 vs B=2 equivalence test**
 
@@ -664,12 +770,19 @@ def test_cache_isolation():
         frontend_cache_config=FrontendCacheConfig(enabled=True, dedup_enabled=False),
     ).cuda().eval()
 
-    frames = [{"img": torch.randn(B, 3, 518, 392).cuda()} for _ in range(3)]
+    # Use different random seeds per batch element so outputs differ IF isolation works
+    g0 = torch.Generator().manual_seed(42)
+    g1 = torch.Generator().manual_seed(99)
+    frames = [{"img": torch.cat([
+        torch.randn(1, 3, 518, 392, generator=g0),
+        torch.randn(1, 3, 518, 392, generator=g1),
+    ], dim=0).cuda()} for _ in range(3)]
     out = model.inference(frames, history_anchor_strategy='fixed_interval',
                            anchor_interval=2, max_anchors=2)
-    # If cache states weren't isolated, batch 0 and batch 1 outputs would be identical
     d0 = out.ress[-1]["depth"][0]
     d1 = out.ress[-1]["depth"][1]
+    # Different inputs → different outputs if cache is isolated
+    # Would be identical if cache states leaked across batch
     assert not torch.allclose(d0, d1), "Cache states not isolated — outputs are identical"
 ```
 
@@ -708,3 +821,167 @@ If B>1 produces incorrect results:
 - Keyframe schedule from batch 0 only (works for `fixed_interval`, needs refactor for coverage strategy)
 - Finetune B>1 limited to no-TokenScorer `FrontendSupervisedLoss`
 - Checkpointing B× recomputation overhead with sequential aggregator
+
+---
+
+## Plan Review (P1–P17) — All Resolved
+
+> Review of this implementation plan against the spec (R1–R38) and actual codebase.
+> 17 findings: 1 Critical, 7 Important, 6 Medium, 3 Informational.
+> **All findings have been fixed in the plan above.** This section is kept for audit trail.
+
+### Resolution Summary
+
+| Finding | Severity | Resolution |
+|---------|----------|------------|
+| P1 | Critical | Rewrote Step 5: added `collate_fn=None` to `get_data_loader` signature + both DataLoader constructors + `build_dataset` call site |
+| P2 | Important | Corrected line reference to 674–678 |
+| P3 | Important | Added `B = self._frame_batch_size(frames[0]["img"])` + validation loop in Step 1 |
+| P4 | Important | Removed `importance=`, added `total_tokens=pending.importance_current.shape[1]` |
+| P5 | Important | Computed `camera_pose_rel` for both ABS and non-ABS paths in Step 3 |
+| P6 | Important | Fixed field names to `pts3d_in_other_view`/`conf`, added `valid_mask` and track fields |
+| P7 | Important | Added `[:, 0]` slicing after depth/point heads |
+| P8 | Important | `camera_pose` now overwritten with composed absolute pose in non-ABS path |
+| P9 | Medium | Renamed to `_compute_protected_count_raw`, explicit rename-keep pattern |
+| P10 | Medium | `has_anchor_tokens` kept on `TokenMetadata` unchanged; cache only on `LayerCacheState` |
+| P11 | Medium | Added Step 4b with explicit `NotImplementedError` for track_head B>1 |
+| P12 | Medium | Changed to `self.aggregator.intra_frame_keep_ratio` |
+| P13 | Medium | Added per-batch `KeyframePacket` loop in Step 6 |
+| P14 | Medium | Added `valid_mask` and track fields to `res_gpu` |
+| P15 | Informational | Fixed wording: "add dataclass fields with defaults" instead of `__init__` |
+| P16 | Informational | Added integration test note to Step 2 |
+| P17 | Informational | Added distill_loss denominator assumption comment |
+
+### P1 (Critical): `get_data_loader` does NOT accept `collate_fn` — Task 1 wiring is broken
+
+**Problem:** Task 1 Step 5 states "the `get_data_loader` function already accepts `collate_fn` parameter." This is false. Reading `src/dust3r/datasets/__init__.py:41–86`, the function signature has no `collate_fn` parameter, and both `DataLoader` creation paths (lines 67–72 and 77–84) omit it. The plan's code snippet `loader = get_data_loader(dataset, ..., collate_fn=...)` would raise `TypeError: get_data_loader() got an unexpected keyword argument 'collate_fn'`.
+**Task/Step:** Task 1 / Step 5
+**Impact:** Collate function is never wired to DataLoader. B>1 training cannot start — every DataLoader iteration crashes with string TypeError. Blocks all downstream tasks.
+**Suggestion:** Add `collate_fn=None` parameter to `get_data_loader` signature, and pass it through to both `DataLoader` constructors (lines 67–72 and 77–84).
+
+### P2 (Important): train_frontend.py batch_size guard is at line 674, not 653–658
+
+**Problem:** Task 2 Step 2 says "Delete lines 653–658" for the batch_size guard. The actual guard is at line 674 (`if int(args.batch_size) != 1: raise ValueError(...)`). Lines 653–657 contain `save_model` checkpointing logic. Deleting the wrong lines breaks checkpoint saving while leaving the B=1 guard in place.
+**Task/Step:** Task 2 / Step 2
+**Impact:** Engineer deletes wrong lines, breaking checkpointing while B>1 training remains blocked.
+**Suggestion:** Correct the line reference to 674–678.
+
+### P3 (Important): Variable `B` is never defined in Task 4 Step 1
+
+**Problem:** Task 4 Step 1 starts with `keyframe_managers = [FrontendKeyframeManager(...) for _ in range(B)]` but never shows where `B` is computed. The current code computes `ref_batch_size` inside `_validate_frontend_batch_size` (line 822–823: `ref_batch_size = self._frame_batch_size(frames[0]["img"])`), which the plan removes in Task 2. After guard removal, no code computes `B`.
+**Task/Step:** Task 4 / Step 1
+**Impact:** `NameError: name 'B' is not defined`. The entire refactor is dead code.
+**Suggestion:** Add `B = self._frame_batch_size(frames[0]["img"])` at the beginning of Step 1, before the per-batch state initialization. Also validate all frames have the same B.
+
+### P4 (Important): `build_frame_token_metadata_base` — plan passes nonexistent `importance` parameter, omits required `total_tokens`
+
+**Problem:** The plan's Step 5 calls `build_frame_token_metadata_base(depth=depth[b:b+1], ..., importance=pending.importance_current, ...)`. But the actual function signature (`frontend_cache.py:805–817`) has no `importance` parameter. The required parameters are: `depth, depth_conf, pose_enc, image_size_hw, patch_size, patch_start_idx, frame_id, keyframe_id, slot_id, anchor_slot, total_tokens, active_local_to_world`. The plan omits the **required** `total_tokens` parameter (currently passed as `pending_update.importance_current.shape[1]` at ovggt.py:547).
+**Task/Step:** Task 4 / Step 5
+**Impact:** `TypeError: build_frame_token_metadata_base() got an unexpected keyword argument 'importance'` at runtime. Every frame commit crashes.
+**Suggestion:** Remove `importance=pending.importance_current`. Add `total_tokens=pending.importance_current.shape[1]`.
+
+### P5 (Important): `rel_pose_enc` undefined in ABS_POSE_ENCODING path — `res_gpu` dict will `NameError`
+
+**Problem:** Task 4 Step 6 builds `"camera_pose_rel": rel_pose_enc[:, 0, :] if rel_pose_enc_batch else None`. But `rel_pose_enc` is only defined inside the `if self.frontend_pose_encoding_type != ABS_POSE_ENCODING` block in Step 3. When `frontend_pose_encoding_type == ABS_POSE_ENCODING`, `rel_pose_enc` is never assigned → `NameError`. The current code (ovggt.py:447–453) handles this correctly — in the ABS path, it computes `camera_pose_rel = relative_from_absolute_pose_encoding(...)`.
+**Task/Step:** Task 4 / Step 6
+**Impact:** Any training/eval run with ABS_POSE_ENCODING crashes at the first frame's `res_gpu` construction.
+**Suggestion:** Compute `camera_pose_rel` for both paths. In the ABS path, derive from `relative_from_absolute_pose_encoding`. For non-ABS, use `torch.cat(rel_pose_enc_batch, dim=0)[:, 0, :]`.
+
+### P6 (Important): `res_gpu` dict field names don't match actual code
+
+**Problem:** The plan's `res_gpu` dict uses `"pts3d": pts3d, "pts3d_conf": pts3d_conf`. The actual code (ovggt.py:583–596) uses `"pts3d_in_other_view": pts3d, "conf": pts3d_conf`. Also missing: `"valid_mask"` (line 590), track fields (`"track"`, `"vis"`, `"track_conf"`, lines 591–595).
+**Task/Step:** Task 4 / Step 6
+**Impact:** Downstream consumers (`accumulate_student_frame` at `train_frontend.py:421–434`) access keys by name → `KeyError` or silent loss computation errors.
+**Suggestion:** Use exact field names from current code. Include `"valid_mask"` and track fields.
+
+### P7 (Important): Missing `[:, 0]` slicing on depth/pts3d head outputs
+
+**Problem:** The DPT head returns `[B, S, 1, H, W]` (verified at `dpt_head.py:131–132`). The current code slices off the sequence dim: `depth = depth[:, 0]` (ovggt.py:471–472, 482–483). The plan's Step 4 omits this slicing. For B>1, `depth` would be `[B, 1, 1, H, W]` instead of `[B, 1, H, W]`.
+**Task/Step:** Task 4 / Step 4
+**Impact:** Downstream code passes `depth[b]` (shape `[1, 1, H, W]` instead of `[1, H, W]`) to `keyframe_manager.update()` and `build_frame_token_metadata_base`, causing shape mismatches.
+**Suggestion:** Add `depth = depth[:, 0]; depth_conf = depth_conf[:, 0]; pts3d = pts3d[:, 0]; pts3d_conf = pts3d_conf[:, 0]` after the head calls.
+
+### P8 (Important): `camera_pose` not updated to composed absolute pose in non-ABS path
+
+**Problem:** Task 4 Step 3 sets `camera_pose = torch.cat(pose_enc_batch, dim=0)` from `abs_pose_enc`. Then the non-ABS block stores the composed pose in `camera_pose_abs` (a new variable), not `camera_pose`. The current code (ovggt.py:456–461) correctly overwrites `camera_pose` with the composed absolute pose. The plan's Step 5 then passes `camera_pose[b]` to `keyframe_manager.update()` — which receives the raw `abs_pose_enc` instead of the composed absolute pose.
+**Task/Step:** Task 4 / Steps 3 and 5
+**Impact:** In non-ABS encoding mode, `keyframe_manager.update` receives incorrect pose → `active_pose_encoding` is wrong → subsequent frame's camera composition uses wrong reference pose → camera predictions diverge silently.
+**Suggestion:** In the non-ABS block, overwrite `camera_pose` (not `camera_pose_abs`): `camera_pose = compose_absolute_from_relative(...)[:, 0, :]`.
+
+### P9 (Medium): `_compute_protected_count_raw` does not exist — plan references nonexistent method
+
+**Problem:** Task 3 Step 5 says `self._cached_protected_count = self._compute_protected_count_raw()`. But `_compute_protected_count_raw` does not exist anywhere in `frontend_cache.py`. The actual method is `_compute_protected_count` (line 670). If Step 3 replaces `_compute_protected_count` to return the cached value, then calling `_compute_protected_count()` at mutation points would just return the stale cached value.
+**Task/Step:** Task 3 / Steps 3 and 5
+**Impact:** Implementer must deduce the rename-keep pattern. Without it, mutation points would call the cached getter instead of computing fresh value.
+**Suggestion:** Explicitly state: rename `_compute_protected_count` to `_compute_protected_count_raw`, then define new `_compute_protected_count` that returns `self._cached_protected_count`. At mutation points, call `self._cached_protected_count = self._compute_protected_count_raw()`.
+
+### P10 (Medium): `has_anchor_tokens` is on `TokenMetadata`, not `LayerCacheState` — caching target class confusion
+
+**Problem:** The plan's Step 1 adds `_cached_has_anchor` in context of `LayerCacheState`, but Step 2 replaces `has_anchor_tokens` at lines 103–104, which is on `TokenMetadata` (a different class, `frontend_cache.py:34–109`). `TokenMetadata` is a dataclass with `index_select`, `append`, `clone`, `empty` that reconstruct instances — any cached field would be lost unless explicitly propagated.
+**Task/Step:** Task 3 / Steps 1 and 2
+**Impact:** Implementer cannot apply the plan as written. Either the attribute goes on the wrong class, or the method replacement references the wrong `self`.
+**Suggestion:** Add `_cached_has_anchor: bool = False` as a field on `TokenMetadata` (not `LayerCacheState`). Update `TokenMetadata.index_select`, `append`, `clone` to propagate the cached value. Alternatively, keep `has_anchor_tokens` on `TokenMetadata` unchanged and only cache `_compute_protected_count` on `LayerCacheState`.
+
+### P11 (Medium): Missing `track_head` path adaptation for B>1
+
+**Problem:** The current code at ovggt.py:485–495 calls `self.track_head(aggregated_tokens, images=images, ...)` inside the `with self._disabled_autocast_context()` block. The plan's Task 4 completely omits this path. For B>1, `aggregated_tokens_list` is batched and `images_all` is `[B, 1, C, H, W]` — the track_head would receive batched input, but the plan doesn't show how `current_query_points` is handled per-batch.
+**Task/Step:** Task 4 / between Step 4 and Step 5
+**Impact:** Any model with `track_head is not None` and `query_points is not None` would either crash or silently produce incorrect results.
+**Suggestion:** Add track_head handling, or explicitly note Phase 1 assumes `track_head is None` for B>1.
+
+### P12 (Medium): `intra_frame_keep_ratio` referenced but not defined in plan code
+
+**Problem:** Task 4 Step 5 passes `intra_frame_keep_ratio=intra_frame_keep_ratio` to `commit_pending_update_`. But `intra_frame_keep_ratio` is never defined in the plan's code. The current code uses `self.aggregator.intra_frame_keep_ratio` (ovggt.py:555).
+**Task/Step:** Task 4 / Step 5
+**Impact:** `NameError: name 'intra_frame_keep_ratio' is not defined` at first commit.
+**Suggestion:** Use `self.aggregator.intra_frame_keep_ratio` as in current code.
+
+### P13 (Medium): Missing `KeyframePacket` per-batch handling
+
+**Problem:** The current code at ovggt.py:562–575 creates a `KeyframePacket` with batched tensors. For B>1, a single `KeyframePacket` would store `[B, 9]` pose data where downstream expects per-keyframe scalars. The plan's Task 4 Step 6 doesn't include per-batch loop for packets.
+**Task/Step:** Task 4 / between Step 5 and Step 6
+**Impact:** Eval mode with B>1 and `export_keyframe_packets=True` would produce corrupt packet data silently.
+**Suggestion:** Add per-batch `KeyframePacket` creation inside the `for b in range(B)` loop.
+
+### P14 (Medium): `valid_mask` and frame dict fields not handled for B>1
+
+**Problem:** The current code at ovggt.py:590 includes `"valid_mask": frame["valid_mask"]` in `res_gpu`. With B>1, `frame["valid_mask"]` would be `[B, H, W]` (stacked by collate). The plan omits this field. Similarly, `frame["dataset"]` and `frame["label"]` become lists (per collate), but `processed_frames.append(frame)` stores the batched frame dict.
+**Task/Step:** Task 4 / Step 6
+**Impact:** `valid_mask` is used by `FrontendSupervisedLoss` — missing it causes `KeyError` in finetune.
+**Suggestion:** Include `"valid_mask"` in `res_gpu`. Document that `processed_frames` contains batched frame dicts for B>1.
+
+### P15 (Informational): Task 3 — `LayerCacheState` is a `@dataclass` without explicit `__init__`
+
+**Problem:** Task 3 Step 1 says "In `LayerCacheState.__init__`" but `LayerCacheState` is a `@dataclass` with auto-generated `__init__`. The instruction to add code "after existing `__init__`" is misleading since there's no explicit `__init__`.
+**Task/Step:** Task 3 / Step 1
+**Impact:** Low — an experienced Python developer would know to add dataclass fields.
+**Suggestion:** Say "Add as dataclass fields with defaults: `_cached_protected_count: int = 0`" instead of referencing `__init__`.
+
+### P16 (Informational): Task 6 smoke test bypasses actual training code path
+
+**Problem:** The test calls `model.inference()` directly with `mode='frontend_train'` and `.eval()`. But actual training calls `model(batch, frame_processor=...)` → `forward()` → `forward_frontend_train()` → `_inference_frontend(...)`. The test doesn't exercise the `forward_frontend_train` path or `accumulate_student_frame` callback or loss computation.
+**Task/Step:** Task 6 / Step 1
+**Impact:** Test verifies model forward pass in isolation but doesn't catch issues in the training pipeline.
+**Suggestion:** Add a test that calls `model(frames, frame_processor=callback_fn)` (the actual `forward` path) to catch integration issues.
+
+### P17 (Informational): Missing `distill_loss` aggregation semantics note for B>1
+
+**Problem:** The plan shows per-frame distill_loss averaging across B (`avg_fdl = sum(frame_distill_losses) / len(frame_distill_losses)`). But if only `k < B` sequences produce non-None distill_loss, the denominator varies per frame, creating non-uniform weighting across frames.
+**Task/Step:** Task 4 / Step 2
+**Impact:** Minor mathematical difference in loss weighting. If all B sequences always produce distill_loss (expected), behavior is correct.
+**Suggestion:** Add a comment noting the assumption that all batch elements produce distill_loss.
+
+---
+
+### Review Summary
+
+| Severity | Count | Finding IDs |
+|----------|-------|-------------|
+| Critical | 1 | P1 |
+| Important | 7 | P2, P3, P4, P5, P6, P7, P8 |
+| Medium | 6 | P9, P10, P11, P12, P13, P14 |
+| Informational | 3 | P15, P16, P17 |
+
+**Blocking issues:** P1 (collate_fn wiring), P3 (undefined B), P4 (wrong function signature), P7 (missing slicing) are showstoppers — the code would crash at the first B>1 training step. P5 and P8 crash or silently corrupt results depending on pose encoding mode. P6 crashes in the frame_writer callback.
+
+**Verdict:** The plan cannot be implemented as written. Tasks 1 and 4 require significant corrections before an engineer could execute without getting stuck. The spec review findings R1–R38 were addressed at the design level, but the plan's code snippets introduced new bugs in translation from spec to implementation steps.
