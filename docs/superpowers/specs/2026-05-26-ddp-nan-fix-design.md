@@ -39,7 +39,15 @@ DDP 安全网 (torch.nan_to_num 兜底)
 **File:** `src/train_frontend.py`
 **Location:** [lines 365-370](src/train_frontend.py#L365-L370), after `teacher.inference()`
 
-新增 `_sanitize_teacher_outputs()` 函数，在 teacher 输出进入 loss 计算前检测并 clamp inf/nan：
+新增 `_sanitize_teacher_outputs()` 函数，在 teacher 输出进入 loss 计算前检测并 clamp inf/nan。
+在 `frontend_loss_of_one_batch` 中 `teacher.inference()` 返回后直接调用：
+
+```python
+teacher_outputs = teacher.inference(...)
+_sanitize_teacher_outputs(teacher_outputs)  # inline mutation, no return value
+```
+
+函数实现：
 
 ```python
 def _sanitize_teacher_outputs(teacher_outputs):
@@ -60,7 +68,7 @@ def _sanitize_teacher_outputs(teacher_outputs):
 #### 2a. `DepthOrPmapLoss.forward` (lines 1265-1291)
 
 - 入口处 `torch.nan_to_num` + clamp pred/gt 到 `[-1e4, 1e4]`
-- 出口处检测 loss 是否为 NaN/inf，如果是则替换为 0 tensor（保留计算图）
+- 出口处检测 loss 是否 finite，如果不是则用 `torch.where(torch.isfinite(loss), loss, torch.zeros_like(loss))` 替换为 0（`torch.zeros_like` 保留计算图，不 detach）
 
 #### 2b. `closed_form_scale_and_shift` (lines 1078-1117)
 
