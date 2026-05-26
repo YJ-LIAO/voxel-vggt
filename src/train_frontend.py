@@ -474,9 +474,12 @@ def frontend_loss_of_one_batch(
                     )
                 # Add TokenScorer distillation loss if present
                 total_distill_loss = student_outputs.distill_loss
-                if total_distill_loss is not None:
-                    loss = loss + distill_loss_weight * total_distill_loss
-                    loss_details["distill_loss"] = float(distill_loss_weight * total_distill_loss)
+                if total_distill_loss is not None and distill_loss_weight > 0:
+                    if torch.isfinite(total_distill_loss):
+                        loss = loss + distill_loss_weight * total_distill_loss
+                        loss_details["distill_loss"] = float(distill_loss_weight * total_distill_loss)
+                    else:
+                        loss_details["distill_loss"] = float("nan")
                     loss_details["total"] = float(loss)
     # The loss tensor already owns the autograd graph it needs. Dropping the
     # large output containers here avoids keeping extra references alive across
