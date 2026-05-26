@@ -47,6 +47,7 @@ def get_data_loader(
     pin_mem=True,
     accelerator: Accelerator = None,
     fixed_length=False,
+    collate_fn=None,
 ):
     import torch
 
@@ -69,6 +70,7 @@ def get_data_loader(
             batch_sampler=sampler,
             num_workers=num_workers,
             pin_memory=pin_mem,
+            collate_fn=collate_fn,
         )
 
     except (AttributeError, NotImplementedError):
@@ -81,6 +83,7 @@ def get_data_loader(
             num_workers=num_workers,
             pin_memory=pin_mem,
             drop_last=drop_last,
+            collate_fn=collate_fn,
         )
 
     return data_loader

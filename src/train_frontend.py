@@ -27,6 +27,7 @@ import croco.utils.misc as misc
 import dust3r.utils.path_to_croco  # noqa: F401
 from croco.utils.misc import NativeScalerWithGradNormCount as NativeScaler
 from dust3r.datasets import get_data_loader
+from dust3r.datasets.collate import frontend_collate_fn
 from dust3r.inference import sample_query_points
 from ovggt.losses.frontend_distill import FrontendDistillLoss
 from ovggt.models.ovggt import OVGGT
@@ -159,6 +160,7 @@ def build_dataset(
     drop_last=True,
 ):
     printer.info("Building train data loader for dataset: %s", dataset)
+    collate_fn = frontend_collate_fn if batch_size > 1 else None
     return get_data_loader(
         dataset,
         batch_size=batch_size,
@@ -168,6 +170,7 @@ def build_dataset(
         drop_last=drop_last,
         accelerator=accelerator,
         fixed_length=fixed_length,
+        collate_fn=collate_fn,
     )
 
 
