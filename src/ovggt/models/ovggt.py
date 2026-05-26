@@ -34,6 +34,7 @@ class OVGGTOutput(ModelOutput):
     views: Optional[Any] = None
     keyframe_packets: Optional[List[KeyframePacket]] = None
     keyframe_schedule: Optional[List[Any]] = None
+    distill_loss: Optional[torch.Tensor] = None  # TokenScorer distillation loss
 
 
 class OVGGT(nn.Module, PyTorchModelHubMixin):
@@ -60,6 +61,8 @@ class OVGGT(nn.Module, PyTorchModelHubMixin):
         camera_num_iters: int = 4,
         anchor_overflow_policy: str = "recent",
         frontend_head_checkpointing: bool = False,
+        use_token_scorer: bool = False,
+        scorer_bottleneck_dim: Optional[int] = None,
     ):
         super().__init__()
 
@@ -95,6 +98,12 @@ class OVGGT(nn.Module, PyTorchModelHubMixin):
             spatial_alpha=spatial_alpha,
             **aggregator_kwargs,
         )
+
+        if use_token_scorer:
+            self.aggregator.init_token_scorers(
+                embed_dim=embed_dim,
+                bottleneck_dim=scorer_bottleneck_dim or embed_dim // 4,
+            )
 
         self.camera_head = CameraHead(
             dim_in=2 * embed_dim,
@@ -181,6 +190,14 @@ class OVGGT(nn.Module, PyTorchModelHubMixin):
     def load_state_dict(self, state_dict, strict: bool = True):
         upgraded_state_dict = dict(state_dict)
         self._upgrade_camera_head_state_dict(upgraded_state_dict)
+        # TokenScorer compatibility: handle scorer keys in/out of checkpoint
+        scorer_keys = [k for k in upgraded_state_dict if 'token_scorers' in k]
+        model_has_scorer = hasattr(self.aggregator, 'token_scorers') and self.aggregator.token_scorers is not None
+        if scorer_keys and not model_has_scorer:
+            for k in scorer_keys:
+                del upgraded_state_dict[k]
+        if model_has_scorer and not scorer_keys:
+            return super().load_state_dict(upgraded_state_dict, strict=False)
         return super().load_state_dict(upgraded_state_dict, strict=strict)
 
     def forward(
@@ -391,10 +408,12 @@ class OVGGT(nn.Module, PyTorchModelHubMixin):
                 return checkpoint(forward_fn, *inputs, use_reentrant=False)
             return forward_fn(*inputs)
 
+        total_distill_loss = None
+
         for i, frame in enumerate(frames):
             images = self._frame_image_to_sequence(frame["img"])
 
-            aggregated_tokens, patch_start_idx, cache_states, pending_updates = self.aggregator(
+            aggregated_tokens, patch_start_idx, cache_states, pending_updates, frame_distill_loss = self.aggregator(
                 images,
                 cache_states=cache_states,
                 use_cache=True,
@@ -403,6 +422,13 @@ class OVGGT(nn.Module, PyTorchModelHubMixin):
                 importance_weight=importance_weight,
                 frontend_cache_config=self.frontend_cache_config,
             )
+
+            if frame_distill_loss is not None:
+                total_distill_loss = (
+                    frame_distill_loss
+                    if total_distill_loss is None
+                    else total_distill_loss + frame_distill_loss
+                )
 
             with self._disabled_autocast_context():
                 camera_anchor_token_count = None if i == 0 else keyframe_manager.get_num_anchor_frames() * self.camera_num_iters
@@ -587,6 +613,7 @@ class OVGGT(nn.Module, PyTorchModelHubMixin):
             views=processed_frames if (cache_results and return_views) else None,
             keyframe_packets=keyframe_packets if export_packets else None,
             keyframe_schedule=keyframe_schedule,
+            distill_loss=total_distill_loss,
         )
 
     def _inference_legacy(
@@ -800,11 +827,8 @@ class OVGGT(nn.Module, PyTorchModelHubMixin):
                     f"Inconsistent frontend frame batch size at frame {frame_idx}: "
                     f"expected {ref_batch_size}, got {cur_batch_size}"
                 )
-        if ref_batch_size != 1:
-            raise ValueError(
-                f"Frontend mode currently supports batch_size=1 only, got batch_size={ref_batch_size}. "
-                "Please set training/eval batch_size to 1."
-            )
+        # B>=1 is now supported; no guard needed.
+        pass
 
     def _build_frontend_keyframe_config(
         self,

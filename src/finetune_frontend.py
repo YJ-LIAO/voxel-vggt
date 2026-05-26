@@ -248,12 +248,6 @@ def save_final_model(accelerator, args, epoch, model_without_ddp):
 
 
 def train(args):
-    if int(args.batch_size) != 1:
-        raise ValueError(
-            f"Frontend training currently supports batch_size=1 only, got batch_size={args.batch_size}. "
-            "Please set batch_size=1 in config."
-        )
-
     ddp_static_graph = bool(getattr(args, "ddp_static_graph", True))
     ddp_find_unused_parameters = bool(getattr(args, "ddp_find_unused_parameters", False))
     accelerator = Accelerator(

@@ -357,10 +357,8 @@ def frontend_loss_of_one_batch(
     teacher_weight_offload: bool = False,
     teacher_empty_cache: bool = False,
     distill_loss_weight: float = 1.0,
+    scorer_only: bool = False,
 ):
-    if teacher_weight_offload and not teacher_output_to_cpu:
-        raise ValueError("teacher_weight_offload=True requires teacher_output_to_cpu=True.")
-
     query_points = build_query_points(batch, num_query_points=num_query_points)
     autocast_enabled = bool(use_amp) and torch.cuda.is_available()
     autocast_dtype = (
@@ -369,13 +367,37 @@ def frontend_loss_of_one_batch(
         else torch.float16
     )
     autocast_device_type = "cuda" if torch.cuda.is_available() else "cpu"
-    step_device = infer_batch_device(batch, fallback=get_module_device(model))
 
     with torch.amp.autocast(
         device_type=autocast_device_type,
         enabled=autocast_enabled,
         dtype=autocast_dtype,
     ):
+        # --- Stage A scorer-only: skip teacher, skip criterion, use only distill_loss ---
+        if scorer_only:
+            student_outputs = model(
+                batch,
+                query_points=query_points,
+                cache_results=False,
+                return_views=False,
+            )
+            total_distill_loss = student_outputs.distill_loss
+            if total_distill_loss is None:
+                raise RuntimeError("scorer_only=True but student did not produce distill_loss. Ensure use_token_scorer=True.")
+            loss = distill_loss_weight * total_distill_loss
+            loss_details = {
+                "distill_loss": float(loss),
+                "total": float(loss),
+            }
+            del student_outputs
+            del query_points
+            return loss, loss_details
+
+        # --- Full teacher-student distillation path ---
+        step_device = infer_batch_device(batch, fallback=get_module_device(model))
+
+        if teacher_weight_offload and not teacher_output_to_cpu:
+            raise ValueError("teacher_weight_offload=True requires teacher_output_to_cpu=True.")
         if teacher_weight_offload and get_module_device(teacher) != step_device:
             teacher.to(step_device)
         with torch.inference_mode():
@@ -407,10 +429,6 @@ def frontend_loss_of_one_batch(
             else contextlib.nullcontext()
         )
         with activation_ctx:
-            # Gradient checkpointing is enabled at model-module level (see train()).
-            # Avoid wrapping the whole student forward with torch.utils.checkpoint here:
-            # the frontend cache path mutates internal cache metadata and can break
-            # checkpoint recomputation consistency in multi-GPU training.
             if isinstance(criterion, FrontendDistillLoss):
                 teacher_preds = teacher_outputs.ress
                 student_camera_pose_rel = []
@@ -449,8 +467,6 @@ def frontend_loss_of_one_batch(
             if student_outputs.keyframe_schedule is None:
                 raise RuntimeError("Frontend training output is missing keyframe_schedule")
 
-            # `views` are not consumed by FrontendDistillLoss; dropping references here
-            # reduces peak memory in long-sequence training.
             teacher_outputs.views = None
             student_outputs.views = None
 
@@ -475,7 +491,6 @@ def frontend_loss_of_one_batch(
                         student_outputs,
                         student_outputs.keyframe_schedule,
                     )
-                # Add TokenScorer distillation loss if present
                 total_distill_loss = student_outputs.distill_loss
                 if total_distill_loss is not None and distill_loss_weight > 0:
                     if torch.isfinite(total_distill_loss):
@@ -484,9 +499,6 @@ def frontend_loss_of_one_batch(
                     else:
                         loss_details["distill_loss"] = float("nan")
                     loss_details["total"] = float(loss)
-    # The loss tensor already owns the autograd graph it needs. Dropping the
-    # large output containers here avoids keeping extra references alive across
-    # the rest of the training step, which is important for DDP memory headroom.
     del teacher_outputs
     del student_outputs
     del query_points
@@ -613,6 +625,7 @@ def train_one_epoch(
                 teacher_weight_offload=bool(getattr(args, "teacher_weight_offload", False)),
                 teacher_empty_cache=bool(getattr(args, "teacher_empty_cache", False)),
                 distill_loss_weight=float(getattr(args, "distill_loss_weight", 1.0)),
+                scorer_only=bool(getattr(args, "scorer_only", False)),
             )
             loss_value = float(loss)
 
@@ -674,12 +687,6 @@ def train_one_epoch(
 
 
 def train(args):
-    if int(args.batch_size) != 1:
-        raise ValueError(
-            f"Frontend training currently supports batch_size=1 only, got batch_size={args.batch_size}. "
-            "Please set batch_size=1 in config."
-        )
-
     ddp_static_graph = bool(getattr(args, "ddp_static_graph", True))
     ddp_find_unused_parameters = bool(getattr(args, "ddp_find_unused_parameters", False))
     accelerator = Accelerator(
@@ -758,19 +765,22 @@ def train(args):
     )
     printer.info("All model parameters: %s", sum(p.numel() for p in model.parameters()))
 
-    # Use OVGGT Legacy mode as Teacher instead of VGGT
-    # VGGT processes all frames at once, causing OOM with 24 frames
-    # OVGGT Legacy processes frames sequentially, using ~70% less memory
-    teacher_total_budget = int(getattr(args, "teacher_total_budget", frontend_total_budget))
-    printer.info(
-        "Loading teacher model (OVGGT Legacy mode, total_budget=%d)",
-        teacher_total_budget,
-    )
-    teacher = OVGGT(
-        mode="legacy",
-        total_budget=teacher_total_budget,
-        enable_track_head=enable_track_head,
-    )
+    scorer_only = bool(getattr(args, "scorer_only", False))
+
+    if scorer_only:
+        teacher = None
+        printer.info("scorer_only=True: skipping teacher model (only training TokenScorer distill_loss)")
+    else:
+        teacher_total_budget = int(getattr(args, "teacher_total_budget", frontend_total_budget))
+        printer.info(
+            "Loading teacher model (OVGGT Legacy mode, total_budget=%d)",
+            teacher_total_budget,
+        )
+        teacher = OVGGT(
+            mode="legacy",
+            total_budget=teacher_total_budget,
+            enable_track_head=enable_track_head,
+        )
 
     printer.info("Creating train criterion = %s", args.train_criterion)
     train_criterion = eval(args.train_criterion).to(device)
@@ -778,10 +788,11 @@ def train(args):
     model.to(device)
     teacher_output_to_cpu = bool(getattr(args, "teacher_output_to_cpu", False))
     teacher_weight_offload = bool(getattr(args, "teacher_weight_offload", False))
-    if teacher_weight_offload and not teacher_output_to_cpu:
-        raise ValueError("teacher_weight_offload=True requires teacher_output_to_cpu=True.")
-    if not teacher_weight_offload:
-        teacher.to(device)
+    if teacher is not None:
+        if teacher_weight_offload and not teacher_output_to_cpu:
+            raise ValueError("teacher_weight_offload=True requires teacher_output_to_cpu=True.")
+        if not teacher_weight_offload:
+            teacher.to(device)
     if bool(getattr(args, "teacher_empty_cache", False)):
         printer.info("Teacher CUDA allocator cache will be explicitly released after offload.")
 
@@ -815,23 +826,24 @@ def train(args):
     if args.pretrained and not args.resume:
         load_student_pretrained_weights(model, args.pretrained)
 
-    teacher_path = args.teacher or args.pretrained
-    if not teacher_path:
-        raise ValueError(
-            "Teacher checkpoint path is required for frontend distillation training. "
-            "Please set `teacher` or `pretrained` in the config."
+    if teacher is not None:
+        teacher_path = args.teacher or args.pretrained
+        if not teacher_path:
+            raise ValueError(
+                "Teacher checkpoint path is required for frontend distillation training. "
+                "Please set `teacher` or `pretrained` in the config."
+            )
+        printer.info("Loading teacher weights from %s", teacher_path)
+        teacher_state = adapt_state_dict_for_model(
+            teacher,
+            resolve_state_dict(teacher_path, map_location="cpu"),
         )
-    printer.info("Loading teacher weights from %s", teacher_path)
-    teacher_state = adapt_state_dict_for_model(
-        teacher,
-        resolve_state_dict(teacher_path, map_location="cpu"),
-    )
-    teacher.load_state_dict(teacher_state, strict=True)
-    del teacher_state
+        teacher.load_state_dict(teacher_state, strict=True)
+        del teacher_state
 
-    for param in teacher.parameters():
-        param.requires_grad = False
-    teacher.eval()
+        for param in teacher.parameters():
+            param.requires_grad = False
+        teacher.eval()
 
     if bool(getattr(args, "use_token_scorer", False)) and not bool(getattr(args, "finetune_full_model", False)):
         freeze_stage_a_scorer_only(model)
