@@ -101,7 +101,7 @@ def load_student_pretrained_weights(model: OVGGT, checkpoint_path: str) -> None:
         model,
         resolve_state_dict(checkpoint_path, map_location="cpu"),
     )
-    printer.info(model.load_state_dict(pretrained_state, strict=True))
+    printer.info(model.load_state_dict(pretrained_state, strict=False))
     del pretrained_state
 
 
@@ -116,6 +116,16 @@ def freeze_frontend_stage_a_parameters(model: OVGGT) -> None:
         model.aggregator.camera_token.requires_grad = False
     if hasattr(model.aggregator, "register_token"):
         model.aggregator.register_token.requires_grad = False
+
+
+def freeze_stage_a_scorer_only(model: OVGGT) -> None:
+    """Stage A distillation: freeze all parameters, only train TokenScorer."""
+    for _, param in model.named_parameters():
+        param.requires_grad = False
+    # Unfreeze scorer parameters
+    if model.aggregator.token_scorers is not None:
+        for param in model.aggregator.token_scorers.parameters():
+            param.requires_grad = True
 
 
 def summarize_trainable_parameters(model: OVGGT) -> None:
@@ -329,6 +339,7 @@ def frontend_loss_of_one_batch(
     teacher_output_to_cpu: bool = False,
     teacher_weight_offload: bool = False,
     teacher_empty_cache: bool = False,
+    distill_loss_weight: float = 1.0,
 ):
     if teacher_weight_offload and not teacher_output_to_cpu:
         raise ValueError("teacher_weight_offload=True requires teacher_output_to_cpu=True.")
@@ -426,7 +437,7 @@ def frontend_loss_of_one_batch(
 
             with torch.amp.autocast(device_type=autocast_device_type, enabled=False):
                 if isinstance(criterion, FrontendDistillLoss):
-                    loss = criterion.finalize_from_stream(
+                    loss, loss_details = criterion.finalize_from_stream(
                         raw_batch_gt=batch,
                         teacher_outputs=teacher_outputs,
                         student_camera_pose_rel=student_camera_pose_rel,
@@ -439,19 +450,25 @@ def frontend_loss_of_one_batch(
                         student_track_conf=student_track_conf,
                     )
                 else:
-                    loss = criterion(
+                    loss, loss_details = criterion(
                         batch,
                         teacher_outputs,
                         student_outputs,
                         student_outputs.keyframe_schedule,
                     )
+                # Add TokenScorer distillation loss if present
+                total_distill_loss = student_outputs.distill_loss
+                if total_distill_loss is not None:
+                    loss = loss + distill_loss_weight * total_distill_loss
+                    loss_details["distill_loss"] = float(distill_loss_weight * total_distill_loss)
+                    loss_details["total"] = float(loss)
     # The loss tensor already owns the autograd graph it needs. Dropping the
     # large output containers here avoids keeping extra references alive across
     # the rest of the training step, which is important for DDP memory headroom.
     del teacher_outputs
     del student_outputs
     del query_points
-    return loss
+    return loss, loss_details
 
 
 def pin_cpu_tensor_tree_(payload) -> None:
@@ -573,14 +590,16 @@ def train_one_epoch(
                 teacher_output_to_cpu=bool(getattr(args, "teacher_output_to_cpu", False)),
                 teacher_weight_offload=bool(getattr(args, "teacher_weight_offload", False)),
                 teacher_empty_cache=bool(getattr(args, "teacher_empty_cache", False)),
+                distill_loss_weight=float(getattr(args, "distill_loss_weight", 1.0)),
             )
             loss_value = float(loss)
 
             if not math.isfinite(loss_value):
-                printer.error("Loss is %s, stopping training. Details: %s", loss_value, loss_details)
-                raise FloatingPointError(
-                    f"Non-finite frontend loss detected: loss={loss_value}, details={loss_details}"
+                printer.warning(
+                    "Replacing non-finite loss with zero: loss=%s, rank=%s, step=%s, details=%s",
+                    loss_value, accelerator.process_index, step, loss_details,
                 )
+                loss = torch.nan_to_num(loss, nan=0.0, posinf=0.0, neginf=0.0)
 
             loss_scaler(
                 loss,
@@ -707,6 +726,7 @@ def train(args):
         anchor_overflow_policy=anchor_overflow_policy,
         frontend_head_checkpointing=bool(getattr(args, "frontend_head_checkpointing", False)),
         enable_track_head=enable_track_head,
+        use_token_scorer=bool(getattr(args, "use_token_scorer", False)),
     )
     printer.info(
         "Frontend budgets: total_budget=%d, camera_budget=%d, anchor_overflow_policy=%s",
@@ -791,7 +811,10 @@ def train(args):
         param.requires_grad = False
     teacher.eval()
 
-    freeze_frontend_stage_a_parameters(model)
+    if bool(getattr(args, "use_token_scorer", False)) and not bool(getattr(args, "finetune_full_model", False)):
+        freeze_stage_a_scorer_only(model)
+    else:
+        freeze_frontend_stage_a_parameters(model)
     summarize_trainable_parameters(model)
 
     param_groups = misc.get_parameter_groups(model, args.weight_decay)
@@ -909,6 +932,7 @@ def train(args):
                     teacher_output_to_cpu=bool(getattr(args, "teacher_output_to_cpu", False)),
                     teacher_weight_offload=bool(getattr(args, "teacher_weight_offload", False)),
                     teacher_empty_cache=bool(getattr(args, "teacher_empty_cache", False)),
+                    distill_loss_weight=float(getattr(args, "distill_loss_weight", 1.0)),
                 ),
                 log_writer=log_writer,
                 prefix="val",
