@@ -24,19 +24,19 @@ Three explicit guards and six singleton state assumptions prevent B>1.
 | File | Line | Mechanism |
 |------|------|-----------|
 | `src/ovggt/models/ovggt.py` | 815-834 | `_validate_frontend_batch_size()` raises `ValueError` if `ref_batch_size != 1` |
-| `src/train_frontend.py` | 654-658 | Startup check: `if batch_size != 1: raise ValueError` |
+| `src/train_frontend.py` | 653-658 | Startup check: `if int(args.batch_size) != 1: raise ValueError` |
 | `src/finetune_frontend.py` | 251-255 | Same startup check in finetune script |
 
 ### 2.2 Singleton State Assumptions
 
-| # | Component | Singleton | Problem with B>1 |
-|---|-----------|-----------|-------------------|
-| 1 | `FrontendKeyframeManager` | One `active_keyframe_id`, one `history_slots` list, one `active_pose_encoding` | Each sequence needs independent keyframe slot management |
-| 2 | `LayerCacheState` (per layer) | One `TokenMetadata` with `[1, N]` shape, shared anchor semantics | Dedup/eviction uses scalar `frame_id`; `_compute_protected_count` only checks `anchor_slot[0]` |
-| 3 | `PendingLayerUpdate` | `frame_id: int` (scalar) | Different batch elements may be at different frame indices (not applicable in training with aligned frames, but the interface blocks it) |
-| 4 | `past_key_values_camera` | One list of `(k,v)` per trunk layer | Each sequence needs independent camera KV caches with potentially different anchor counts |
-| 5 | `_compute_protected_count` | `anchor_slot[0] >= 0` — indexes only batch 0 | Ignores all other batch elements |
-| 6 | `gather_` B=1 fast-path | `_gather_single_batch_` via `index_select` | Multi-batch path (`gather_per_batch_`) pads to equal length, which would corrupt attention with garbage tokens |
+| # | Component | Singleton | Problem with B>1 | Fix |
+|---|-----------|-----------|-------------------|-----|
+| 1 | `FrontendKeyframeManager` | One `active_keyframe_id`, one `history_slots` list, one `active_pose_encoding` | Each sequence needs independent keyframe slot management | §4.1: replicate B copies |
+| 2 | `LayerCacheState` (per layer) | One `TokenMetadata` with `[1, N]` shape, shared anchor semantics | Dedup/eviction uses scalar `frame_id`; `_compute_protected_count` only checks `anchor_slot[0]` | §4.1: replicate B×depth copies |
+| 3 | `PendingLayerUpdate` | `frame_id: int` (scalar) | Different batch elements may be at different frame indices (not applicable in training with aligned frames, but interface blocks it) | §4.8: scalar per-sequence (aligned in training) |
+| 4 | `past_key_values_camera` | One list of `(k,v)` per trunk layer | Each sequence needs independent camera KV caches with potentially different anchor counts | §4.1: replicate B copies; §4.5: camera head per-batch cache |
+| 5 | `_compute_protected_count` | `anchor_slot[0] >= 0` — indexes only batch 0 (L670-673) | Ignores all other batch elements | §4.1: removed by per-batch LayerCacheState (each has B=1 internally) |
+| 6 | `gather_` B=1 fast-path | `_gather_single_batch_` via `index_select` | Multi-batch path (`gather_per_batch_`) pads to equal length, which would corrupt attention with garbage tokens | §4.1: removed by per-batch LayerCacheState (each handles B=1 internally) |
 
 ### 2.3 Partially Vectorized Lower-Level Code
 
@@ -160,10 +160,11 @@ Minimal changes. `update()` already returns `KeyframeEvent` per-call. Only verif
 
 | Location | Current | Replacement |
 |----------|---------|-------------|
-| `has_anchor_tokens()` (L149) | `bool((self.anchor_slot >= 0).any().item())` | Use cached `self._cached_has_anchor` updated after reorder/evict |
-| `_compute_protected_count()` (L683) | `int((self.metadata.anchor_slot[0] >= 0).sum().item())` | Cache result after each mutation, return cached int |
-| `_current_frame_importance()` (L692) | `int(mask.sum().item())` | Use `mask.sum()` tensor, handle in calling code without sync |
-| `_dedup_single_batch()` (L587) | `int(inverse.max().item())` | Defer or use tensor-based conditional logic |
+| `has_anchor_tokens()` (L103-104) | `bool((self.anchor_slot >= 0).any().item())` | Use cached `self._cached_has_anchor` updated after reorder/evict |
+| `_compute_protected_count()` (L670-673) | `int((self.metadata.anchor_slot[0] >= 0).sum().item())` | Cache result after each mutation, return cached int |
+| `_current_frame_importance()` (L675-686) | `int(mask.sum().item())` at L682 | Track as tensor; replace `int(mask.sum().item())` with `mask.sum()` and handle downstream without sync |
+
+Note: `_dedup_single_batch` (L516-619) is fully vectorized and contains **zero** `.item()` calls. The estimate of "~240+ sync points" comes from 3 `.item()` sites × ~24 layers × 10 frames (≈720 calls maximum; actual count is lower due to conditional branches in `commit_pending_update_`).
 
 Each replacement stores the computed integer result at the point of mutation (where a GPU sync is already unavoidable due to the mutation op) and reads the cached value on subsequent queries.
 
@@ -177,17 +178,27 @@ Add a helper `merge_cache_states_for_batch()` that:
 
 ### 4.5 `src/ovggt/heads/camera_head.py`
 
-Support per-batch `past_key_values_camera`. The camera head's internal KV cache management already operates on `[B, H, N, D]` tensors. The key change is propagating per-batch caches through the sync_anchor_change logic.
+Support per-batch `past_key_values_camera`. The camera head's internal KV cache management already operates on `[B, H, N, D]` tensors. Changes:
+
+1. **`past_key_values_camera` initialization**: Change from `List[Optional[Tuple]]` (length=trunk_depth) to `List[List[Optional[Tuple]]]` (B × trunk_depth). Each batch element gets its own camera cache.
+
+2. **`camera_head(...)` call site** (currently near L438-454 of ovggt.py): Pass `past_key_values_camera=PVC[b]` where `b` is the batch index.
+
+3. **`sync_anchor_change` call** (currently near L571-575): This method manipulates camera head's internal KV cache via `past_key_values_camera` and `anchor_token_count`. Since each batch element now has its own cache, call `camera_head.sync_anchor_change(pvc[b], ...)` independently per batch.
+
+4. **`camera_anchor_token_count`** (currently L440): Computed as `keyframe_manager.get_num_anchor_frames() * camera_num_iters`. Change to per-batch: `keyframe_managers[b].get_num_anchor_frames() * camera_num_iters`.
+
+Internal `sync_anchor_change` method (camera_head.py L317-390) operates on `[B, H, N, D]` tensors natively — no internal changes needed. Only the calling convention changes at the ovggt.py level.
 
 ### 4.6 `src/train_frontend.py`
 
-- Remove `ValueError` guard at line 654
+- Remove `ValueError` guard at line 653
 - In `train()`, pass `use_token_scorer` and `distill_loss_weight` from args to model constructor
-- Ensure `freeze_stage_a_scorer_only()` is called between `load_student_pretrained_weights` (line 774) and `get_parameter_groups` (line 797) when `use_token_scorer=True`
+- Ensure `freeze_stage_a_scorer_only()` is called between `load_student_pretrained_weights` (L792) and `get_parameter_groups` (L818) when `use_token_scorer=True`
 
 ### 4.7 Training Config
 
-`config/train_frontend_blendedmvs.yaml`:
+`config/train_frontend_finetune.yaml`:
 ```yaml
 batch_size: 4          # changed from 1
 accum_iter: 1          # batch_size handles parallelism
@@ -199,6 +210,28 @@ batch_size: 4          # changed from 1
 accum_iter: 1
 ```
 
+### 4.8 `build_frame_token_metadata_base` — Per-Batch Adaptation
+
+**Location**: Called at approximately L529-542 within `_inference_frontend`, currently with scalar arguments:
+```python
+frame_metadata_base = build_frame_token_metadata_base(
+    depth=depth,           # [B, H, W] or [B, H, W, 1]
+    depth_conf=depth_conf, # [B, ...]
+    pose_enc=camera_pose, # [B, 9]
+    ..., frame_id=i, keyframe_id=..., slot_id=..., anchor_slot=...
+)
+```
+
+For B>1, the tensor arguments are already batched (`[B, ...]`).
+The scalar arguments (`frame_id`, `keyframe_id`, `slot_id`, `anchor_slot`) currently
+describe per-frame values that are identical across all batch elements when using
+`fixed_interval` strategy (all sequences share the same frame index `i`).
+
+**Decision**: Keep scalar arguments as-is for Phase 1. For fixed_interval strategy,
+`frame_id=i` and `keyframe_id` are identical across batches. For coverage-based
+strategies (Phase 2+), expand to per-batch scalar values. Document this as
+a known limitation in §8 Risk #2.
+
 ---
 
 ## 5. Side Optimization: GPU Sync Point Elimination
@@ -207,12 +240,13 @@ While refactoring the cache layer for B>1 support, we opportunistically eliminat
 
 ### 5.1 Mechanism
 
-Each `.item()` call on a GPU tensor forces CUDA kernel completion and transfers a scalar to the host. In `frontend_cache.py`, four methods call `.item()` in the per-frame per-layer hot path:
+Each `.item()` call on a GPU tensor forces CUDA kernel completion and transfers a scalar to the host. In `frontend_cache.py`, three methods call `.item()` in the per-frame per-layer hot path (verified by `grep`):
 
-- `has_anchor_tokens()` → called from `commit_pending_update_`
-- `_compute_protected_count()` → called from `gather_`, `append_`, `commit_pending_update_`, `reorder_`
-- `_current_frame_importance()` → called from `commit_pending_update_`
-- `_dedup_single_batch()` → called from `apply_voxel_dedup_` → `commit_pending_update_`
+- `has_anchor_tokens()` (L104) → called from `commit_pending_update_`
+- `_compute_protected_count()` (L673) → called from `gather_`, `append_`, `commit_pending_update_`, `reorder_`
+- `_current_frame_importance()` (L682) → called from `commit_pending_update_`
+
+Note: `_dedup_single_batch` contains zero `.item()` calls — verify with `grep -n "\.item()" frontend_cache.py`.
 
 ### 5.2 Strategy: Cache-on-Mutation
 
@@ -277,9 +311,13 @@ On read, return the cached value without GPU sync. The cached values may be slig
 
 ### 7.3 Regression Tests
 
-- `tests/test_frontend_training_smoke.py` — pass with batch_size=2
-- `tests/test_frontend_cache.py` — pass with multi-batch cache states
-- `tools/test_phase2_smoke.py` — pass with use_token_scorer=True (remove stale `use_learned_scorer` field)
+The following tests do not yet exist and must be **created** as part of implementation:
+
+- `tests/test_frontend_training_smoke.py` — verify training runs without error with batch_size=2
+- `tests/test_frontend_cache.py` — verify multi-batch cache states are isolated (set a key in batch[0], confirm batch[1] unaffected)
+
+Existing test that needs update:
+- `tools/test_phase2_smoke.py` (L22) — remove stale `use_learned_scorer=True` from `FrontendCacheConfig` (field does not exist)
 
 ---
 
@@ -288,7 +326,8 @@ On read, return the cached value without GPU sync. The cached values may be slig
 | # | Risk | Mitigation |
 |---|------|-----------|
 | 1 | Cache state padding causes attention artifacts | Pad with zeros + `-inf` mask; verify attention weights are zero on padded positions |
-| 2 | Per-batch event divergence causes desynchronization | Training uses `fixed_interval` strategy with identical frame indices for all batches → events should be identical. Add assertion in Phase 1 to verify |
+| 2 | Per-batch event divergence causes desynchronization | **Phase 1 (fixed_interval only)**: All sequences share identical `frame_idx=i`, so keyframe events are guaranteed identical. Add assertion: `assert all(e.event_type == events[0].event_type for e in events)`. **Phase 2+ (coverage strategies)**: Events may diverge because depth/pose values differ across sequences. Per-batch event list already handles this correctly — no assertion, no fix needed |
+| 2a | `build_frame_token_metadata_base` scalar args diverge with coverage strategy (see §4.8) | **Phase 1**: Not applicable (fixed_interval, all values identical). **Phase 2+**: Expand `frame_id`/`keyframe_id`/`slot_id`/`anchor_slot` to per-batch |
 | 3 | GPU memory exceeds budget at B=4 | Enable `gradient_checkpointing=True` (40-60% memory reduction, 30% compute increase) or reduce `frontend_total_budget` |
 | 4 | Sync point cache invalidation bug | Add debug assertions in Phase 1: after each frame, verify cached `_protected_count` matches ground-truth `.item()` value |
 | 5 | DDP communication overhead increases with B | `ddp_static_graph=True` already set; gradient all-reduce communicates parameter gradients (fixed size regardless of B) |
@@ -307,7 +346,7 @@ On read, return the cached value without GPU sync. The cached values may be slig
 | `src/ovggt/utils/frontend_keyframe.py` | Modify | ~5 | Verify per-batch isolation |
 | `src/train_frontend.py` | Modify | ~10 | Guard removal, batch_size adaptation |
 | `src/finetune_frontend.py` | Modify | ~3 | Guard removal |
-| `config/train_frontend_blendedmvs.yaml` | Modify | 2 | `batch_size: 4` |
+| `config/train_frontend_finetune.yaml` | Modify | 2 | `batch_size: 4` |
 | `config/train_token_scorer.yaml` | Modify | 2 | `batch_size: 4` |
 | **Total** | | **~167** | |
 
