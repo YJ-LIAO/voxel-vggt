@@ -334,9 +334,7 @@ def _sanitize_teacher_outputs(teacher_outputs):
             if key in pred:
                 t = pred[key]
                 if not torch.isfinite(t).all():
-                    import logging
-                    _logger = logging.getLogger(__name__)
-                    _logger.warning(
+                    printer.warning(
                         "Teacher %s has inf/nan at frame %d, clamping to finite range.", key, i
                     )
                     pred[key] = torch.nan_to_num(t, nan=0.0, posinf=1e4, neginf=-1e4)
