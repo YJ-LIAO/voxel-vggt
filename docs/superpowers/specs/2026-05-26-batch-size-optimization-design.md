@@ -113,7 +113,7 @@ past_key_values_camera = [
 total_distill_loss = None
 ```
 
-**Aggregator call** (replaces line 397):
+**Aggregator call** (replaces the call at approximately line 416):
 
 ```python
 # Merge per-batch cache states for the aggregator
@@ -184,7 +184,7 @@ Support per-batch `past_key_values_camera`. The camera head's internal KV cache 
 
 2. **`camera_head(...)` call site** (currently near L438-454 of ovggt.py): Pass `past_key_values_camera=PVC[b]` where `b` is the batch index.
 
-3. **`sync_anchor_change` call** (currently near L571-575): This method manipulates camera head's internal KV cache via `past_key_values_camera` and `anchor_token_count`. Since each batch element now has its own cache, call `camera_head.sync_anchor_change(pvc[b], ...)` independently per batch.
+3. **`apply_keyframe_event` call** (currently near L577-578): This method propagates keyframe slot reassignments to the camera head's KV cache. Since each batch element now has its own cache, call `camera_head.apply_keyframe_event(pvc[b], ...)` independently per batch.
 
 4. **`camera_anchor_token_count`** (currently L440): Computed as `keyframe_manager.get_num_anchor_frames() * camera_num_iters`. Change to per-batch: `keyframe_managers[b].get_num_anchor_frames() * camera_num_iters`.
 
