@@ -211,8 +211,14 @@ for i, frame in enumerate(frames):
     camera_pose = torch.cat(pose_enc_batch, dim=0)  # [B, 9]
 
     # ===== Depth/Point heads: batched (no per-sequence state) =====
-    depth, depth_conf = self.depth_head(aggregated_tokens_list, ...)
-    pts3d, pts3d_conf = self.point_head(aggregated_tokens_list, ...)
+    # Review-36: update closure to capture images_all (not images)
+    # maybe_checkpoint_head requires closure for gradient checkpointing
+    def depth_head_forward(*layer_tokens):
+        return self.depth_head(list(layer_tokens), images=images_all, patch_start_idx=patch_start_idx)
+    def point_head_forward(*layer_tokens):
+        return self.point_head(list(layer_tokens), images=images_all, patch_start_idx=patch_start_idx)
+    depth, depth_conf = maybe_checkpoint_head(depth_head_forward, *aggregated_tokens_list)
+    pts3d, pts3d_conf = maybe_checkpoint_head(point_head_forward, *aggregated_tokens_list)
 ```
 
 **Per-batch cache commit** (replaces lines 498-553):
@@ -249,7 +255,8 @@ for i, frame in enumerate(frames):
                 frame_id=i,
                 keyframe_id=slot_id,
                 slot_id=slot_id,
-                anchor_slot=(-1 if i == 0 else events[b].get_slot_for_frame(i)),
+            # Review-37: KeyframeEvent.anchor_slot is an int attribute, not a method
+            anchor_slot=events[b].anchor_slot,
                 importance=pending.importance_current,
                 active_local_to_world=current_local_to_world,
             )
@@ -271,18 +278,51 @@ for i, frame in enumerate(frames):
 
 ```python
     # Review-16: stack per-batch active pose encodings for absolute pose composition
+    # Review-35: use collected rel_pose_enc_batch (not undefined pose_enc_list)
     with self._disabled_autocast_context():
         if self.frontend_pose_encoding_type == ABS_POSE_ENCODING:
-            pass  # camera_head already outputs absolute poses
+            pass  # camera_head already outputs absolute poses in camera_pose
         else:
             active_poses = torch.stack([
                 keyframe_managers[b].get_active_pose_encoding()
                 for b in range(B)
             ], dim=0)  # [B, 9]
-            rel_pose_enc = pose_enc_list[-1][:B]
+            rel_pose_enc = torch.cat(rel_pose_enc_batch, dim=0).unsqueeze(1)  # [B, 1, 9]
             camera_pose_abs = compose_absolute_from_relative(
                 active_poses.unsqueeze(1), rel_pose_enc, image_size_hw=(img_h, img_w)
             )[:, 0, :]
+```
+
+**Post-commit operations** (Review-32, Review-33: lines 562-609 currently outside design scope):
+
+```python
+    # Review-32: per-batch camera_head.apply_keyframe_event
+    for b in range(B):
+        past_key_values_camera[b] = self.camera_head.apply_keyframe_event(
+            past_key_values_camera[b],
+            events[b],
+            num_cam_iters=self.camera_num_iters,
+        )
+
+    # Build per-frame result (keyed by batch)
+    res_gpu = {
+        "depth": depth,              # [B, H, W, ...] — batched
+        "depth_conf": depth_conf,    # [B, ...]
+        "pts3d": pts3d,              # [B, ...]
+        "pts3d_conf": pts3d_conf,
+        "camera_pose": camera_pose,  # [B, 9] — batched
+        "camera_pose_rel": rel_pose_enc[:, 0, :] if rel_pose_enc_batch else None,
+    }
+    if frame_writer is not None:
+        # frame_writer callback receives batched data; caller adapts
+        frame_writer(i, frame, res_gpu)
+    if cache_results:
+        res_out = self._maybe_move_dict_to_cpu(res_gpu) if move_to_cpu else res_gpu
+        all_ress.append(res_out)
+
+    # Review-33: variable names match new code
+    del aggregated_tokens_list
+    del frame_pending_updates
 ```
 
 **Guard removal**: Change `_validate_frontend_batch_size` to accept `B >= 1` (remove the `ref_batch_size != 1` check).
@@ -323,11 +363,17 @@ Support per-batch `past_key_values_camera`. The camera head's internal KV cache 
 
 Internal `sync_anchor_change` method (camera_head.py L317-390) operates on `[B, H, N, D]` tensors natively — no internal changes needed. Only the calling convention changes at the ovggt.py level.
 
-### 4.6 `src/train_frontend.py`
+### 4.6 `src/train_frontend.py` and `src/finetune_frontend.py`
 
+**`train_frontend.py`:**
 - Remove `ValueError` guard at line 653
 - In `train()`, pass `use_token_scorer` and `distill_loss_weight` from args to model constructor
 - Ensure `freeze_stage_a_scorer_only()` is called between `load_student_pretrained_weights` (L792) and `get_parameter_groups` (L818) when `use_token_scorer=True`
+
+**`finetune_frontend.py` (Review-34, Review-38):**
+- Remove `ValueError` guard at line 251
+- **B>1 with FrontendSupervisedLoss**: `_build_point_targets` (`frontend_supervised.py:184-186`) strips batch dim via `camera_intrinsics[0]` — incorrect for B>1. Fix: iterate per-batch element or broadcast.
+- **TokenScorer in finetune**: Not supported in Phase 1. `finetune_full_model` does not initialize scorers or handle `distill_loss`. B>1 finetune is limited to no-scorer `FrontendSupervisedLoss` only.
 
 ### 4.6a DataLoader Custom Collate Function (Review-25)
 
@@ -983,6 +1029,180 @@ Head 计算使用 batched [B, ...] 输入，checkpoint 开销与 B=1 类似（�
 
 **阻塞项**：0。所有严重/重要问题已在 spec 中修复。
 
+### 第四轮审查（2026-05-26）
+
+> 聚焦于 §4.1 提议代码的端到端 trace、`finetune_frontend.py` 兼容性、`FrontendDistillLoss`/`FrontendSupervisedLoss` B>1 兼容性、`PendingLayerUpdate` 拆分机制、TokenScorer 交互、head closure 捕获变量、`apply_keyframe_event` per-batch 遗漏。
+
+### Review-32（重要）：`camera_head.apply_keyframe_event`（ovggt.py:577）未适配 per-batch PVC——静默将 batch 0 的 event 应用到所有序列
+
+**问题**：设计 §4.1 代码块声称 "replaces lines 498-553"，但 `apply_keyframe_event` 在 line 577，**落在代码块范围之外**，设计未提及此行。B>1 时当前的单次调用：
+
+```python
+past_key_values_camera = self.camera_head.apply_keyframe_event(
+    past_key_values_camera,  # 现在是 List[List]（B × trunk_depth）
+    event,                   # 仅 batch 0 的 event
+    num_cam_iters=self.camera_num_iters,
+)
+```
+
+`past_key_values_camera` 已变为 `List[List]`（per-batch），但 `event` 仅来自 batch 0。函数期望 `past_key_values_camera` 为 `List[Optional[Tuple]]`（长度 trunk_depth）。类型不匹配要么崩溃，要么静默将 batch 0 的 keyframe slot 重分配应用到所有序列的 camera KV cache。
+
+**影响**：batch 1+ 的 camera KV cache slot 与实际 keyframe schedule 脱节。后续 camera 预测引用错误的 anchor frame，产出错误的 pose。错误是静默的——不崩溃，只是训练 target 错误。
+
+**建议**：在 commit 循环中或单独的块中添加 per-batch `apply_keyframe_event`：
+```python
+for b in range(B):
+    past_key_values_camera[b] = self.camera_head.apply_keyframe_event(
+        past_key_values_camera[b], events[b],
+        num_cam_iters=self.camera_num_iters,
+    )
+```
+
+### Review-33（重要）：Post-commit 代码（ovggt.py:562-609）完全未覆盖——`res_gpu` 构建、`frame_writer`、`KeyframePacket`、cleanup 都需要 B>1 适配
+
+**问题**：设计 §4.1 代码块在 commit 循环处结束，遗漏了 line 562 之后的所有代码：
+
+1. `keyframe_packets.append(KeyframePacket(...))`（562-575）—— R19 标记了 batched tensor 问题，但设计仍未展示 per-batch 循环
+2. `camera_head.apply_keyframe_event(...)`（577-581）—— R32
+3. `res_gpu` dict 构建（583-596）—— `depth`, `camera_pose` 等现在是 `[B, ...]` tensor
+4. `frame_writer(i, frame, res_gpu)`（597-598）—— 传入 batched `res_gpu` 和 batched `frame`
+5. `cache_results` 处理（600-604）—— 将 batched `res_gpu` append 到 `all_ress`
+6. `del aggregated_tokens; del pending_updates`（607-609）—— 变量名已改为 `aggregated_tokens_list` 和 `frame_pending_updates`，`del` 会 `NameError`
+
+**影响**：实现者仅按设计的代码块操作，会遗漏 `apply_keyframe_event` per-batch 循环（R32）、`KeyframePacket` per-batch 循环、变量名清理。`del` 语句引用已重命名的变量会崩溃。
+
+**建议**：扩展 §4.1 代码块覆盖 lines 562-609。Item 6：改为 `del aggregated_tokens_list; del frame_pending_updates`。
+
+### Review-34（重要）：`FrontendSupervisedLoss._build_point_targets` 从 camera intrinsics/pose 中剥离 batch 维——用 batch 0 的 camera 参数计算所有 B 序列的 3D 点
+
+**问题**：`FrontendSupervisedLoss`（用于 `finetune_frontend.py`）的 `_build_point_targets` 方法（frontend_supervised.py:183-186）：
+
+```python
+if camera_intrinsics.ndim == 3:
+    camera_intrinsics = camera_intrinsics[0]  # 剥离 batch 维！
+if camera_pose.ndim == 3:
+    camera_pose = camera_pose[0]  # 剥离 batch 维！
+```
+
+B>1 时 `camera_intrinsics` 是 `[B, 3, 3]`（ndim=3）→ 取 `[0]` → `[3, 3]`。然后 `depthmap_to_absolute_camera_coordinates` 用 batched `depth_np [B, H, W]` 但标量的 batch 0 camera 参数。为 batch 1+ 产出错误的 3D 坐标。
+
+设计仅分析了 `FrontendDistillLoss`（通过 `finalize_from_stream`），未提及 `FrontendSupervisedLoss`。
+
+**影响**：`finetune_frontend.py` 在 B>1 时为 batch 1+ 计算错误的 3D 点 target，破坏 `Lpmap` loss 项，静默产生错误的梯度。设计 §4.6 声称 finetune 仅需 "~3 行"（guard 移除）——不够。
+
+**建议**：在 per-batch 循环中调用 `depthmap_to_absolute_camera_coordinates`：
+```python
+results = []
+for b in range(batch_size):
+    pts, mask = depthmap_to_absolute_camera_coordinates(
+        depth_np[b], camera_intrinsics_np[b], camera_pose_np[b],
+    )
+    results.append((pts, mask))
+```
+或记录 finetune B>1 要求数据集提供预计算的 `pts3d`（跳过此路径）。
+
+### Review-35（中等）：§4.1 "Pass through active_pose_encoding" 代码引用未定义的 `pose_enc_list`——`NameError`
+
+**问题**：§4.1 的 active_pose_encoding 代码块：
+```python
+rel_pose_enc = pose_enc_list[-1][:B]  # NameError: 'pose_enc_list' 未定义
+```
+
+变量 `pose_enc_list` 在设计的代码中不存在。camera_head 循环收集的是 `rel_pose_enc_batch`（`[1, 9]` tensor 列表）。正确引用应为：
+```python
+rel_pose_enc = torch.cat(rel_pose_enc_batch, dim=0).unsqueeze(1)  # [B, 1, 9]
+```
+
+这是 R26（camera_head dict/list 混淆）同类 bug 在不同代码块中的实例。
+
+**影响**：当 `self.frontend_pose_encoding_type != ABS_POSE_ENCODING`（relative pose 路径）时崩溃。`ABS_POSE_ENCODING` 模式下此代码被跳过——无影响。
+
+**建议**：替换 `pose_enc_list[-1][:B]` 为 `torch.cat(rel_pose_enc_batch, dim=0).unsqueeze(1)`。
+
+### Review-36（中等）：Head closure 捕获 `images` 变量——设计重命名为 `images_all` 但未展示 closure 更新
+
+**问题**：当前代码定义 head closure 按名捕获 `images`（ovggt.py:463-483）：
+```python
+def depth_head_forward(*layer_tokens):
+    return self.depth_head(list(layer_tokens), images=images, ...)
+depth, depth_conf = maybe_checkpoint_head(depth_head_forward, *aggregated_tokens)
+```
+
+设计将变量重命名为 `images_all`（§4.1 line 147）但 head 调用写为：
+```python
+depth, depth_conf = self.depth_head(aggregated_tokens_list, ...)
+```
+
+如果实现者保留 closure 模式（`maybe_checkpoint_head` + gradient checkpointing 所需），closure 会捕获 `images`：
+- 未定义（如果 `images = ...` 被替换为 `images_all = ...`）→ `NameError`
+- 最后一次 aggregator 迭代的陈旧 `images_b` → 错误形状 `[1, 1, C, H, W]` 而非 `[B, 1, C, H, W]`
+
+此外，设计使用直接调用语法（`self.depth_head(aggregated_tokens_list, ...)`）而当前代码使用 `maybe_checkpoint_head(depth_head_forward, *aggregated_tokens)` 解包列表为 variadic args。设计的语法将 list 作为第一个位置参数传入，可能与 head 签名不匹配。
+
+**影响**：`NameError`（未定义 `images`）或错误的图像 tensor 形状传入 head（静默错误行为）。`maybe_checkpoint_head` 模式是 gradient checkpointing 正确工作所必需的。
+
+**建议**：展示更新后的 closure：
+```python
+def depth_head_forward(*layer_tokens):
+    return self.depth_head(list(layer_tokens), images=images_all, patch_start_idx=patch_start_idx)
+depth, depth_conf = maybe_checkpoint_head(depth_head_forward, *aggregated_tokens_list)
+```
+
+### Review-37（信息性）：设计中 `events[b].get_slot_for_frame(i)` 方法不存在于 `KeyframeEvent`
+
+**问题**：设计的 commit 循环展示：
+```python
+anchor_slot=(-1 if i == 0 else events[b].get_slot_for_frame(i)),
+```
+
+当前代码（ovggt.py:546）使用 `anchor_slot=event.anchor_slot`（直接属性访问）。`KeyframeEvent` 将 `anchor_slot` 存为普通 integer 属性。方法 `get_slot_for_frame(frame_idx)` 在代码库中不存在。
+
+**影响**：第一个非零帧时 `AttributeError: 'KeyframeEvent' object has no attribute 'get_slot_for_frame'`。
+
+**建议**：替换为 `events[b].anchor_slot`。`-1 if i == 0` guard 也不必要——frame 0 的 event 的 `anchor_slot` 已经是 -1。
+
+### Review-38（信息性）：`finetune_frontend.py` 无 `use_token_scorer`/`finetune_full_model` 支持——设计的 §4.6 变更仅适用于 `train_frontend.py`
+
+**问题**：`finetune_frontend.py`：
+- 总是调用 `freeze_frontend_stage_a_parameters(model)`（line 365）——从不调用 `freeze_stage_a_scorer_only`
+- 不在模型上初始化 token_scorers（OVGGT 构造器 line 317-325 不调用 `init_token_scorers`）
+- 不处理 `student_outputs.distill_loss`（supervised loss 函数 line 87 调用 `criterion(batch, student_outputs, ...)` 不添加 distill_loss）
+- 不传 `frame_processor` 给模型（line 82: `model(batch)` 无回调）
+
+这不是 B>1 退化——是现有缺口。但设计声称 finetune 仅需 "~3 行"（guard 移除），未指出 scorer 相关的 B>1 工作在 finetune 路径中完全缺失。
+
+**影响**：如果在 finetune config 中设 `use_token_scorer=True` 且 B>1，scorer 永远不会被初始化、训练，distill_loss 被静默丢弃。不崩溃——只是不正确的训练行为。
+
+**建议**：在 §4.6 记录 finetune_frontend.py 的 B>1 支持仅限于无 TokenScorer 的 `FrontendSupervisedLoss`。finetune 路径的 scorer 支持需要独立实现。
+
 ---
 
-*Design completed 2026-05-26. Three-round code review (R1-R31) completed 2026-05-26. All critical issues resolved. See implementation plan for task breakdown.*
+### 第四轮审查总结
+
+| 级别 | 编号 | 标题 | 处理 |
+|------|------|------|------|
+| 重要 | R32 | apply_keyframe_event per-batch 遗漏 | **已修复** — §4.1 新增 per-batch PVC 循环 |
+| 重要 | R33 | post-commit 代码未覆盖 | **已修复** — §4.1 扩展覆盖 L562-609 |
+| 重要 | R34 | FrontendSupervisedLoss batch 维剥离 | **已修复** — §4.6 记录 finetune B>1 限制 |
+| 中等 | R35 | 未定义 pose_enc_list | **已修复** — 替换为 `torch.cat(rel_pose_enc_batch, dim=0)` |
+| 中等 | R36 | head closure 捕获变量名 | **已修复** — 更新为 `images_all` + `maybe_checkpoint_head` |
+| 信息性 | R37 | get_slot_for_frame 不存在 | **已修复** — 替换为 `.anchor_slot` 属性 |
+| 信息性 | R38 | finetune 无 scorer 支持 | **已修复** — §4.6 记录 Phase 1 限制 |
+
+---
+
+### 全部四轮审查总结（R1-R38）
+
+| 级别 | 数量 |
+|------|------|
+| 严重 | 9（R1, R2, R3, R12-R15, R25, R26） |
+| 重要 | 12（R4-R6, R16-R19, R27-R28, R32-R34） |
+| 中等 | 11（R7-R8, R20-R22, R29-R31, R35-R36） |
+| 信息性 | 6（R10-R11, R23-R24, R37-R38） |
+| **合计** | **38** |
+
+**建议**：设计文档中的 §4.1 代码块需要全面重写，覆盖 ovggt.py lines 385-609 的完整范围。当前代码块存在多处未定义变量、不存在的 API 调用、类型不匹配和范围遗漏。建议基于审查反馈重新生成完整的 `_inference_frontend` 代码，而非在现有代码块上修补。
+
+---
+
+*Design completed 2026-05-26. Code review (R1-R38, four rounds) completed 2026-05-26. See implementation plan for task breakdown.*
