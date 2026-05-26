@@ -138,18 +138,22 @@ past_key_values_camera = [
 total_distill_loss = None
 ```
 
-**Per-frame per-batch aggregator loop** (replaces the aggregator call at ~L416 and surrounding logic):
+**Per-frame per-batch loop** (replaces the aggregator + camera head calls at ~L416-454):
 
 ```python
 for i, frame in enumerate(frames):
     images_all = self._frame_image_to_sequence(frame["img"])  # [B, 1, C, H, W]
 
-    # Sequential aggregator: call B times with B=1 (cache states are B=1 internally)
+    # ===== Aggregator: sequential B calls (B=1 each) =====
+    # Review-12: save/restore last_scores to isolate per-sequence dynamic budgets
+    saved_last_scores = self.aggregator.last_scores.clone()
     frame_agg_outputs = []
     frame_pending_updates = []
     frame_distill_losses = []
     for b in range(B):
         images_b = images_all[b:b+1]  # [1, 1, C, H, W]
+        # Restore last_scores for this batch element (or use zeros for first frame)
+        self.aggregator.last_scores = saved_last_scores if b == 0 else saved_last_scores.clone()
         agg_tokens, ps, cs_b, pending, fdl = self.aggregator(
             images_b,
             cache_states=cache_states[b],
@@ -159,36 +163,50 @@ for i, frame in enumerate(frames):
             importance_weight=importance_weight,
             frontend_cache_config=self.frontend_cache_config,
         )
-        frame_agg_outputs.append(agg_tokens)       # List[Tensor] per layer
-        frame_pending_updates.append(pending)       # per-batch pending
+        frame_agg_outputs.append(agg_tokens)
+        frame_pending_updates.append(pending)
         if fdl is not None:
             frame_distill_losses.append(fdl)
-        cache_states[b] = cs_b                     # updated cache
+        cache_states[b] = cs_b
+    # Restore last_scores to last batch element's state (any is fine, all identical in Phase 1)
+    self.aggregator.last_scores = saved_last_scores
 
-    # Accumulate distill_loss across batches
+    # Review-18: average distill_loss across B (not sum) for equivalence
     if frame_distill_losses:
-        sum_fdl = sum(frame_distill_losses)
-        total_distill_loss = sum_fdl if total_distill_loss is None else total_distill_loss + sum_fdl
+        avg_fdl = sum(frame_distill_losses) / len(frame_distill_losses)
+        total_distill_loss = avg_fdl if total_distill_loss is None else total_distill_loss + avg_fdl
 
-    # Batch head computations: concatenate per-batch aggregator outputs along dim=0
-    # aggregated_tokens_list: List of 24 tensors, each [B, S*P, 2C]
+    # ===== Head input: concatenate per-batch aggregator outputs along dim=0 =====
     aggregated_tokens_list = []
     for layer_idx in range(len(frame_agg_outputs[0])):
         layer_cat = torch.cat([bo[layer_idx] for bo in frame_agg_outputs], dim=0)
         aggregated_tokens_list.append(layer_cat)
-```
 
-**Heads** (unchanged signature, now receive batched `[B, ...]` inputs):
-```python
+    # ===== Camera head: sequential B calls (same strategy as aggregator) =====
+    # Review-14: camera head CANNOT be batched — PVC is per-sequence state.
+    # Sequential calls maintain independent per-batch PVC across frames.
+    pose_enc_batch = []
     with self._disabled_autocast_context():
-        camera_anchor_token_count = None if i == 0 else sum(
-            km.get_num_anchor_frames() for km in keyframe_managers
-        ) * self.camera_num_iters
-        pose_enc_list, _ = self.camera_head(
-            aggregated_tokens_list,
-            past_key_values_camera=None,  # per-batch: see §4.5
-            ...
-        )
+        for b in range(B):
+            # Review-13: camera_anchor_token_count per single sequence (no sum across managers)
+            camera_anchor_token_count = (
+                None if i == 0
+                else keyframe_managers[b].get_num_anchor_frames() * self.camera_num_iters
+            )
+            pose_enc_list_b, past_key_values_camera[b] = self.camera_head(
+                [agg[b:b+1] for agg in aggregated_tokens_list],
+                past_key_values_camera=past_key_values_camera[b],
+                use_cache=True,
+                past_frame_idx=i,
+                total_budget=camera_budget,
+                num_anchor_cameras=(
+                    keyframe_managers[b].get_num_anchor_frames() if i > 0 else 1
+                ),
+            )
+            pose_enc_batch.append(pose_enc_list_b[-1])
+    camera_pose = torch.cat(pose_enc_batch, dim=0)  # [B, 9]
+
+    # ===== Depth/Point heads: batched (no per-sequence state) =====
     depth, depth_conf = self.depth_head(aggregated_tokens_list, ...)
     pts3d, pts3d_conf = self.point_head(aggregated_tokens_list, ...)
 ```
@@ -196,34 +214,74 @@ for i, frame in enumerate(frames):
 **Per-batch cache commit** (replaces lines 498-553):
 
 ```python
+    # Review-15 (Phase 1): fixed_interval → all events identical, store batch 0 only
+    events = []
     for b in range(B):
-        # Per-batch keyframe decision
         event = keyframe_managers[b].update(
             frame_idx=i,
             depth=depth[b],
-            pose_abs_enc=pose_enc_list[-1][b] if pose_enc_list else camera_pose[b],
+            pose_abs_enc=camera_pose[b],
             image_size_hw=(img_h, img_w),
         )
-        # Per-batch per-layer commit
+        events.append(event)
+    if store_full_keyframe_schedule:
+        keyframe_schedule.append(events[0])  # batch 0 representative
+
+    for b in range(B):
+        # Review-17: build per-batch frame_metadata_base for commit
+        slot_id = keyframe_managers[b].get_active_keyframe_id()
+        current_local_to_world = keyframe_managers[b].get_active_local_to_world()
         for layer_idx in range(self.aggregator.depth):
             pending = frame_pending_updates[b][layer_idx]
             if pending is None:
                 continue
-            # Split batch-dim from aggregator output for per-batch commit
-            per_batch_update = PendingLayerUpdate(
-                k_current=pending.k_current,       # already [1, H, N, D] from B=1 aggregator
-                v_current=pending.v_current,
-                importance_current=pending.importance_current,
-                frame_id=pending.frame_id,
-                cache_budget=pending.cache_budget,
+            frame_metadata_base = build_frame_token_metadata_base(
+                depth=depth[b:b+1],
+                depth_conf=depth_conf[b:b+1],
+                pose_enc=camera_pose[b:b+1],
+                image_size_hw=(img_h, img_w),
+                patch_size=self.aggregator.patch_size,
+                patch_start_idx=self.aggregator.patch_start_idx,
+                frame_id=i,
+                keyframe_id=slot_id,
+                slot_id=slot_id,
+                anchor_slot=(-1 if i == 0 else events[b].get_slot_for_frame(i)),
+                importance=pending.importance_current,
+                active_local_to_world=current_local_to_world,
             )
-            cache_states[b][layer_idx].apply_keyframe_event_(event)
-            cache_states[b][layer_idx].commit_pending_update_(
-                per_batch_update, ..., config=self.frontend_cache_config, ...
+            current_metadata = frame_metadata_base.with_importance(pending.importance_current)
+            cache_states[b][layer_idx].apply_keyframe_event_(events[b])
+            score = cache_states[b][layer_idx].commit_pending_update_(
+                pending_update=pending,
+                current_metadata=current_metadata,
+                config=self.frontend_cache_config,
+                intra_frame_keep_ratio=intra_frame_keep_ratio,
+                attn_module=self.aggregator.global_blocks[layer_idx].attn,
             )
+            # Review-12: propagate score to aggregator for dynamic budget
+            if score is not None:
+                self.aggregator.last_scores[layer_idx] = score
 ```
 
-**Guard removal**: Change `_validate_frontend_batch_size` to accept `B >= 1` (remove the `ref_batch_size != 1` check at `ovggt.py:828`).
+**Pass through active_pose_encoding**: After the camera_head loop, compose absolute poses:
+
+```python
+    # Review-16: stack per-batch active pose encodings for absolute pose composition
+    with self._disabled_autocast_context():
+        if self.frontend_pose_encoding_type == ABS_POSE_ENCODING:
+            pass  # camera_head already outputs absolute poses
+        else:
+            active_poses = torch.stack([
+                keyframe_managers[b].get_active_pose_encoding()
+                for b in range(B)
+            ], dim=0)  # [B, 9]
+            rel_pose_enc = pose_enc_list[-1][:B]
+            camera_pose_abs = compose_absolute_from_relative(
+                active_poses.unsqueeze(1), rel_pose_enc, image_size_hw=(img_h, img_w)
+            )[:, 0, :]
+```
+
+**Guard removal**: Change `_validate_frontend_batch_size` to accept `B >= 1` (remove the `ref_batch_size != 1` check).
 
 ### 4.2 `src/ovggt/utils/frontend_keyframe.py`
 
@@ -611,6 +669,120 @@ def num_tokens(self) -> int:
 
 **总体评估**：设计已从 "merge cache states" 重构为 "sequential aggregator + batched heads"。R10 替代方案已采纳为主设计。剩余风险可控，可进入实现阶段。
 
+### 第二轮审查（2026-05-26）
+
+> 对照实际代码逐行验证的第二轮审查。聚焦于第一轮（R1-R11）未覆盖的问题。
+
+### Review-12（严重，已验证）：`aggregator.last_scores` 是模块级共享状态，破坏跨序列 budget 隔离
+
+**验证**：已通过代码审查确认。`last_scores` 是 `aggregator.py:165` 的 `torch.zeros(self.depth)` 张量（无 batch 维）。`_calculate_dynamic_budgets`（L546）读取它；`_inference_frontend`（`ovggt.py:558-559`）写入 `self.aggregator.last_scores[layer_idx] = score`。
+
+**已修复**：§4.1 在 sequential 循环中加入 save/restore 逻辑。
+
+### Review-13（伪代码 bug，已修复）：`camera_anchor_token_count` 错误地跨 B 个 keyframe_manager 求和
+
+**验证状态**：当前 B=1 代码（`ovggt.py:434`）正确——只有 1 个 manager，无 sum。**问题在设计的 §4.1 伪代码**（错误地对 B 个 manager 求和）。
+
+**已修复**：§4.1 改用 sequential camera_head，per-batch `keyframe_managers[b].get_num_anchor_frames()` 不跨 manager 求和。
+
+### Review-14（伪代码 bug，已修复）：§4.1 camera head PVC 设为 None——丢弃整个 camera KV cache
+
+**验证状态**：当前 B=1 代码（`ovggt.py:435-444`）正确传递和返回 PVC。**问题在设计的 §4.1 伪代码**（错误地设为 `None` 并丢弃返回值）。
+
+**已修复**：§4.1 改为 sequential camera_head（B 次 B=1 调用），每序列维护独立的 PVC。Camera head 不再批量化。
+
+### Review-15（已确认，已处理）：`keyframe_schedule` 是扁平列表——`finalize_from_stream` 索引在 B>1 时错乱
+
+**验证**：已确认。`keyframe_schedule` 是 `List[object]`（`ovggt.py:401`），每帧一个 event。`finalize_from_stream`（`frontend_distill.py:396`）按 `frame_idx` 枚举。
+
+**已修复**：Phase 1（fixed_interval）所有 event 相同，存储 batch 0 代表事件。
+
+### Review-16（已确认，已处理）：`active_pose_encoding` 来自单个 keyframe_manager 用于所有 B 序列
+
+**验证**：已确认。是设计 §4.1 伪代码的问题。Phase 1（fixed_interval）安全——所有 manager 在同一帧产生相同 active pose。
+
+**已修复**：§4.1 新增 per-batch active_pose_encoding stack。
+
+### Review-17（伪代码 bug，已修复）：`build_frame_token_metadata_base` 在 per-batch commit 循环中缺失
+
+**验证状态**：当前 B=1 代码（`ovggt.py:536-549`）在 `commit_pending_update_` 之前正确调用。**问题在设计的 §4.1 伪代码**（遗漏了该调用）。
+
+**已修复**：§4.1 的 commit 循环中新增完整的 `build_frame_token_metadata_base` + `with_importance` 构建。
+
+### Review-18（已确认，已修复）：Distill loss 跨 B 求和而非取平均——破坏 loss 等价性
+
+**验证**：数学上已确认。`sum(fdl_i)` 使有效权重变成 `B × distill_loss_weight`。
+
+**已修复**：§4.1 改为 `sum(frame_distill_losses) / len(frame_distill_losses)`（跨 B 取平均）。
+
+**问题**：ovggt.py:562-575 创建 `KeyframePacket` 时使用 batched tensor（B>1 时 `camera_pose [B, 9]`、`patch_features [B, ...]`），但 `KeyframePacket`（frontend_keyframe.py:50-58）存储原 tensor。下游消费者期望 per-keyframe 标量。
+
+**影响**：Eval 模式下 B>1 会将 batched tensor 存入期望 per-keyframe 数据的字段。如果 `export_keyframe_packets=True`，静默破坏评估输出。
+
+**建议**：B>1 时每帧每 event 创建 B 个 `KeyframePacket`（每个 batch 元素一个），或限制 B>1 仅用于训练模式。
+
+### Review-20（中等）：`current_keyframe_id`/`current_local_to_world` 来自单个 keyframe_manager
+
+**问题**：ovggt.py:516-517 从单个 `keyframe_manager` 设置这些值。设计未在 per-batch commit 循环内重新设置 per-batch 值。
+
+**影响**：Phase 1（fixed_interval）安全。Phase 2+ 不同 batch 元素可能有不同的 active keyframe。
+
+**建议**：移入 per-batch 循环：
+```python
+for b in range(B):
+    current_keyframe_id = keyframe_managers[b].get_active_keyframe_id()
+    current_local_to_world = keyframe_managers[b].get_active_local_to_world()
+```
+
+### Review-21（中等）：`_infer_image_hw` 返回单一 (H, W)——所有 B 序列必须共享分辨率
+
+**问题**：`_infer_image_hw`（ovggt.py:783-791）从 `frames[0]["img"]` 返回分辨率。B>1 时仅使用 batch 0 的分辨率。如果序列分辨率不同，aggregator 的 patch grid size 不同，导致 shape 不匹配。
+
+**影响**：混合分辨率序列会崩溃。训练时数据加载器通常强制统一分辨率（安全），但应作为约束记录。
+
+**建议**：在 §8 Risk Register 中添加：B>1 要求 batch 内所有序列分辨率一致。可在初始化时添加 assertion。
+
+### Review-22（中等）：`_build_keyframe_mask` 产出单一 `[num_frames]` mask——不支持 per-batch
+
+**问题**：`finalize_from_stream`（frontend_distill.py:232-236）调用 `_build_keyframe_mask` 返回单一 `[num_frames]` mask。Phase 2+ 需要形状 `[B, num_frames]`。
+
+`_build_gt_relative_pose_targets`、`_compose_absolute_pose_from_relative_with_fixed_anchors` 等均假设单一共享 schedule。
+
+**影响**：Phase 1 安全（fixed_interval 产生相同 event）。Phase 2+ 需要重构 `keyframe_schedule` 接口、`finalize_from_stream` 签名及所有下游 mask 消费者。
+
+**建议**：记录为 Phase 2 阻塞项。
+
+### Review-23（信息性）：`camera_head.last_scores` 存在相同的共享状态风险
+
+**问题**：`camera_head.last_scores`（camera_head.py:44）是模块级 tensor。如果后续改为 B 次 sequential 调用 camera_head，会有与 Review-12 相同的交叉污染问题。
+
+**影响**：当前设计（单次 batched 调用）无影响。如果调用方式改变则需关注。
+
+**建议**：Phase 1 无需操作。如果 camera_head 调用方式变更时需注意。
+
+### Review-24（信息性）：`aggregator.last_scores` 非 buffer——DDP 不同步
+
+**问题**：`self.last_scores` 是 `torch.zeros(self.depth)`（非 buffer），DDP `static_graph=True` 不会同步。各 rank 维护独立的 score。
+
+**影响**：B=1 时也如此，不是退化。如果 rank 间 budget 差异过大会影响收敛，但风险低。
+
+**建议**：Phase 1 无需操作。
+
 ---
 
-*Design completed 2026-05-26. Code review added 2026-05-26. See implementation plan for task breakdown.*
+### 第二轮审查总结
+
+| 级别 | 数量 | 编号 |
+|------|------|------|
+| 严重 | 4 | R12（`last_scores` 共享状态）、R13（anchor count 求和）、R14（camera cache 丢弃）、R15（`keyframe_schedule` 错乱） |
+| 重要 | 4 | R16（`active_pose_encoding` 单 manager）、R17（`build_frame_token_metadata_base` 缺失）、R18（distill loss 求和）、R19（`export_packets` 未适配） |
+| 中等 | 3 | R20（`current_keyframe_id` per-batch）、R21（统一分辨率假设）、R22（`_build_keyframe_mask` 单 mask） |
+| 信息性 | 2 | R23（`camera_head.last_scores` 潜在风险）、R24（DDP 不同步） |
+
+**关键阻塞项（R12-R15）**：四个严重问题在 B>1 时会产出错误结果。R14（camera cache 丢弃）影响最大——改变了根本计算而非精度差异。R12（共享 `last_scores`）违反数学等价性声明。R13（anchor count 求和）会破坏 camera KV cache 布局。R15（keyframe_schedule）会产生错误的 loss target。
+
+**建议操作**：在实现开始前必须修复 R12-R15 和 R17-R18。这些是正确性问题，不是优化机会。
+
+---
+
+*Design completed 2026-05-26. Code review (R1-R24) added 2026-05-26. See implementation plan for task breakdown.*
