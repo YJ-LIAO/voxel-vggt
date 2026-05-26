@@ -153,6 +153,7 @@ class LayerCacheState:
     max_history_anchors: int = 3
     slot_to_active: Optional[Dict[int, Tensor]] = None
     needs_reorder_: bool = False
+    _cached_protected_count: int = 0  # cache for _compute_protected_count, updated at mutation points
 
     def as_past_key_values(self):
         if self.k is None or self.v is None:
@@ -175,7 +176,8 @@ class LayerCacheState:
         self.k = torch.gather(self.k, 2, expanded)
         self.v = torch.gather(self.v, 2, expanded)
         self.metadata = self.metadata.index_select(indices)
-        self.protected_count = self._compute_protected_count()
+        self._cached_protected_count = self._compute_protected_count_raw()
+        self.protected_count = self._cached_protected_count
 
     def _gather_single_batch_(self, indices: Tensor) -> None:
         if self.k is None or self.v is None or self.metadata is None:
@@ -195,7 +197,8 @@ class LayerCacheState:
             importance=self.metadata.importance.index_select(1, indices),
             depth_conf=self.metadata.depth_conf.index_select(1, indices),
         )
-        self.protected_count = self._compute_protected_count()
+        self._cached_protected_count = self._compute_protected_count_raw()
+        self.protected_count = self._cached_protected_count
 
     def gather_per_batch_(self, indices_list: List[Tensor]) -> None:
         """
@@ -337,7 +340,8 @@ class LayerCacheState:
             depth_conf=torch.stack(depth_confs, dim=0),
         )
 
-        self.protected_count = self._compute_protected_count()
+        self._cached_protected_count = self._compute_protected_count_raw()
+        self.protected_count = self._cached_protected_count
 
     def append_(self, k_new: Tensor, v_new: Tensor, metadata_new: TokenMetadata) -> None:
         if self.k is None or self.v is None or self.metadata is None:
@@ -348,7 +352,8 @@ class LayerCacheState:
             self.k = torch.cat([self.k, k_new], dim=2)
             self.v = torch.cat([self.v, v_new], dim=2)
             self.metadata = self.metadata.append(metadata_new)
-        self.protected_count = self._compute_protected_count()
+        self._cached_protected_count = self._compute_protected_count_raw()
+        self.protected_count = self._cached_protected_count
 
     def protect_topk_on_demotion_(self, demoted_slot: int, keep_count: int) -> None:
         """Before FIFO_SWAP demotion, reassign top-K tokens from the demoted
@@ -365,7 +370,8 @@ class LayerCacheState:
             top_indices = indices[top_local]
             # Reassign top-K to slot 0 so they survive the FIFO demotion
             self.metadata.anchor_slot[b_idx, top_indices] = 0
-        self.protected_count = self._compute_protected_count()
+        self._cached_protected_count = self._compute_protected_count_raw()
+        self.protected_count = self._cached_protected_count
 
     def apply_keyframe_event_(self, event) -> None:
         slot_pose_updates = getattr(event, "slot_pose_updates", None)
@@ -420,7 +426,8 @@ class LayerCacheState:
                 batch_indices.append(torch.empty(0, dtype=torch.long, device=self.metadata.anchor_slot.device))
         indices = torch.stack(batch_indices, dim=0)
         self.gather_(indices)
-        self.protected_count = self._compute_protected_count()
+        self._cached_protected_count = self._compute_protected_count_raw()
+        self.protected_count = self._cached_protected_count
         return indices
 
     def apply_voxel_dedup_(self, config: FrontendCacheConfig, current_frame_id: int) -> None:
@@ -664,13 +671,19 @@ class LayerCacheState:
         self.v = final_v
         if kept_indices is not None:
             self.metadata = self.metadata.index_select(kept_indices)
-        self.protected_count = self._compute_protected_count()
+        self._cached_protected_count = self._compute_protected_count_raw()
+        self.protected_count = self._cached_protected_count
         return avg_score
 
-    def _compute_protected_count(self) -> int:
+    def _compute_protected_count_raw(self) -> int:
+        """Original computation — called only at mutation points (has GPU sync)."""
         if self.metadata is None or self.metadata.anchor_slot.numel() == 0:
             return 0
         return int((self.metadata.anchor_slot[0] >= 0).sum().item())
+
+    def _compute_protected_count(self) -> int:
+        """Cached version — returns pre-computed value, no GPU sync."""
+        return self._cached_protected_count
 
     def _current_frame_importance(self, frame_id: int):
         if self.metadata is None:
