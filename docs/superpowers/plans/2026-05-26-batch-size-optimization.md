@@ -158,6 +158,8 @@ Delete lines 653-658 (`if int(args.batch_size) != 1: raise ValueError(...)`).
 
 Delete lines 251-255.
 
+> **Warning (Spec R34)**: B>1 finetune with `FrontendSupervisedLoss` has a known limitation: `_build_point_targets` (`frontend_supervised.py:184-186`) strips batch dim via `camera_intrinsics[0]`, producing incorrect 3D point targets for batch > 0. Finetune B>1 is only safe when the dataset provides pre-computed `pts3d` (skipping this code path). If using datasets without pre-computed `pts3d`, keep `batch_size=1` in finetune config.
+
 - [ ] **Step 4: Verify guards removed**
 
 ```bash
@@ -226,11 +228,11 @@ def _compute_protected_count(self) -> int:
 counts.append(int(mask.sum().item()))
 
 # AFTER:
-counts.append(mask.sum())  # keep as tensor, check lengths with .numel()
-# Update the equality check:
+counts.append(mask.sum())
+# Update the equality check downstream:
 if not counts or min(c.numel() for c in counts) == 0 or len(set(c.item() for c in counts)) != 1:
     return None, 0
-# Note: the .item() in the set comprehension is acceptable (once per batch, not per-layer)
+# Note: .item() in set comprehension runs once per batch element (not per-layer), acceptable.
 ```
 
 - [ ] **Step 5: Update caches at mutation points**
