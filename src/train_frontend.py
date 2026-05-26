@@ -327,6 +327,22 @@ def normalize_resume_step(resume_step: int, steps_per_epoch: int) -> int:
     return resume_step % steps_per_epoch
 
 
+def _sanitize_teacher_outputs(teacher_outputs):
+    """Clamp inf/nan in teacher depth/pmap to prevent NaN in downstream loss."""
+    for i, pred in enumerate(teacher_outputs.ress):
+        for key in ("depth", "pts3d_in_other_view"):
+            if key in pred:
+                t = pred[key]
+                if not torch.isfinite(t).all():
+                    import logging
+                    _logger = logging.getLogger(__name__)
+                    _logger.warning(
+                        "Teacher %s has inf/nan at frame %d, clamping to finite range.", key, i
+                    )
+                    pred[key] = torch.nan_to_num(t, nan=0.0, posinf=1e4, neginf=-1e4)
+                    pred[key] = pred[key].clamp(-1e4, 1e4)
+
+
 def frontend_loss_of_one_batch(
     batch,
     model,
@@ -370,6 +386,8 @@ def frontend_loss_of_one_batch(
             )
         if teacher_output_to_cpu:
             pin_cpu_tensor_tree_(teacher_outputs.ress)
+
+        _sanitize_teacher_outputs(teacher_outputs)
 
         if teacher_weight_offload and get_module_device(teacher).type == "cuda":
             teacher.to(torch.device("cpu"))
