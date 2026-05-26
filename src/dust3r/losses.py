@@ -1101,6 +1101,9 @@ def closed_form_scale_and_shift(pred, gt):
         scale = numerator / denominator
 
         shift = gt_mean - scale * pred_mean
+        # Guard: fall back to identity if computation produced NaN (e.g. all-zero input)
+        scale = torch.where(torch.isfinite(scale), scale, torch.ones_like(scale))
+        shift = torch.where(torch.isfinite(shift), shift, torch.zeros_like(shift))
         return scale, shift
 
     elif C == 3:
@@ -1111,6 +1114,9 @@ def closed_form_scale_and_shift(pred, gt):
 
         scale = (pred_centered * gt_centered).sum() / (pred_centered ** 2).sum().clamp(min=1e-6)
         shift = gt_mean - scale * pred_mean
+        # Guard: fall back to identity if computation produced NaN (e.g. all-zero input)
+        scale = torch.where(torch.isfinite(scale), scale, torch.ones_like(scale))
+        shift = torch.where(torch.isfinite(shift), shift, torch.zeros_like(shift))
         return scale, shift
 
     else:
