@@ -382,14 +382,28 @@ class OVGGT(nn.Module, PyTorchModelHubMixin):
             max_anchors,
             coverage_threshold,
         )
-        cache_states = [
-            LayerCacheState(max_history_anchors=frontend_keyframe_config.max_history_anchors)
-            for _ in range(self.aggregator.depth)
+        # Compute batch size from input frames
+        B = self._frame_batch_size(frames[0]["img"])
+        for f in frames[1:]:
+            assert self._frame_batch_size(f["img"]) == B, "All frames must have same batch size"
+
+        # Per-batch independent state (B copies of each singleton)
+        keyframe_managers = [
+            FrontendKeyframeManager(frontend_keyframe_config)
+            for _ in range(B)
         ]
-        past_key_values_camera = [None] * self.camera_head.trunk_depth
+        cache_states = [
+            [LayerCacheState(max_history_anchors=frontend_keyframe_config.max_history_anchors)
+             for _ in range(self.aggregator.depth)]
+            for _ in range(B)
+        ]
+        past_key_values_camera = [
+            [None] * self.camera_head.trunk_depth
+            for _ in range(B)
+        ]
         total_budget = self.total_budget
         importance_weight = self.importance_weight
-        keyframe_manager = FrontendKeyframeManager(frontend_keyframe_config)
+        intra_frame_keep_ratio = self.aggregator.intra_frame_keep_ratio
 
         img_h, img_w = self._infer_image_hw(frames)
         export_packets = self.frontend_cache_config.export_keyframe_packets
@@ -411,76 +425,106 @@ class OVGGT(nn.Module, PyTorchModelHubMixin):
         total_distill_loss = None
 
         for i, frame in enumerate(frames):
-            images = self._frame_image_to_sequence(frame["img"])
+            images_all = self._frame_image_to_sequence(frame["img"])  # [B, 1, C, H, W]
 
-            aggregated_tokens, patch_start_idx, cache_states, pending_updates, frame_distill_loss = self.aggregator(
-                images,
-                cache_states=cache_states,
-                use_cache=True,
-                past_frame_idx=i,
-                total_budget=total_budget,
-                importance_weight=importance_weight,
-                frontend_cache_config=self.frontend_cache_config,
-            )
-
-            if frame_distill_loss is not None:
-                total_distill_loss = (
-                    frame_distill_loss
-                    if total_distill_loss is None
-                    else total_distill_loss + frame_distill_loss
-                )
-
-            with self._disabled_autocast_context():
-                camera_anchor_token_count = None if i == 0 else keyframe_manager.get_num_anchor_frames() * self.camera_num_iters
-                pose_enc_list, past_key_values_camera = self.camera_head(
-                    aggregated_tokens,
-                    num_iterations=self.camera_num_iters,
-                    past_key_values_camera=past_key_values_camera,
+            # ===== Sequential aggregator: B calls with B=1 (Review-12: save/restore last_scores) =====
+            saved_last_scores = self.aggregator.last_scores.clone()
+            frame_agg_outputs = []
+            frame_pending_updates = []
+            frame_distill_losses = []
+            for b in range(B):
+                images_b = images_all[b:b+1]  # [1, 1, C, H, W]
+                if b > 0:
+                    self.aggregator.last_scores = saved_last_scores.clone()
+                agg_tokens, ps, cs_b, pending, fdl = self.aggregator(
+                    images_b,
+                    cache_states=cache_states[b],
                     use_cache=True,
-                    anchor_token_count=camera_anchor_token_count,
-                    pose_encoding_type=self._camera_pose_encoding_type_for_frontend(),
-                    return_pose_predictions=True,
-                    return_last_pose_only=True,
+                    past_frame_idx=i,
+                    total_budget=total_budget,
+                    importance_weight=importance_weight,
+                    frontend_cache_config=self.frontend_cache_config,
                 )
-                abs_pose_enc = pose_enc_list["abs_pose_enc"]
-                rel_pose_enc = pose_enc_list["rel_pose_enc"]
+                frame_agg_outputs.append(agg_tokens)
+                frame_pending_updates.append(pending)
+                if fdl is not None:
+                    frame_distill_losses.append(fdl)
+                cache_states[b] = cs_b
+            self.aggregator.last_scores = saved_last_scores
+            patch_start_idx = ps  # shared across batch elements
+
+            # Average distill_loss across B (Review-18)
+            if frame_distill_losses:
+                avg_fdl = sum(frame_distill_losses) / len(frame_distill_losses)
+                total_distill_loss = avg_fdl if total_distill_loss is None else total_distill_loss + avg_fdl
+
+            # Concatenate per-batch aggregator outputs for batched heads
+            aggregated_tokens = []
+            for layer_idx in range(len(frame_agg_outputs[0])):
+                layer_cat = torch.cat([bo[layer_idx] for bo in frame_agg_outputs], dim=0)
+                aggregated_tokens.append(layer_cat)
+
+            # ===== Camera head: sequential B calls (Review-14, Review-26) =====
+            pose_enc_batch = []
+            rel_pose_enc_batch = []
+            with self._disabled_autocast_context():
+                for b in range(B):
+                    camera_anchor_token_count = (
+                        None if i == 0
+                        else keyframe_managers[b].get_num_anchor_frames() * self.camera_num_iters
+                    )
+                    pose_enc_dict_b, past_key_values_camera[b] = self.camera_head(
+                        [agg[b:b+1] for agg in aggregated_tokens],
+                        num_iterations=self.camera_num_iters,
+                        past_key_values_camera=past_key_values_camera[b],
+                        use_cache=True,
+                        anchor_token_count=camera_anchor_token_count,
+                        pose_encoding_type=self._camera_pose_encoding_type_for_frontend(),
+                        return_pose_predictions=True,
+                        return_last_pose_only=True,
+                    )
+                    pose_enc_batch.append(pose_enc_dict_b["abs_pose_enc"][:, 0, :])
+                    rel_pose_enc_batch.append(pose_enc_dict_b["rel_pose_enc"][:, 0, :])
+                abs_pose_enc = torch.cat(pose_enc_batch, dim=0)
+                rel_pose_enc = torch.cat(rel_pose_enc_batch, dim=0)
                 if i == 0 or self.frontend_pose_encoding_type == ABS_POSE_ENCODING:
-                    camera_pose = abs_pose_enc[:, 0, :]
+                    camera_pose = abs_pose_enc
                     camera_pose_rel = relative_from_absolute_pose_encoding(
                         camera_pose.unsqueeze(1),
                         camera_pose.unsqueeze(1),
                         image_size_hw=(img_h, img_w),
                     )[:, 0, :]
                 else:
-                    active_pose_encoding = keyframe_manager.get_active_pose_encoding().unsqueeze(0).unsqueeze(0)
+                    active_poses = torch.stack([
+                        km.get_active_pose_encoding() for km in keyframe_managers
+                    ], dim=0)
                     camera_pose = compose_absolute_from_relative(
-                        active_pose_encoding,
-                        rel_pose_enc,
+                        active_poses.unsqueeze(1),
+                        rel_pose_enc.unsqueeze(1),
                         image_size_hw=(img_h, img_w),
                     )[:, 0, :]
-                    camera_pose_rel = rel_pose_enc[:, 0, :]
+                    camera_pose_rel = rel_pose_enc
 
-                def depth_head_forward(*layer_tokens):
-                    return self.depth_head(
-                        list(layer_tokens),
-                        images=images,
-                        patch_start_idx=patch_start_idx,
-                    )
+            # ===== Depth/Point heads: batched (Review-36) =====
+            def depth_head_forward(*layer_tokens):
+                return self.depth_head(
+                    list(layer_tokens),
+                    images=images_all,
+                    patch_start_idx=patch_start_idx,
+                )
+            depth, depth_conf = maybe_checkpoint_head(depth_head_forward, *aggregated_tokens)
+            depth = depth[:, 0]
+            depth_conf = depth_conf[:, 0]
 
-                depth, depth_conf = maybe_checkpoint_head(depth_head_forward, *aggregated_tokens)
-                depth = depth[:, 0]
-                depth_conf = depth_conf[:, 0]
-
-                def point_head_forward(*layer_tokens):
-                    return self.point_head(
-                        list(layer_tokens),
-                        images=images,
-                        patch_start_idx=patch_start_idx,
-                    )
-
-                pts3d, pts3d_conf = maybe_checkpoint_head(point_head_forward, *aggregated_tokens)
-                pts3d = pts3d[:, 0]
-                pts3d_conf = pts3d_conf[:, 0]
+            def point_head_forward(*layer_tokens):
+                return self.point_head(
+                    list(layer_tokens),
+                    images=images_all,
+                    patch_start_idx=patch_start_idx,
+                )
+            pts3d, pts3d_conf = maybe_checkpoint_head(point_head_forward, *aggregated_tokens)
+            pts3d = pts3d[:, 0]
+            pts3d_conf = pts3d_conf[:, 0]
 
                 if self.track_head is not None and current_query_points is not None:
                     track_list, vis, conf = self.track_head(
@@ -494,92 +538,123 @@ class OVGGT(nn.Module, PyTorchModelHubMixin):
                     vis = vis[:, 0]
                     track_conf = conf[:, 0]
 
-            event = keyframe_manager.update(
-                frame_idx=i,
-                depth=depth[0],
-                pose_abs_enc=camera_pose[0],
-                image_size_hw=(img_h, img_w),
-            )
+            # ===== Per-batch keyframe events + cache commit =====
+            events = []
+            for b in range(B):
+                event = keyframe_managers[b].update(
+                    frame_idx=i,
+                    depth=depth[b],
+                    pose_abs_enc=camera_pose[b],
+                    image_size_hw=(img_h, img_w),
+                )
+                events.append(event)
+            # Review-15 (Phase 1): fixed_interval → all events identical, store batch 0
             if store_full_keyframe_schedule:
-                keyframe_schedule.append(event)
+                keyframe_schedule.append(events[0])
             else:
                 keyframe_schedule.append(
                     {
-                        "event_type": str(event.event_type),
-                        "frame_idx": int(event.frame_idx),
-                        "keyframe_id": int(event.keyframe_id),
-                        "anchor_slot": int(event.anchor_slot),
-                        "num_anchor_frames": int(event.num_anchor_frames),
+                        "event_type": str(events[0].event_type),
+                        "frame_idx": int(events[0].frame_idx),
+                        "keyframe_id": int(events[0].keyframe_id),
+                        "anchor_slot": int(events[0].anchor_slot),
+                        "num_anchor_frames": int(events[0].num_anchor_frames),
                     }
                 )
 
-            current_keyframe_id = keyframe_manager.get_active_keyframe_id()
-            current_local_to_world = keyframe_manager.get_active_local_to_world()
-            frame_metadata_base = None
+            for b in range(B):
+                current_keyframe_id = keyframe_managers[b].get_active_keyframe_id()
+                current_local_to_world = keyframe_managers[b].get_active_local_to_world()
+                frame_metadata_base = None
 
-            for layer_idx, pending_update in enumerate(pending_updates):
-                if pending_update is None:
-                    continue
-                is_fifo_swap = str(getattr(event, "event_type", None)).endswith("FIFO_SWAP")
-                if is_fifo_swap and self.frontend_cache_config.fifo_keep_topk > 0:
-                    demoted_slot = getattr(event, "demoted_slot", None)
-                    if demoted_slot is not None:
-                        cache_states[layer_idx].protect_topk_on_demotion_(
-                            demoted_slot=demoted_slot,
-                            keep_count=self.frontend_cache_config.fifo_keep_topk,
+                for layer_idx in range(self.aggregator.depth):
+                    pending = frame_pending_updates[b][layer_idx]
+                    if pending is None:
+                        continue
+                    is_fifo_swap = str(getattr(events[b], "event_type", None)).endswith("FIFO_SWAP")
+                    if is_fifo_swap and self.frontend_cache_config.fifo_keep_topk > 0:
+                        demoted_slot = getattr(events[b], "demoted_slot", None)
+                        if demoted_slot is not None:
+                            cache_states[b][layer_idx].protect_topk_on_demotion_(
+                                demoted_slot=demoted_slot,
+                                keep_count=self.frontend_cache_config.fifo_keep_topk,
+                            )
+                    cache_states[b][layer_idx].apply_keyframe_event_(events[b])
+                    if (
+                        frame_metadata_base is None
+                        or frame_metadata_base.frame_id.shape[1] != pending.importance_current.shape[1]
+                    ):
+                        frame_metadata_base = build_frame_token_metadata_base(
+                            depth=depth[b:b+1],
+                            depth_conf=depth_conf[b:b+1],
+                            pose_enc=camera_pose[b:b+1],
+                            image_size_hw=(img_h, img_w),
+                            patch_size=self.aggregator.patch_size,
+                            patch_start_idx=patch_start_idx,
+                            frame_id=i,
+                            keyframe_id=current_keyframe_id,
+                            slot_id=current_keyframe_id,
+                            anchor_slot=events[b].anchor_slot,
+                            total_tokens=pending.importance_current.shape[1],
+                            active_local_to_world=current_local_to_world,
                         )
-                cache_states[layer_idx].apply_keyframe_event_(event)
-                if (
-                    frame_metadata_base is None
-                    or frame_metadata_base.frame_id.shape[1] != pending_update.importance_current.shape[1]
-                ):
-                    frame_metadata_base = build_frame_token_metadata_base(
-                        depth=depth,
-                        depth_conf=depth_conf,
-                        pose_enc=camera_pose,
-                        image_size_hw=(img_h, img_w),
-                        patch_size=self.aggregator.patch_size,
-                        patch_start_idx=patch_start_idx,
-                        frame_id=i,
-                        keyframe_id=current_keyframe_id,
-                        slot_id=current_keyframe_id,
-                        anchor_slot=event.anchor_slot,
-                        total_tokens=pending_update.importance_current.shape[1],
-                        active_local_to_world=current_local_to_world,
+                    current_metadata = frame_metadata_base.with_importance(pending.importance_current)
+                    score = cache_states[b][layer_idx].commit_pending_update_(
+                        pending_update=pending,
+                        current_metadata=current_metadata,
+                        config=self.frontend_cache_config,
+                        intra_frame_keep_ratio=intra_frame_keep_ratio,
+                        attn_module=self.aggregator.global_blocks[layer_idx].attn,
                     )
-                current_metadata = frame_metadata_base.with_importance(pending_update.importance_current)
-                score = cache_states[layer_idx].commit_pending_update_(
-                    pending_update=pending_update,
-                    current_metadata=current_metadata,
-                    config=self.frontend_cache_config,
-                    intra_frame_keep_ratio=self.aggregator.intra_frame_keep_ratio,
-                    attn_module=self.aggregator.global_blocks[layer_idx].attn,
-                )
-                if score is not None:
-                    self.aggregator.last_scores[layer_idx] = score
-                pending_updates[layer_idx] = None
+                    if score is not None:
+                        self.aggregator.last_scores[layer_idx] = score
 
-            if export_packets and event.anchor_slot >= 0 and frame_metadata_base is not None:
-                patch_features = aggregated_tokens[-1][:, 0, patch_start_idx:]
-                keyframe_packets.append(
-                    KeyframePacket(
-                        frame_idx=i,
-                        keyframe_id=current_keyframe_id,
-                        anchor_slot=event.anchor_slot,
-                        pose_abs=camera_pose.detach().cpu(),
-                        local_to_world=current_local_to_world.detach().cpu(),
-                        patch_local_xyz=frame_metadata_base.slot_local_xyz[:, patch_start_idx:].detach().cpu(),
-                        patch_depth_conf=frame_metadata_base.depth_conf[:, patch_start_idx:].detach().cpu(),
-                        patch_features=patch_features.detach().cpu(),
-                    )
+            # ===== Per-batch camera head keyframe sync (Review-32) =====
+            for b in range(B):
+                past_key_values_camera[b] = self.camera_head.apply_keyframe_event(
+                    past_key_values_camera[b],
+                    events[b],
+                    num_cam_iters=self.camera_num_iters,
                 )
 
-            past_key_values_camera = self.camera_head.apply_keyframe_event(
-                past_key_values_camera,
-                event,
-                num_cam_iters=self.camera_num_iters,
-            )
+            # ===== Per-batch KeyframePacket (Review-33) =====
+            if export_packets:
+                for b in range(B):
+                    if events[b].anchor_slot >= 0:
+                        slot_id_b = keyframe_managers[b].get_active_keyframe_id()
+                        ltw_b = keyframe_managers[b].get_active_local_to_world()
+                        pkt_metadata = build_frame_token_metadata_base(
+                            depth=depth[b:b+1],
+                            depth_conf=depth_conf[b:b+1],
+                            pose_enc=camera_pose[b:b+1],
+                            image_size_hw=(img_h, img_w),
+                            patch_size=self.aggregator.patch_size,
+                            patch_start_idx=patch_start_idx,
+                            frame_id=i,
+                            keyframe_id=slot_id_b,
+                            slot_id=slot_id_b,
+                            anchor_slot=events[b].anchor_slot,
+                            total_tokens=(
+                                frame_pending_updates[b][-1].importance_current.shape[1]
+                                if frame_pending_updates[b][-1] is not None else 0
+                            ),
+                            active_local_to_world=ltw_b,
+                        )
+                        patch_features = aggregated_tokens[-1][b:b+1, :, patch_start_idx:]
+                        keyframe_packets.append(
+                            KeyframePacket(
+                                frame_idx=i,
+                                keyframe_id=slot_id_b,
+                                anchor_slot=events[b].anchor_slot,
+                                pose_abs=camera_pose[b].detach().cpu(),
+                                local_to_world=ltw_b.detach().cpu(),
+                                patch_local_xyz=pkt_metadata.slot_local_xyz[:, patch_start_idx:].detach().cpu(),
+                                patch_depth_conf=pkt_metadata.depth_conf[:, patch_start_idx:].detach().cpu(),
+                                patch_features=patch_features.detach().cpu(),
+                            )
+                        )
 
+            # ===== Build per-frame result =====
             res_gpu = {
                 "pts3d_in_other_view": pts3d,
                 "conf": pts3d_conf,
@@ -603,9 +678,9 @@ class OVGGT(nn.Module, PyTorchModelHubMixin):
                 if return_views:
                     processed_frames.append(self._maybe_move_dict_to_cpu(frame) if move_to_cpu else frame)
 
-            # Drop references that are no longer needed in this frame iteration.
+            # Review-33: variable names match new code
             del aggregated_tokens
-            del pending_updates
+            del frame_pending_updates
             del res_gpu
 
         return OVGGTOutput(
