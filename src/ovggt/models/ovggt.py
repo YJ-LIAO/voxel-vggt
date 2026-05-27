@@ -526,17 +526,17 @@ class OVGGT(nn.Module, PyTorchModelHubMixin):
             pts3d = pts3d[:, 0]
             pts3d_conf = pts3d_conf[:, 0]
 
-                if self.track_head is not None and current_query_points is not None:
-                    track_list, vis, conf = self.track_head(
-                        aggregated_tokens,
-                        images=images,
-                        patch_start_idx=patch_start_idx,
-                        query_points=current_query_points,
-                    )
-                    track = track_list[-1][:, 0]
-                    current_query_points = track
-                    vis = vis[:, 0]
-                    track_conf = conf[:, 0]
+            if self.track_head is not None and current_query_points is not None:
+                track_list, vis, conf = self.track_head(
+                    aggregated_tokens,
+                    images=images_all,
+                    patch_start_idx=patch_start_idx,
+                    query_points=current_query_points,
+                )
+                track = track_list[-1][:, 0]
+                current_query_points = track
+                vis = vis[:, 0]
+                track_conf = conf[:, 0]
 
             # ===== Per-batch keyframe events + cache commit =====
             events = []
