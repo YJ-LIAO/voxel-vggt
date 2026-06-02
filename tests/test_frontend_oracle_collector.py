@@ -1254,3 +1254,162 @@ class TestSelectOracleEvents:
         assert len(selected) == 4
         layers = [e["layer_id"] for e in selected]
         assert set(layers) == {0, 6, 12, 18}
+
+
+import unittest.mock as _mock
+from ovggt.training.frontend_oracle_collector import (
+    collect_oracle_events_from_sequence,
+    select_oracle_events as _real_select,
+)
+
+
+class TestTask6Wiring:
+    """Tests that select_oracle_events is wired into the collection pipeline."""
+
+    @staticmethod
+    def _make_event(idx, frame_id=0, layer_id=0, event_type="eviction"):
+        return {
+            "event_id": idx,
+            "frame_id": frame_id,
+            "layer_id": layer_id,
+            "event_type": event_type,
+            "candidate_subsets": [{"keep_indices": [0], "source": "test"}],
+        }
+
+    def test_select_oracle_events_called_with_stratified_args(self):
+        """collect_oracle_events_from_sequence should call select_oracle_events
+        with the stratified selection parameters."""
+        import ovggt.training.frontend_oracle_collector as mod
+
+        events = [self._make_event(i, frame_id=i % 3, layer_id=i, event_type="eviction") for i in range(10)]
+        for e in events:
+            e["candidate_subsets"] = [{"keep_indices": [0], "source": "test"}]
+
+        select_calls = []
+
+        def fake_select(candidates, max_events, max_events_per_frame, policy, layer_bucket_width):
+            select_calls.append({
+                "max_events": max_events,
+                "max_events_per_frame": max_events_per_frame,
+                "policy": policy,
+                "layer_bucket_width": layer_bucket_width,
+                "num_candidates": len(candidates),
+            })
+            return candidates[:max_events]
+
+        with _mock.patch.object(mod, "_run_frontend_with_probe") as fake_run, \
+             _mock.patch.object(mod, "measure_counterfactual_event", return_value=None), \
+             _mock.patch.object(mod, "select_oracle_events", side_effect=fake_select):
+
+            def populate_probes(model, frames, probe, **kwargs):
+                probe.events = [e for e in events if e["event_type"] == "eviction"]
+                dedup = kwargs.get("dedup_probe")
+                if dedup:
+                    dedup.events = [e for e in events if e["event_type"] == "dedup"]
+                fifo = kwargs.get("fifo_probe")
+                if fifo:
+                    fifo.events = []
+            fake_run.side_effect = populate_probes
+
+            result = collect_oracle_events_from_sequence(
+                model=None,
+                frames=[{"f": i} for i in range(12)],
+                device=torch.device("cpu"),
+                max_events=5,
+                num_samples=2,
+                oracle_window=4,
+                max_candidate_events_per_sequence=100,
+                max_events_per_frame=3,
+                event_selection_policy="stratified_round_robin",
+                stratified_layer_bucket_width=4,
+            )
+
+        assert len(select_calls) == 1
+        call = select_calls[0]
+        assert call["max_events"] == 5
+        assert call["max_events_per_frame"] == 3
+        assert call["policy"] == "stratified_round_robin"
+        assert call["layer_bucket_width"] == 4
+
+    def test_candidate_cap_used_for_probe_max_events(self):
+        """When max_candidate_events_per_sequence is set, probes should use it as cap."""
+        import ovggt.training.frontend_oracle_collector as mod
+
+        probe_max_events = []
+
+        class FakeProbe:
+            def __init__(self, **kwargs):
+                self.events = []
+                probe_max_events.append(kwargs.get("max_events"))
+
+        with _mock.patch.object(mod, "CounterfactualEvictionProbe", FakeProbe), \
+             _mock.patch.object(mod, "CounterfactualDedupProbe", FakeProbe), \
+             _mock.patch.object(mod, "CounterfactualFifoTopKProbe", FakeProbe), \
+             _mock.patch.object(mod, "_run_frontend_with_probe"), \
+             _mock.patch.object(mod, "select_oracle_events", return_value=[]):
+
+            collect_oracle_events_from_sequence(
+                model=None,
+                frames=[{"f": i} for i in range(12)],
+                device=torch.device("cpu"),
+                max_events=5,
+                num_samples=2,
+                oracle_window=4,
+                max_candidate_events_per_sequence=200,
+            )
+
+        # All three probes should get candidate_cap=200
+        assert probe_max_events == [200, 200, 200]
+
+    def test_candidate_cap_defaults_to_max_events(self):
+        """When max_candidate_events_per_sequence is None, probes use max_events."""
+        import ovggt.training.frontend_oracle_collector as mod
+
+        probe_max_events = []
+
+        class FakeProbe:
+            def __init__(self, **kwargs):
+                self.events = []
+                probe_max_events.append(kwargs.get("max_events"))
+
+        with _mock.patch.object(mod, "CounterfactualEvictionProbe", FakeProbe), \
+             _mock.patch.object(mod, "CounterfactualDedupProbe", FakeProbe), \
+             _mock.patch.object(mod, "CounterfactualFifoTopKProbe", FakeProbe), \
+             _mock.patch.object(mod, "_run_frontend_with_probe"), \
+             _mock.patch.object(mod, "select_oracle_events", return_value=[]):
+
+            collect_oracle_events_from_sequence(
+                model=None,
+                frames=[{"f": i} for i in range(12)],
+                device=torch.device("cpu"),
+                max_events=5,
+                num_samples=2,
+                oracle_window=4,
+            )
+
+        assert probe_max_events == [5, 5, 5]
+
+    def test_default_policy_is_stratified_round_robin(self):
+        """When event_selection_policy is not passed, default should be stratified_round_robin."""
+        import ovggt.training.frontend_oracle_collector as mod
+
+        select_calls = []
+
+        def fake_select(candidates, max_events, max_events_per_frame, policy, layer_bucket_width):
+            select_calls.append({"policy": policy})
+            return []
+
+        with _mock.patch.object(mod, "_run_frontend_with_probe"), \
+             _mock.patch.object(mod, "select_oracle_events", side_effect=fake_select):
+
+            collect_oracle_events_from_sequence(
+                model=None,
+                frames=[{"f": i} for i in range(12)],
+                device=torch.device("cpu"),
+                max_events=5,
+                num_samples=2,
+                oracle_window=4,
+            )
+
+        assert len(select_calls) == 1
+        assert select_calls[0]["policy"] == "stratified_round_robin"

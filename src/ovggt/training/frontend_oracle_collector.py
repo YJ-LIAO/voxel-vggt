@@ -56,6 +56,10 @@ class FrontendOracleCollectorConfig:
     max_events_per_sequence: int = 0
     num_views: int | None = None
     max_fetch_errors: int = 256
+    max_candidate_events_per_sequence: int | None = None
+    max_events_per_frame: int = 6
+    event_selection_policy: str = "stratified_round_robin"
+    stratified_layer_bucket_width: int = 6
     store_replay_payload: bool = False
 
 
@@ -1070,6 +1074,10 @@ def collect_oracle_shard_from_config(collector_cfg: FrontendOracleCollectorConfi
         f"subset_replay_batch_size={collector_cfg.subset_replay_batch_size} "
         f"layers_per_frame={collector_cfg.layers_per_frame} "
         f"max_events_per_sequence={collector_cfg.max_events_per_sequence} "
+        f"max_candidate_events_per_sequence={collector_cfg.max_candidate_events_per_sequence} "
+        f"max_events_per_frame={collector_cfg.max_events_per_frame} "
+        f"event_selection_policy={collector_cfg.event_selection_policy} "
+        f"stratified_layer_bucket_width={collector_cfg.stratified_layer_bucket_width} "
         f"store_replay_payload={collector_cfg.store_replay_payload}"
     )
     log_fn("loading config")
@@ -1146,6 +1154,10 @@ def collect_oracle_shard_from_config(collector_cfg: FrontendOracleCollectorConfi
         max_events_per_sequence=collector_cfg.max_events_per_sequence,
         num_layers=num_layers,
         max_fetch_errors=collector_cfg.max_fetch_errors,
+        max_candidate_events_per_sequence=collector_cfg.max_candidate_events_per_sequence,
+        max_events_per_frame=collector_cfg.max_events_per_frame,
+        event_selection_policy=collector_cfg.event_selection_policy,
+        stratified_layer_bucket_width=collector_cfg.stratified_layer_bucket_width,
         store_replay_payload=collector_cfg.store_replay_payload,
     )
     shard = dict(base_shard)
@@ -1178,6 +1190,10 @@ def collect_oracle_events_from_loader(
     max_events_per_sequence: int = 0,
     num_layers: int | None = None,
     max_fetch_errors: int = 256,
+    max_candidate_events_per_sequence: int | None = None,
+    max_events_per_frame: int = 6,
+    event_selection_policy: str = "stratified_round_robin",
+    stratified_layer_bucket_width: int = 6,
     store_replay_payload: bool = False,
 ) -> list[dict]:
     events: list[dict] = []
@@ -1252,6 +1268,10 @@ def collect_oracle_events_from_loader(
             layers_per_frame=layers_per_frame,
             num_layers=num_layers,
             on_event_collected=on_event_collected,
+            max_candidate_events_per_sequence=max_candidate_events_per_sequence,
+            max_events_per_frame=max_events_per_frame,
+            event_selection_policy=event_selection_policy,
+            stratified_layer_bucket_width=stratified_layer_bucket_width,
             store_replay_payload=store_replay_payload,
         )
         for event in batch_events:
@@ -1290,11 +1310,16 @@ def collect_oracle_events_from_sequence(
     layers_per_frame: int = 0,
     num_layers: int | None = None,
     on_event_collected: Callable[[dict], None] | None = None,
+    max_candidate_events_per_sequence: int | None = None,
+    max_events_per_frame: int = 6,
+    event_selection_policy: str = "stratified_round_robin",
+    stratified_layer_bucket_width: int = 6,
     store_replay_payload: bool = False,
 ) -> list[dict]:
     if max_events <= 0:
         return []
     frames = list(frames)
+    candidate_cap = int(max_candidate_events_per_sequence or max_events)
     if log_fn is not None:
         log_fn(f"{event_prefix}: running probe over {len(frames)} frames")
     probe = CounterfactualEvictionProbe(
@@ -1302,7 +1327,7 @@ def collect_oracle_events_from_sequence(
         oracle_window=oracle_window,
         seed=seed,
         event_prefix=event_prefix,
-        max_events=max_events,
+        max_events=candidate_cap,
         sequence_provenance=sequence_provenance,
         layers_per_frame=layers_per_frame,
         num_layers=num_layers,
@@ -1312,7 +1337,7 @@ def collect_oracle_events_from_sequence(
         oracle_window=oracle_window,
         seed=seed,
         event_prefix=f"{event_prefix}_dedup",
-        max_events=max_events,
+        max_events=candidate_cap,
         sequence_provenance=sequence_provenance,
         layers_per_frame=layers_per_frame,
         num_layers=num_layers,
@@ -1323,7 +1348,7 @@ def collect_oracle_events_from_sequence(
         oracle_window=oracle_window,
         seed=seed,
         event_prefix=f"{event_prefix}_fifo",
-        max_events=max_events,
+        max_events=candidate_cap,
         sequence_provenance=sequence_provenance,
         layers_per_frame=layers_per_frame,
         num_layers=num_layers,
@@ -1336,7 +1361,7 @@ def collect_oracle_events_from_sequence(
         event
         for event in probe.events
         if int(event["frame_id"]) + 1 < len(frames)
-    ][:max_events]
+    ][:candidate_cap]
     # Combine dedup and FIFO events into candidate_events
     dedup_events = [
         event
@@ -1350,7 +1375,13 @@ def collect_oracle_events_from_sequence(
     ]
     candidate_events.extend(dedup_events)
     candidate_events.extend(fifo_events)
-    candidate_events = candidate_events[:max_events]
+    candidate_events = select_oracle_events(
+        candidate_events,
+        max_events=max_events,
+        max_events_per_frame=max_events_per_frame,
+        policy=event_selection_policy,
+        layer_bucket_width=stratified_layer_bucket_width,
+    )
     if log_fn is not None:
         log_fn(
             f"{event_prefix}: probe captured {len(probe.events)} eviction, "
