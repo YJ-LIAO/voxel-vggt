@@ -1077,3 +1077,70 @@ class TestProbeCallbackSignatureCompatibility:
             scores=torch.randn(5), policy_keep_indices=torch.tensor([0, 1, 2, 3, 4]),
         )
         assert torch.equal(result.cpu(), torch.tensor([0, 1, 2]))
+
+
+from ovggt.training.frontend_oracle_collector import _sample_dedup_keep_indices
+
+class TestSampleDedupKeepIndices:
+    def test_returns_all_indices_when_n_le_cap(self):
+        group_indices = torch.tensor([3, 7, 11, 15])
+        dedup_scores = torch.tensor([0.1, 0.9, 0.5, 0.3])
+        gen = torch.Generator().manual_seed(0)
+        result, baseline = _sample_dedup_keep_indices(group_indices, dedup_scores, cap=8, generator=gen)
+        assert sorted(result) == [3, 7, 11, 15]
+        assert baseline is None
+
+    def test_caps_at_requested_size_when_n_gt_cap(self):
+        group_indices = torch.arange(50)
+        dedup_scores = torch.rand(50)
+        gen = torch.Generator().manual_seed(42)
+        result, baseline = _sample_dedup_keep_indices(group_indices, dedup_scores, cap=8, generator=gen)
+        assert len(result) <= 8
+        assert len(result) >= 4
+        for idx in result:
+            assert 0 <= idx < 50
+
+    def test_includes_extreme_scores(self):
+        group_indices = torch.arange(20)
+        dedup_scores = torch.arange(20, dtype=torch.float)
+        gen = torch.Generator().manual_seed(0)
+        result, _ = _sample_dedup_keep_indices(group_indices, dedup_scores, cap=4, generator=gen)
+        assert 19 in result
+        assert 0 in result
+
+    def test_deterministic_with_same_seed(self):
+        group_indices = torch.arange(100)
+        dedup_scores = torch.rand(100)
+        gen1 = torch.Generator().manual_seed(42)
+        gen2 = torch.Generator().manual_seed(42)
+        r1, _ = _sample_dedup_keep_indices(group_indices, dedup_scores, cap=8, generator=gen1)
+        r2, _ = _sample_dedup_keep_indices(group_indices, dedup_scores, cap=8, generator=gen2)
+        assert r1 == r2
+
+    def test_policy_baseline_single_token_in_group(self):
+        group_indices = torch.arange(20)
+        dedup_scores = torch.rand(20)
+        policy_keep = torch.tensor([5, 50, 60, 70, 80])
+        gen = torch.Generator().manual_seed(42)
+        result, baseline = _sample_dedup_keep_indices(group_indices, dedup_scores, cap=8, generator=gen, policy_keep_indices=policy_keep)
+        assert 5 in result
+        assert baseline is None
+
+    def test_policy_baseline_multiple_tokens_in_group(self):
+        group_indices = torch.arange(20)
+        dedup_scores = torch.rand(20)
+        policy_keep = torch.tensor([3, 7, 11, 50, 60, 70, 80])
+        gen = torch.Generator().manual_seed(42)
+        result, baseline = _sample_dedup_keep_indices(group_indices, dedup_scores, cap=8, generator=gen, policy_keep_indices=policy_keep)
+        assert baseline is not None
+        assert torch.equal(baseline, policy_keep.long())
+        assert len(result) + (1 if baseline is not None else 0) <= 8
+
+    def test_policy_baseline_zero_tokens_in_group_is_skipped(self):
+        group_indices = torch.arange(20)
+        dedup_scores = torch.rand(20)
+        policy_keep = torch.tensor([50, 60, 70, 80])
+        gen = torch.Generator().manual_seed(42)
+        result, baseline = _sample_dedup_keep_indices(group_indices, dedup_scores, cap=8, generator=gen, policy_keep_indices=policy_keep)
+        assert result == []
+        assert baseline is None

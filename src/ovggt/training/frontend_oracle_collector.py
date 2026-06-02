@@ -673,6 +673,59 @@ def deduplicate_keep_subsets(subsets: Sequence[torch.Tensor | Iterable[int]]) ->
     return unique_subsets
 
 
+def _sample_dedup_keep_indices(
+    group_indices: torch.Tensor,
+    dedup_scores: torch.Tensor,
+    cap: int,
+    generator: torch.Generator,
+    policy_keep_indices: torch.Tensor | None = None,
+) -> tuple[list[int], torch.Tensor | None]:
+    """Sample up to `cap` keep-one subset anchors from a voxel group.
+
+    Returns (chosen_token_indices, policy_baseline_or_None).
+    dedup_scores must be group-local: shape [N], same order as group_indices.
+    """
+    cap = int(cap)
+    n = int(group_indices.numel())
+    if cap <= 0 or n == 0:
+        return [], None
+    if n <= cap:
+        return [int(x) for x in group_indices.tolist()], None
+
+    chosen: set[int] = set()
+    policy_baseline: torch.Tensor | None = None
+
+    if policy_keep_indices is not None:
+        policy_set = {int(idx) for idx in policy_keep_indices.reshape(-1).tolist()}
+        policy_local = [
+            local_idx
+            for local_idx, token_idx in enumerate(group_indices.tolist())
+            if int(token_idx) in policy_set
+        ]
+        if len(policy_local) == 0:
+            return [], None
+        if len(policy_local) == 1:
+            chosen.add(int(policy_local[0]))
+        else:
+            policy_baseline = policy_keep_indices.reshape(-1).detach().cpu().long()
+
+    head = max(cap // 4, 1)
+    tail = max(cap // 4, 1)
+    _, top_idx = torch.topk(dedup_scores, k=min(head, n))
+    _, bot_idx = torch.topk(dedup_scores, k=min(tail, n), largest=False)
+    chosen.update(int(i) for i in top_idx.tolist())
+    chosen.update(int(i) for i in bot_idx.tolist())
+
+    reserved = 1 if policy_baseline is not None else 0
+    remaining_slots = max(cap - reserved - len(chosen), 0)
+    remaining = [i for i in range(n) if i not in chosen]
+    if remaining and remaining_slots > 0:
+        perm = torch.randperm(len(remaining), generator=generator)[:remaining_slots]
+        chosen.update(remaining[i] for i in perm.tolist())
+
+    return [int(group_indices[i].item()) for i in sorted(chosen)], policy_baseline
+
+
 def should_record_oracle_layer(
     layer_id: int,
     frame_id: int,
