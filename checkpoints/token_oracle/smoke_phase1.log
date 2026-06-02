@@ -1,0 +1,1110 @@
+[oracle 2026-06-02 23:07:26] collector start: config=config/train_frontend_finetune.yaml dataset_key=train_dataset output=checkpoints/token_oracle/smoke_phase1.pt device=cuda max_batches=10 max_events=4096 num_samples=8 oracle_window=4 high_budget_teacher=True subset_replay_batch_size=8 layers_per_frame=2 max_events_per_sequence=16 max_candidate_events_per_sequence=256 max_events_per_frame=6 event_selection_policy=stratified_round_robin stratified_layer_bucket_width=6 store_replay_payload=False
+[oracle 2026-06-02 23:07:26] loading config
+[oracle 2026-06-02 23:07:27] config loaded
+[oracle 2026-06-02 23:07:27] building frozen student model
+[oracle 2026-06-02 23:07:35] loading student checkpoint: /path/to/mount/lyj/voxel-vggt/ckpt/model.pt
+[oracle 2026-06-02 23:07:47] student model ready
+[oracle 2026-06-02 23:07:54] loading teacher checkpoint: /path/to/mount/lyj/voxel-vggt/ckpt/model.pt
+[oracle 2026-06-02 23:07:57] teacher model ready
+[oracle 2026-06-02 23:07:57] building dataloader: dataset_key=train_dataset batch_size=1 num_workers=0
+[oracle 2026-06-02 23:07:57] dataset expression length=4294
+Skipping 41069085
+Skipping 41098062
+Skipping 41098090
+Skipping 41098166
+Skipping 41125120
+Skipping 41125262
+Skipping 41125316
+Skipping 42897759
+Skipping 42898046
+Skipping 42899109
+Skipping 42899112
+Skipping 42899445
+Skipping 42899799
+Skipping 42899800
+Skipping 42899801
+Skipping 42899811
+Skipping 42899814
+Skipping 42899821
+Skipping 42899828
+Skipping 45261547
+Skipping 45261548
+Skipping 47331355
+Skipping 47331358
+Skipping 47331603
+Skipping 47331762
+Skipping 47331766
+Skipping 47331770
+Skipping 47331783
+Skipping 47331784
+Skipping 47331789
+Skipping 47331793
+Skipping 47331795
+Skipping 47331894
+Skipping 47331901
+Skipping 47332062
+Skipping 47332113
+Skipping 47333014
+Skipping 47333683
+Skipping 47333698
+Skipping 47333699
+Skipping 47333731
+Skipping 47333762
+Skipping 47333946
+Skipping 47333963
+Skipping 47333967
+Skipping 47333996
+Skipping 47334000
+Skipping 47334004
+Skipping 47334005
+Skipping 47334006
+Skipping 47334020
+Skipping 47334167
+Skipping 47334514
+Skipping 47334540
+Skipping 47334543
+Skipping 47334547
+Skipping 47334548
+Skipping 47334558
+Skipping 47334565
+Skipping 47334592
+Skipping 47334646
+Skipping 47334693
+Skipping 47334694
+Skipping 47334697
+Skipping 47334698
+Skipping 47334735
+Skipping 47334737
+Skipping 47334809
+Skipping 47334810
+Skipping 47334817
+Skipping 47429650
+Skipping 47429665
+Skipping 47429686
+Skipping 47429689
+Skipping 47429690
+Skipping 47429692
+Skipping 47429701
+Skipping 47429941
+Skipping 47429947
+Skipping 47429955
+Skipping 47429957
+Skipping 47430058
+Skipping 47430088
+Skipping 47430094
+Skipping 47430100
+Skipping 47430103
+Skipping 47430107
+Skipping 47430111
+Skipping 47430114
+Skipping 47430130
+Skipping 47430132
+Skipping 47430154
+Skipping 47430162
+Skipping 47430165
+Skipping 47430168
+Skipping 47430169
+Skipping 47430181
+Skipping 47430184
+Skipping 47430193
+Skipping 47430202
+Skipping 47430213
+Skipping 47430382
+Skipping 47430385
+Skipping 47430389
+Skipping 47430392
+Skipping 47430395
+Skipping 47430401
+Skipping 47430402
+Skipping 47430496
+Skipping 47430514
+Skipping 47430518
+Skipping 47430521
+Skipping 47430538
+Skipping 47430539
+Skipping 47430543
+Skipping 47430552
+Skipping 47430566
+Skipping 47430568
+Skipping 47430585
+Skipping 47430588
+Skipping 47430629
+Skipping 47430633
+Skipping 47430636
+Skipping 47430637
+Skipping 47430651
+Skipping 47430652
+Skipping 47430654
+Skipping 47430655
+Skipping 47430657
+Skipping 47430658
+Skipping 47430661
+Skipping 47430685
+Skipping 47430688
+Skipping 47430689
+Skipping 47430692
+Skipping 47430699
+Skipping 47430731
+Skipping 47430751
+Skipping 47430767
+Skipping 47430773
+Skipping 47430776
+Skipping 47430777
+Skipping 47430778
+Skipping 47430780
+Skipping 47430784
+Skipping 47430789
+Skipping 47430791
+Skipping 47430850
+Skipping 47430900
+Skipping 47431078
+Skipping 47431082
+Skipping 47431083
+Skipping 47431088
+Skipping 47431110
+Skipping 47431113
+Skipping 47431114
+Skipping 47431120
+Skipping 47431123
+Skipping 47431136
+Skipping 47431138
+Skipping 47431146
+Skipping 47431148
+Skipping 47431153
+Skipping 47431158
+Skipping 47431160
+Skipping 47431166
+Skipping 47431169
+Skipping 47431170
+Skipping 47431173
+Skipping 47431185
+Skipping 47431198
+Skipping 47431200
+Skipping 47431201
+Skipping 47895319
+Skipping 47895328
+Skipping 47895614
+Skipping 47895653
+Skipping 47895656
+Skipping 47895661
+Skipping 47895666
+Skipping 47895672
+Skipping 47895678
+Skipping 47895679
+Skipping 47895701
+Skipping 47895702
+Skipping 47895710
+Skipping 47895713
+Skipping 47895718
+Skipping 47895719
+Skipping 47895859
+Skipping 47895931
+Skipping 47895932
+Skipping 47895941
+Skipping 47895944
+Skipping 47895951
+Skipping 47895962
+Skipping 47895967
+Skipping 47895972
+Skipping 47895975
+Skipping 47895976
+Skipping 47895978
+Skipping 47895983
+Skipping 48017818
+Skipping 48017967
+Skipping 48017969
+Skipping 48017972
+Skipping 48017974
+Skipping 48017977
+Skipping 48017981
+Skipping 48017986
+Skipping 48018003
+Skipping 48018005
+Skipping 48018010
+Skipping 48018013
+Skipping 48018015
+Skipping 48018023
+Skipping 48018025
+Skipping 48018126
+Skipping 48018151
+Skipping 48018165
+Skipping 48018182
+Skipping 48018187
+Skipping 48018188
+Skipping 48018190
+Skipping 48018191
+Skipping 48018196
+Skipping 48018203
+Skipping 48018211
+Skipping 48018213
+Skipping 48018233
+Skipping 48018238
+Skipping 48018241
+Skipping 48018243
+Skipping 48018245
+Skipping 48018407
+Skipping 48018411
+Skipping 48018415
+Skipping 48018440
+Skipping 48018445
+Skipping 48018451
+Skipping 48018456
+Skipping 48018468
+Skipping 48018471
+Skipping 48018473
+Skipping 48018484
+Skipping 48018500
+Skipping 48018503
+Skipping 48018506
+Skipping 48018508
+Skipping 48018509
+Skipping 48018512
+Skipping 48018516
+Skipping 48018641
+Skipping 48018644
+Skipping 48018693
+Skipping 48018702
+Skipping 48018704
+Skipping 48018705
+Skipping 48018708
+Skipping 48018711
+Skipping 48018721
+Skipping 48018722
+Skipping 48018778
+Skipping 48018887
+Skipping 48018895
+Skipping 48018927
+Skipping 48018932
+Skipping 48018935
+Skipping 48018937
+Skipping 42445060
+Skipping 42445584
+Skipping 42447214
+Skipping 42898160
+Skipping 42898560
+Skipping 42898577
+Skipping 42898596
+Skipping 42899126
+Skipping 43649384
+Skipping 43896055
+Skipping 45663064
+Skipping 45663397
+Skipping 45663398
+Skipping 47115166
+Skipping 47115621
+Skipping 47204350
+Skipping 47331931
+Skipping 47333239
+Skipping 47333815
+Skipping 47334808
+Skipping 47429670
+Skipping 47429682
+Skipping 47429688
+Skipping 47430065
+Skipping 47430068
+Skipping 47430092
+Skipping 47430127
+Skipping 47430519
+Skipping 47430530
+Skipping 47430531
+Skipping 47430683
+Skipping 47430800
+Skipping 47430928
+Skipping 47431071
+Skipping 47431072
+Skipping 47431081
+Skipping 47431090
+Skipping 47431106
+Skipping 47431155
+Skipping 47670324
+Skipping 47895720
+Skipping 48018069
+Skipping 48018250
+  0%|          | 0/1513 [00:00<?, ?it/s]  2%|▏         | 26/1513 [00:00<00:05, 254.14it/s]  3%|▎         | 52/1513 [00:00<00:05, 256.19it/s]  5%|▌         | 79/1513 [00:00<00:05, 261.47it/s]  7%|▋         | 106/1513 [00:00<00:05, 243.70it/s]  9%|▊         | 131/1513 [00:00<00:05, 244.34it/s] 10%|█         | 156/1513 [00:00<00:05, 245.93it/s] 12%|█▏        | 181/1513 [00:00<00:05, 231.27it/s] 14%|█▍        | 209/1513 [00:00<00:05, 244.10it/s] 16%|█▌        | 235/1513 [00:00<00:05, 246.90it/s] 17%|█▋        | 260/1513 [00:01<00:05, 241.61it/s] 19%|█▉        | 288/1513 [00:01<00:04, 250.91it/s] 21%|██        | 316/1513 [00:01<00:04, 259.06it/s] 23%|██▎       | 343/1513 [00:01<00:04, 261.80it/s] 25%|██▍       | 373/1513 [00:01<00:04, 269.11it/s] 26%|██▋       | 400/1513 [00:01<00:04, 268.89it/s] 28%|██▊       | 428/1513 [00:01<00:04, 266.54it/s] 30%|███       | 456/1513 [00:01<00:03, 269.33it/s] 32%|███▏      | 486/1513 [00:01<00:03, 278.13it/s] 34%|███▍      | 516/1513 [00:01<00:03, 283.24it/s] 36%|███▌      | 545/1513 [00:02<00:03, 269.69it/s] 38%|███▊      | 573/1513 [00:02<00:03, 268.52it/s] 40%|███▉      | 605/1513 [00:02<00:03, 280.31it/s] 42%|████▏     | 634/1513 [00:02<00:03, 275.49it/s] 44%|████▍     | 664/1513 [00:02<00:03, 282.09it/s] 46%|████▌     | 694/1513 [00:02<00:02, 283.17it/s] 48%|████▊     | 723/1513 [00:02<00:03, 258.38it/s] 50%|████▉     | 753/1513 [00:02<00:02, 269.26it/s] 52%|█████▏    | 781/1513 [00:02<00:02, 263.31it/s] 53%|█████▎    | 809/1513 [00:03<00:02, 267.04it/s] 55%|█████▌    | 839/1513 [00:03<00:02, 272.31it/s] 57%|█████▋    | 867/1513 [00:03<00:02, 266.75it/s] 59%|█████▉    | 894/1513 [00:03<00:02, 257.11it/s] 61%|██████    | 920/1513 [00:03<00:02, 255.21it/s] 63%|██████▎   | 948/1513 [00:03<00:02, 261.47it/s] 64%|██████▍   | 975/1513 [00:03<00:02, 256.66it/s] 66%|██████▌   | 1001/1513 [00:03<00:02, 254.36it/s] 68%|██████▊   | 1029/1513 [00:03<00:01, 259.50it/s] 70%|██████▉   | 1058/1513 [00:04<00:01, 263.26it/s] 72%|███████▏  | 1085/1513 [00:04<00:01, 260.78it/s] 74%|███████▍  | 1116/1513 [00:04<00:01, 273.72it/s] 76%|███████▌  | 1144/1513 [00:04<00:01, 265.78it/s] 78%|███████▊  | 1173/1513 [00:04<00:01, 271.20it/s] 79%|███████▉  | 1201/1513 [00:04<00:01, 268.93it/s] 81%|████████  | 1228/1513 [00:04<00:01, 268.63it/s] 83%|████████▎ | 1255/1513 [00:04<00:00, 265.37it/s] 85%|████████▍ | 1282/1513 [00:04<00:00, 261.30it/s] 87%|████████▋ | 1313/1513 [00:04<00:00, 274.39it/s] 89%|████████▉ | 1345/1513 [00:05<00:00, 284.87it/s] 91%|█████████ | 1374/1513 [00:05<00:00, 266.33it/s] 93%|█████████▎| 1401/1513 [00:05<00:00, 266.29it/s] 95%|█████████▍| 1434/1513 [00:05<00:00, 282.22it/s] 97%|█████████▋| 1463/1513 [00:05<00:00, 281.54it/s] 99%|█████████▊| 1492/1513 [00:05<00:00, 268.26it/s]100%|██████████| 1513/1513 [00:05<00:00, 264.17it/s]
+Skipping ai_011_010/cam_00
+Skipping ai_015_007/cam_00
+Skipping ai_047_008/cam_00
+Skipping ai_054_006/cam_01
+  0%|          | 0/487 [00:00<?, ?it/s]  1%|          | 3/487 [00:00<00:18, 25.62it/s]  8%|▊         | 38/487 [00:00<00:02, 200.76it/s] 16%|█▌        | 78/487 [00:00<00:01, 287.04it/s] 23%|██▎       | 112/487 [00:00<00:01, 291.13it/s] 31%|███▏      | 153/487 [00:00<00:01, 331.02it/s] 38%|███▊      | 187/487 [00:00<00:00, 318.75it/s] 45%|████▌     | 220/487 [00:01<00:03, 73.15it/s]  52%|█████▏    | 252/487 [00:01<00:02, 94.97it/s] 59%|█████▉    | 288/487 [00:02<00:01, 123.20it/s] 65%|██████▌   | 317/487 [00:02<00:01, 145.99it/s] 73%|███████▎  | 356/487 [00:02<00:00, 185.77it/s] 79%|███████▉  | 387/487 [00:02<00:00, 134.09it/s] 84%|████████▍ | 411/487 [00:02<00:00, 145.20it/s] 93%|█████████▎| 451/487 [00:02<00:00, 182.54it/s] 98%|█████████▊| 477/487 [00:03<00:00, 172.26it/s]100%|██████████| 487/487 [00:03<00:00, 154.58it/s]
+  0%|          | 0/5914 [00:00<?, ?it/s]  2%|▏         | 104/5914 [00:00<00:05, 1039.48it/s]  4%|▎         | 214/5914 [00:00<00:05, 1072.74it/s]  5%|▌         | 322/5914 [00:00<00:09, 620.41it/s]   7%|▋         | 438/5914 [00:00<00:07, 766.30it/s]  9%|▉         | 555/5914 [00:00<00:06, 878.21it/s] 11%|█▏        | 671/5914 [00:00<00:05, 958.21it/s] 13%|█▎        | 786/5914 [00:00<00:05, 1011.70it/s] 15%|█▌        | 895/5914 [00:00<00:04, 1029.07it/s] 17%|█▋        | 1009/5914 [00:01<00:04, 1060.44it/s] 19%|█▉        | 1122/5914 [00:01<00:04, 1080.04it/s] 21%|██        | 1235/5914 [00:01<00:04, 1093.00it/s] 23%|██▎       | 1347/5914 [00:01<00:04, 1099.79it/s] 25%|██▍       | 1462/5914 [00:01<00:03, 1113.49it/s] 27%|██▋       | 1576/5914 [00:01<00:03, 1121.24it/s] 29%|██▊       | 1689/5914 [00:01<00:03, 1118.65it/s] 30%|███       | 1802/5914 [00:01<00:03, 1108.76it/s] 32%|███▏      | 1916/5914 [00:01<00:03, 1117.69it/s] 34%|███▍      | 2029/5914 [00:01<00:03, 1085.29it/s] 36%|███▌      | 2142/5914 [00:02<00:03, 1096.62it/s] 38%|███▊      | 2255/5914 [00:02<00:03, 1104.10it/s] 40%|████      | 2368/5914 [00:02<00:03, 1110.85it/s] 42%|████▏     | 2480/5914 [00:02<00:03, 1111.86it/s] 44%|████▍     | 2593/5914 [00:02<00:02, 1117.18it/s] 46%|████▌     | 2705/5914 [00:02<00:02, 1113.44it/s] 48%|████▊     | 2817/5914 [00:02<00:02, 1114.40it/s] 50%|████▉     | 2931/5914 [00:02<00:02, 1119.16it/s] 51%|█████▏    | 3043/5914 [00:02<00:02, 1118.28it/s] 53%|█████▎    | 3155/5914 [00:02<00:02, 1117.54it/s] 55%|█████▌    | 3269/5914 [00:03<00:02, 1122.34it/s] 57%|█████▋    | 3382/5914 [00:03<00:02, 1118.92it/s] 59%|█████▉    | 3496/5914 [00:03<00:02, 1122.94it/s] 61%|██████    | 3611/5914 [00:03<00:02, 1130.96it/s] 63%|██████▎   | 3727/5914 [00:03<00:01, 1137.37it/s] 65%|██████▍   | 3841/5914 [00:03<00:01, 1133.43it/s] 67%|██████▋   | 3955/5914 [00:03<00:01, 1131.25it/s] 69%|██████▉   | 4069/5914 [00:03<00:01, 1132.33it/s] 71%|███████   | 4183/5914 [00:03<00:01, 1129.27it/s] 73%|███████▎  | 4296/5914 [00:03<00:01, 1128.01it/s] 75%|███████▍  | 4412/5914 [00:04<00:01, 1135.84it/s] 77%|███████▋  | 4527/5914 [00:04<00:01, 1137.45it/s] 78%|███████▊  | 4641/5914 [00:04<00:01, 1137.35it/s] 80%|████████  | 4756/5914 [00:04<00:01, 1140.34it/s] 82%|████████▏ | 4871/5914 [00:04<00:00, 1088.36it/s] 84%|████████▍ | 4981/5914 [00:04<00:00, 1081.27it/s] 86%|████████▌ | 5094/5914 [00:04<00:00, 1093.11it/s] 88%|████████▊ | 5206/5914 [00:04<00:00, 1098.72it/s] 90%|████████▉ | 5320/5914 [00:04<00:00, 1109.93it/s] 92%|█████████▏| 5435/5914 [00:05<00:00, 1120.52it/s] 94%|█████████▍| 5552/5914 [00:05<00:00, 1134.44it/s] 96%|█████████▌| 5668/5914 [00:05<00:00, 1140.90it/s] 98%|█████████▊| 5783/5914 [00:05<00:00, 829.77it/s] 100%|█████████▉| 5898/5914 [00:05<00:00, 903.73it/s]100%|██████████| 5914/5914 [00:05<00:00, 1062.76it/s]
+  0%|          | 0/37 [00:00<?, ?it/s]Skipping 0027
+Skipping 0022
+100%|██████████| 37/37 [00:00<00:00, 1218.47it/s]
+  0%|          | 0/119 [00:00<?, ?it/s]100%|██████████| 119/119 [00:00<00:00, 1947.98it/s]
+  0%|          | 0/33 [00:00<?, ?it/s]100%|██████████| 33/33 [00:00<00:00, 625.87it/s]
+[oracle 2026-06-02 23:09:09] dataloader ready: dataset_len=36750 sampler_len=36750
+[oracle 2026-06-02 23:09:09] starting oracle event collection
+[oracle 2026-06-02 23:09:10] batch 1/10 start: events_so_far=0
+[oracle 2026-06-02 23:09:10] batch 1/10 provenance: sequences=1 first=train_dataset/WildRGBD/stuffed_toy/scenes/scene_458:...:stuffed_toy/scenes/scene_458 frames=24
+[oracle 2026-06-02 23:09:11] batch0: running probe over 24 frames
+[oracle 2026-06-02 23:09:20] batch0: probe captured 0 eviction, 136 dedup, 0 fifo candidates, 16 total have future frames
+[oracle 2026-06-02 23:09:20] timing phase=probe event_prefix=batch0 frames=24 eviction=0 dedup=136 fifo=0 candidate_events=16 elapsed_sec=9.092 cuda_allocated_mb=9323.0 cuda_reserved_mb=10944.0
+[oracle 2026-06-02 23:09:20] batch0: running high-budget teacher for 24 frames
+[oracle 2026-06-02 23:09:24] batch0: teacher outputs ready
+[oracle 2026-06-02 23:09:24] timing phase=teacher event_prefix=batch0 frames=24 elapsed_sec=4.369 cuda_allocated_mb=9402.1 cuda_reserved_mb=25294.0
+[oracle 2026-06-02 23:09:24] batch0: measuring event 1/16 id=batch0_dedup:b0:f0:l0:voxel16773119:e0 layer=0 frame=0 subsets=8 future_frames=4
+[oracle 2026-06-02 23:09:24] batch0_dedup:b0:f0:l0:voxel16773119:e0: replay subsets 1-8/8 batch=8 frames=0:5
+[oracle 2026-06-02 23:09:33] timing phase=replay event_id=batch0_dedup:b0:f0:l0:voxel16773119:e0 event_type=dedup layer_id=0 frame_id=0 num_subsets=8 chunk_size=8 chunk=1-8 stop=5 elapsed_sec=9.136 cuda_allocated_mb=9819.7 cuda_reserved_mb=28564.0
+[oracle 2026-06-02 23:09:33] timing phase=event event_id=batch0_dedup:b0:f0:l0:voxel16773119:e0 event_type=dedup layer_id=0 frame_id=0 num_subsets=8 measured_subsets=8 replay_sec=9.136 target_sec=0.037 loss_sec=0.017 elapsed_sec=9.195 cuda_allocated_mb=9819.7 cuda_reserved_mb=28564.0
+[oracle 2026-06-02 23:09:33] batch0: measuring event 2/16 id=batch0_dedup:b0:f0:l12:voxel-1:e1 layer=12 frame=0 subsets=8 future_frames=4
+[oracle 2026-06-02 23:09:33] batch0_dedup:b0:f0:l12:voxel-1:e1: replay subsets 1-8/8 batch=8 frames=0:5
+[oracle 2026-06-02 23:09:42] timing phase=replay event_id=batch0_dedup:b0:f0:l12:voxel-1:e1 event_type=dedup layer_id=12 frame_id=0 num_subsets=8 chunk_size=8 chunk=1-8 stop=5 elapsed_sec=8.940 cuda_allocated_mb=9819.2 cuda_reserved_mb=28564.0
+[oracle 2026-06-02 23:09:42] timing phase=event event_id=batch0_dedup:b0:f0:l12:voxel-1:e1 event_type=dedup layer_id=12 frame_id=0 num_subsets=8 measured_subsets=8 replay_sec=8.940 target_sec=0.037 loss_sec=0.014 elapsed_sec=8.996 cuda_allocated_mb=9819.2 cuda_reserved_mb=28564.0
+[oracle 2026-06-02 23:09:42] batch0: measuring event 3/16 id=batch0_dedup:b0:f0:l12:voxel0:e2 layer=12 frame=0 subsets=8 future_frames=4
+[oracle 2026-06-02 23:09:42] batch0_dedup:b0:f0:l12:voxel0:e2: replay subsets 1-8/8 batch=8 frames=0:5
+[oracle 2026-06-02 23:09:51] timing phase=replay event_id=batch0_dedup:b0:f0:l12:voxel0:e2 event_type=dedup layer_id=12 frame_id=0 num_subsets=8 chunk_size=8 chunk=1-8 stop=5 elapsed_sec=8.930 cuda_allocated_mb=9819.6 cuda_reserved_mb=28564.0
+[oracle 2026-06-02 23:09:51] timing phase=event event_id=batch0_dedup:b0:f0:l12:voxel0:e2 event_type=dedup layer_id=12 frame_id=0 num_subsets=8 measured_subsets=8 replay_sec=8.930 target_sec=0.037 loss_sec=0.014 elapsed_sec=8.986 cuda_allocated_mb=9819.6 cuda_reserved_mb=28564.0
+[oracle 2026-06-02 23:09:51] batch0: measuring event 4/16 id=batch0_dedup:b0:f0:l12:voxel16773119:e3 layer=12 frame=0 subsets=8 future_frames=4
+[oracle 2026-06-02 23:09:51] batch0_dedup:b0:f0:l12:voxel16773119:e3: replay subsets 1-8/8 batch=8 frames=0:5
+[oracle 2026-06-02 23:10:00] timing phase=replay event_id=batch0_dedup:b0:f0:l12:voxel16773119:e3 event_type=dedup layer_id=12 frame_id=0 num_subsets=8 chunk_size=8 chunk=1-8 stop=5 elapsed_sec=9.179 cuda_allocated_mb=9820.9 cuda_reserved_mb=28564.0
+[oracle 2026-06-02 23:10:00] timing phase=event event_id=batch0_dedup:b0:f0:l12:voxel16773119:e3 event_type=dedup layer_id=12 frame_id=0 num_subsets=8 measured_subsets=8 replay_sec=9.179 target_sec=0.038 loss_sec=0.014 elapsed_sec=9.237 cuda_allocated_mb=9820.9 cuda_reserved_mb=28564.0
+[oracle 2026-06-02 23:10:00] batch0: measuring event 5/16 id=batch0_dedup:b0:f1:l1:voxel-1:e4 layer=1 frame=1 subsets=8 future_frames=4
+[oracle 2026-06-02 23:10:00] batch0_dedup:b0:f1:l1:voxel-1:e4: replay subsets 1-8/8 batch=8 frames=0:6
+[oracle 2026-06-02 23:10:12] timing phase=replay event_id=batch0_dedup:b0:f1:l1:voxel-1:e4 event_type=dedup layer_id=1 frame_id=1 num_subsets=8 chunk_size=8 chunk=1-8 stop=6 elapsed_sec=11.162 cuda_allocated_mb=9904.0 cuda_reserved_mb=28578.0
+[oracle 2026-06-02 23:10:12] timing phase=event event_id=batch0_dedup:b0:f1:l1:voxel-1:e4 event_type=dedup layer_id=1 frame_id=1 num_subsets=8 measured_subsets=8 replay_sec=11.162 target_sec=0.038 loss_sec=0.014 elapsed_sec=11.221 cuda_allocated_mb=9904.0 cuda_reserved_mb=28578.0
+[oracle 2026-06-02 23:10:12] batch0: measuring event 6/16 id=batch0_dedup:b0:f1:l1:voxel0:e5 layer=1 frame=1 subsets=8 future_frames=4
+[oracle 2026-06-02 23:10:12] batch0_dedup:b0:f1:l1:voxel0:e5: replay subsets 1-8/8 batch=8 frames=0:6
+[oracle 2026-06-02 23:10:23] timing phase=replay event_id=batch0_dedup:b0:f1:l1:voxel0:e5 event_type=dedup layer_id=1 frame_id=1 num_subsets=8 chunk_size=8 chunk=1-8 stop=6 elapsed_sec=11.183 cuda_allocated_mb=9905.7 cuda_reserved_mb=28578.0
+[oracle 2026-06-02 23:10:23] timing phase=event event_id=batch0_dedup:b0:f1:l1:voxel0:e5 event_type=dedup layer_id=1 frame_id=1 num_subsets=8 measured_subsets=8 replay_sec=11.183 target_sec=0.039 loss_sec=0.014 elapsed_sec=11.243 cuda_allocated_mb=9905.7 cuda_reserved_mb=28578.0
+[oracle 2026-06-02 23:10:23] batch0: measuring event 7/16 id=batch0_dedup:b0:f1:l1:voxel16773119:e6 layer=1 frame=1 subsets=8 future_frames=4
+[oracle 2026-06-02 23:10:23] batch0_dedup:b0:f1:l1:voxel16773119:e6: replay subsets 1-8/8 batch=8 frames=0:6
+[oracle 2026-06-02 23:10:34] timing phase=replay event_id=batch0_dedup:b0:f1:l1:voxel16773119:e6 event_type=dedup layer_id=1 frame_id=1 num_subsets=8 chunk_size=8 chunk=1-8 stop=6 elapsed_sec=11.144 cuda_allocated_mb=9904.3 cuda_reserved_mb=28578.0
+[oracle 2026-06-02 23:10:34] timing phase=event event_id=batch0_dedup:b0:f1:l1:voxel16773119:e6 event_type=dedup layer_id=1 frame_id=1 num_subsets=8 measured_subsets=8 replay_sec=11.144 target_sec=0.038 loss_sec=0.014 elapsed_sec=11.202 cuda_allocated_mb=9904.3 cuda_reserved_mb=28578.0
+[oracle 2026-06-02 23:10:34] batch0: measuring event 8/16 id=batch0_dedup:b0:f1:l13:voxel-1:e7 layer=13 frame=1 subsets=8 future_frames=4
+[oracle 2026-06-02 23:10:34] batch0_dedup:b0:f1:l13:voxel-1:e7: replay subsets 1-8/8 batch=8 frames=0:6
+[oracle 2026-06-02 23:10:45] timing phase=replay event_id=batch0_dedup:b0:f1:l13:voxel-1:e7 event_type=dedup layer_id=13 frame_id=1 num_subsets=8 chunk_size=8 chunk=1-8 stop=6 elapsed_sec=10.852 cuda_allocated_mb=9903.8 cuda_reserved_mb=28578.0
+[oracle 2026-06-02 23:10:45] timing phase=event event_id=batch0_dedup:b0:f1:l13:voxel-1:e7 event_type=dedup layer_id=13 frame_id=1 num_subsets=8 measured_subsets=8 replay_sec=10.852 target_sec=0.038 loss_sec=0.014 elapsed_sec=10.910 cuda_allocated_mb=9903.8 cuda_reserved_mb=28578.0
+[oracle 2026-06-02 23:10:45] batch0: measuring event 9/16 id=batch0_dedup:b0:f1:l13:voxel0:e8 layer=13 frame=1 subsets=8 future_frames=4
+[oracle 2026-06-02 23:10:45] batch0_dedup:b0:f1:l13:voxel0:e8: replay subsets 1-8/8 batch=8 frames=0:6
+[oracle 2026-06-02 23:10:56] timing phase=replay event_id=batch0_dedup:b0:f1:l13:voxel0:e8 event_type=dedup layer_id=13 frame_id=1 num_subsets=8 chunk_size=8 chunk=1-8 stop=6 elapsed_sec=11.058 cuda_allocated_mb=9905.1 cuda_reserved_mb=28578.0
+[oracle 2026-06-02 23:10:56] timing phase=event event_id=batch0_dedup:b0:f1:l13:voxel0:e8 event_type=dedup layer_id=13 frame_id=1 num_subsets=8 measured_subsets=8 replay_sec=11.058 target_sec=0.037 loss_sec=0.014 elapsed_sec=11.116 cuda_allocated_mb=9905.1 cuda_reserved_mb=28578.0
+[oracle 2026-06-02 23:10:56] batch0: measuring event 10/16 id=batch0_dedup:b0:f1:l13:voxel16773119:e9 layer=13 frame=1 subsets=8 future_frames=4
+[oracle 2026-06-02 23:10:56] batch0_dedup:b0:f1:l13:voxel16773119:e9: replay subsets 1-8/8 batch=8 frames=0:6
+[oracle 2026-06-02 23:11:07] timing phase=replay event_id=batch0_dedup:b0:f1:l13:voxel16773119:e9 event_type=dedup layer_id=13 frame_id=1 num_subsets=8 chunk_size=8 chunk=1-8 stop=6 elapsed_sec=11.073 cuda_allocated_mb=9905.0 cuda_reserved_mb=28578.0
+[oracle 2026-06-02 23:11:07] timing phase=event event_id=batch0_dedup:b0:f1:l13:voxel16773119:e9 event_type=dedup layer_id=13 frame_id=1 num_subsets=8 measured_subsets=8 replay_sec=11.073 target_sec=0.038 loss_sec=0.014 elapsed_sec=11.131 cuda_allocated_mb=9905.0 cuda_reserved_mb=28578.0
+[oracle 2026-06-02 23:11:07] batch0: measuring event 11/16 id=batch0_dedup:b0:f2:l2:voxel-1:e10 layer=2 frame=2 subsets=8 future_frames=4
+[oracle 2026-06-02 23:11:07] batch0_dedup:b0:f2:l2:voxel-1:e10: replay subsets 1-8/8 batch=8 frames=0:7
+[oracle 2026-06-02 23:11:20] timing phase=replay event_id=batch0_dedup:b0:f2:l2:voxel-1:e10 event_type=dedup layer_id=2 frame_id=2 num_subsets=8 chunk_size=8 chunk=1-8 stop=7 elapsed_sec=12.801 cuda_allocated_mb=9986.8 cuda_reserved_mb=28578.0
+[oracle 2026-06-02 23:11:20] timing phase=event event_id=batch0_dedup:b0:f2:l2:voxel-1:e10 event_type=dedup layer_id=2 frame_id=2 num_subsets=8 measured_subsets=8 replay_sec=12.801 target_sec=0.038 loss_sec=0.014 elapsed_sec=12.861 cuda_allocated_mb=9986.8 cuda_reserved_mb=28578.0
+[oracle 2026-06-02 23:11:20] batch0: measuring event 12/16 id=batch0_dedup:b0:f2:l2:voxel0:e11 layer=2 frame=2 subsets=8 future_frames=4
+[oracle 2026-06-02 23:11:20] batch0_dedup:b0:f2:l2:voxel0:e11: replay subsets 1-8/8 batch=8 frames=0:7
+[oracle 2026-06-02 23:11:33] timing phase=replay event_id=batch0_dedup:b0:f2:l2:voxel0:e11 event_type=dedup layer_id=2 frame_id=2 num_subsets=8 chunk_size=8 chunk=1-8 stop=7 elapsed_sec=12.775 cuda_allocated_mb=9987.0 cuda_reserved_mb=28578.0
+[oracle 2026-06-02 23:11:33] timing phase=event event_id=batch0_dedup:b0:f2:l2:voxel0:e11 event_type=dedup layer_id=2 frame_id=2 num_subsets=8 measured_subsets=8 replay_sec=12.775 target_sec=0.038 loss_sec=0.014 elapsed_sec=12.834 cuda_allocated_mb=9987.0 cuda_reserved_mb=28578.0
+[oracle 2026-06-02 23:11:33] batch0: measuring event 13/16 id=batch0_dedup:b0:f2:l2:voxel16773119:e12 layer=2 frame=2 subsets=8 future_frames=4
+[oracle 2026-06-02 23:11:33] batch0_dedup:b0:f2:l2:voxel16773119:e12: replay subsets 1-8/8 batch=8 frames=0:7
+[oracle 2026-06-02 23:11:46] timing phase=replay event_id=batch0_dedup:b0:f2:l2:voxel16773119:e12 event_type=dedup layer_id=2 frame_id=2 num_subsets=8 chunk_size=8 chunk=1-8 stop=7 elapsed_sec=12.796 cuda_allocated_mb=9986.9 cuda_reserved_mb=28578.0
+[oracle 2026-06-02 23:11:46] timing phase=event event_id=batch0_dedup:b0:f2:l2:voxel16773119:e12 event_type=dedup layer_id=2 frame_id=2 num_subsets=8 measured_subsets=8 replay_sec=12.796 target_sec=0.039 loss_sec=0.014 elapsed_sec=12.857 cuda_allocated_mb=9986.9 cuda_reserved_mb=28578.0
+[oracle 2026-06-02 23:11:46] batch0: measuring event 14/16 id=batch0_dedup:b0:f2:l14:voxel-1:e13 layer=14 frame=2 subsets=8 future_frames=4
+[oracle 2026-06-02 23:11:46] batch0_dedup:b0:f2:l14:voxel-1:e13: replay subsets 1-8/8 batch=8 frames=0:7
+[oracle 2026-06-02 23:11:59] timing phase=replay event_id=batch0_dedup:b0:f2:l14:voxel-1:e13 event_type=dedup layer_id=14 frame_id=2 num_subsets=8 chunk_size=8 chunk=1-8 stop=7 elapsed_sec=12.945 cuda_allocated_mb=9986.7 cuda_reserved_mb=28578.0
+[oracle 2026-06-02 23:11:59] timing phase=event event_id=batch0_dedup:b0:f2:l14:voxel-1:e13 event_type=dedup layer_id=14 frame_id=2 num_subsets=8 measured_subsets=8 replay_sec=12.945 target_sec=0.038 loss_sec=0.014 elapsed_sec=13.004 cuda_allocated_mb=9986.7 cuda_reserved_mb=28578.0
+[oracle 2026-06-02 23:11:59] batch0: measuring event 15/16 id=batch0_dedup:b0:f2:l14:voxel0:e14 layer=14 frame=2 subsets=8 future_frames=4
+[oracle 2026-06-02 23:11:59] batch0_dedup:b0:f2:l14:voxel0:e14: replay subsets 1-8/8 batch=8 frames=0:7
+[oracle 2026-06-02 23:12:12] timing phase=replay event_id=batch0_dedup:b0:f2:l14:voxel0:e14 event_type=dedup layer_id=14 frame_id=2 num_subsets=8 chunk_size=8 chunk=1-8 stop=7 elapsed_sec=12.716 cuda_allocated_mb=9987.6 cuda_reserved_mb=28578.0
+[oracle 2026-06-02 23:12:12] timing phase=event event_id=batch0_dedup:b0:f2:l14:voxel0:e14 event_type=dedup layer_id=14 frame_id=2 num_subsets=8 measured_subsets=8 replay_sec=12.716 target_sec=0.038 loss_sec=0.014 elapsed_sec=12.775 cuda_allocated_mb=9987.6 cuda_reserved_mb=28578.0
+[oracle 2026-06-02 23:12:12] batch0: measuring event 16/16 id=batch0_dedup:b0:f2:l14:voxel16773119:e15 layer=14 frame=2 subsets=8 future_frames=4
+[oracle 2026-06-02 23:12:12] batch0_dedup:b0:f2:l14:voxel16773119:e15: replay subsets 1-8/8 batch=8 frames=0:7
+[oracle 2026-06-02 23:12:24] timing phase=replay event_id=batch0_dedup:b0:f2:l14:voxel16773119:e15 event_type=dedup layer_id=14 frame_id=2 num_subsets=8 chunk_size=8 chunk=1-8 stop=7 elapsed_sec=12.744 cuda_allocated_mb=9986.6 cuda_reserved_mb=28578.0
+[oracle 2026-06-02 23:12:24] timing phase=event event_id=batch0_dedup:b0:f2:l14:voxel16773119:e15 event_type=dedup layer_id=14 frame_id=2 num_subsets=8 measured_subsets=8 replay_sec=12.744 target_sec=0.038 loss_sec=0.014 elapsed_sec=12.803 cuda_allocated_mb=9986.6 cuda_reserved_mb=28578.0
+[oracle 2026-06-02 23:12:24] flushed partial shard: events=16 path=checkpoints/token_oracle/smoke_phase1.pt reason=batch 1/10 event 16 collected summary={"num_sequences": 1, "num_events": 16, "partial": true, "event_type_counts": {"dedup": 16}, "dataset_counts": {"WildRGBD": 1}, "frame_histogram": {"0": 4, "1": 6, "2": 6}, "layer_histogram": {"0": 1, "1": 3, "2": 3, "12": 3, "13": 3, "14": 3}, "subsets_per_event": {"min": 8, "mean": 8.0, "p50": 8.0, "p90": 8.0, "max": 8}, "events_per_hour": 1281896.0354750142, "elapsed_sec": 0.04493344109505415}
+[oracle 2026-06-02 23:12:24] timing phase=flush events=16 batch_idx=-1 force=0 elapsed_sec=0.046
+[oracle 2026-06-02 23:12:24] batch 1/10 done: batch_events=16 total_events=16
+[oracle 2026-06-02 23:12:24] flushed partial shard: events=16 path=checkpoints/token_oracle/smoke_phase1.pt reason=batch 1/10 done summary={"num_sequences": 1, "num_events": 16, "partial": true, "event_type_counts": {"dedup": 16}, "dataset_counts": {"WildRGBD": 1}, "frame_histogram": {"0": 4, "1": 6, "2": 6}, "layer_histogram": {"0": 1, "1": 3, "2": 3, "12": 3, "13": 3, "14": 3}, "subsets_per_event": {"min": 8, "mean": 8.0, "p50": 8.0, "p90": 8.0, "max": 8}, "events_per_hour": 1235986.3882665134, "elapsed_sec": 0.0466024549677968}
+[oracle 2026-06-02 23:12:24] timing phase=flush events=16 batch_idx=0 force=0 elapsed_sec=0.047
+[oracle 2026-06-02 23:12:27] batch 2/10 start: events_so_far=16
+[oracle 2026-06-02 23:12:27] batch 2/10 provenance: sequences=1 first=train_dataset/hypersim/ai_045_008/cam_01_000034_rgb.png:...:ai_045_008/cam_01_000059_rgb.png frames=24
+[oracle 2026-06-02 23:12:27] batch1: running probe over 24 frames
+[oracle 2026-06-02 23:12:34] batch1: probe captured 0 eviction, 143 dedup, 0 fifo candidates, 16 total have future frames
+[oracle 2026-06-02 23:12:34] timing phase=probe event_prefix=batch1 frames=24 eviction=0 dedup=143 fifo=0 candidate_events=16 elapsed_sec=7.420 cuda_allocated_mb=9408.3 cuda_reserved_mb=28578.0
+[oracle 2026-06-02 23:12:34] batch1: running high-budget teacher for 24 frames
+[oracle 2026-06-02 23:12:39] batch1: teacher outputs ready
+[oracle 2026-06-02 23:12:39] timing phase=teacher event_prefix=batch1 frames=24 elapsed_sec=5.065 cuda_allocated_mb=9525.4 cuda_reserved_mb=41522.0
+[oracle 2026-06-02 23:12:39] batch1: measuring event 1/16 id=batch1_dedup:b0:f0:l0:voxel-4096:e0 layer=0 frame=0 subsets=8 future_frames=4
+[oracle 2026-06-02 23:12:39] batch1_dedup:b0:f0:l0:voxel-4096:e0: replay subsets 1-8/8 batch=8 frames=0:5
+[oracle 2026-06-02 23:12:49] timing phase=replay event_id=batch1_dedup:b0:f0:l0:voxel-4096:e0 event_type=dedup layer_id=0 frame_id=0 num_subsets=8 chunk_size=8 chunk=1-8 stop=5 elapsed_sec=9.422 cuda_allocated_mb=10133.8 cuda_reserved_mb=43244.0
+[oracle 2026-06-02 23:12:49] timing phase=event event_id=batch1_dedup:b0:f0:l0:voxel-4096:e0 event_type=dedup layer_id=0 frame_id=0 num_subsets=8 measured_subsets=8 replay_sec=9.422 target_sec=0.038 loss_sec=0.014 elapsed_sec=9.482 cuda_allocated_mb=10133.8 cuda_reserved_mb=43244.0
+[oracle 2026-06-02 23:12:49] batch1: measuring event 2/16 id=batch1_dedup:b0:f0:l0:voxel0:e1 layer=0 frame=0 subsets=8 future_frames=4
+[oracle 2026-06-02 23:12:49] batch1_dedup:b0:f0:l0:voxel0:e1: replay subsets 1-8/8 batch=8 frames=0:5
+[oracle 2026-06-02 23:12:58] timing phase=replay event_id=batch1_dedup:b0:f0:l0:voxel0:e1 event_type=dedup layer_id=0 frame_id=0 num_subsets=8 chunk_size=8 chunk=1-8 stop=5 elapsed_sec=9.441 cuda_allocated_mb=10133.5 cuda_reserved_mb=43250.0
+[oracle 2026-06-02 23:12:58] timing phase=event event_id=batch1_dedup:b0:f0:l0:voxel0:e1 event_type=dedup layer_id=0 frame_id=0 num_subsets=8 measured_subsets=8 replay_sec=9.441 target_sec=0.038 loss_sec=0.014 elapsed_sec=9.500 cuda_allocated_mb=10133.5 cuda_reserved_mb=43250.0
+[oracle 2026-06-02 23:12:58] batch1: measuring event 3/16 id=batch1_dedup:b0:f0:l0:voxel16777215:e2 layer=0 frame=0 subsets=8 future_frames=4
+[oracle 2026-06-02 23:12:58] batch1_dedup:b0:f0:l0:voxel16777215:e2: replay subsets 1-8/8 batch=8 frames=0:5
+[oracle 2026-06-02 23:13:08] timing phase=replay event_id=batch1_dedup:b0:f0:l0:voxel16777215:e2 event_type=dedup layer_id=0 frame_id=0 num_subsets=8 chunk_size=8 chunk=1-8 stop=5 elapsed_sec=9.442 cuda_allocated_mb=10134.2 cuda_reserved_mb=43250.0
+[oracle 2026-06-02 23:13:08] timing phase=event event_id=batch1_dedup:b0:f0:l0:voxel16777215:e2 event_type=dedup layer_id=0 frame_id=0 num_subsets=8 measured_subsets=8 replay_sec=9.442 target_sec=0.037 loss_sec=0.014 elapsed_sec=9.501 cuda_allocated_mb=10134.2 cuda_reserved_mb=43250.0
+[oracle 2026-06-02 23:13:08] batch1: measuring event 4/16 id=batch1_dedup:b0:f0:l12:voxel-4096:e3 layer=12 frame=0 subsets=8 future_frames=4
+[oracle 2026-06-02 23:13:08] batch1_dedup:b0:f0:l12:voxel-4096:e3: replay subsets 1-8/8 batch=8 frames=0:5
+[oracle 2026-06-02 23:13:17] timing phase=replay event_id=batch1_dedup:b0:f0:l12:voxel-4096:e3 event_type=dedup layer_id=12 frame_id=0 num_subsets=8 chunk_size=8 chunk=1-8 stop=5 elapsed_sec=9.384 cuda_allocated_mb=10133.4 cuda_reserved_mb=43250.0
+[oracle 2026-06-02 23:13:17] timing phase=event event_id=batch1_dedup:b0:f0:l12:voxel-4096:e3 event_type=dedup layer_id=12 frame_id=0 num_subsets=8 measured_subsets=8 replay_sec=9.384 target_sec=0.038 loss_sec=0.015 elapsed_sec=9.443 cuda_allocated_mb=10133.4 cuda_reserved_mb=43250.0
+[oracle 2026-06-02 23:13:17] batch1: measuring event 5/16 id=batch1_dedup:b0:f0:l12:voxel0:e4 layer=12 frame=0 subsets=8 future_frames=4
+[oracle 2026-06-02 23:13:17] batch1_dedup:b0:f0:l12:voxel0:e4: replay subsets 1-8/8 batch=8 frames=0:5
+[oracle 2026-06-02 23:13:27] timing phase=replay event_id=batch1_dedup:b0:f0:l12:voxel0:e4 event_type=dedup layer_id=12 frame_id=0 num_subsets=8 chunk_size=8 chunk=1-8 stop=5 elapsed_sec=9.418 cuda_allocated_mb=10134.3 cuda_reserved_mb=43250.0
+[oracle 2026-06-02 23:13:27] timing phase=event event_id=batch1_dedup:b0:f0:l12:voxel0:e4 event_type=dedup layer_id=12 frame_id=0 num_subsets=8 measured_subsets=8 replay_sec=9.418 target_sec=0.038 loss_sec=0.014 elapsed_sec=9.476 cuda_allocated_mb=10134.3 cuda_reserved_mb=43250.0
+[oracle 2026-06-02 23:13:27] batch1: measuring event 6/16 id=batch1_dedup:b0:f0:l12:voxel16777215:e5 layer=12 frame=0 subsets=8 future_frames=4
+[oracle 2026-06-02 23:13:27] batch1_dedup:b0:f0:l12:voxel16777215:e5: replay subsets 1-8/8 batch=8 frames=0:5
+[oracle 2026-06-02 23:13:36] timing phase=replay event_id=batch1_dedup:b0:f0:l12:voxel16777215:e5 event_type=dedup layer_id=12 frame_id=0 num_subsets=8 chunk_size=8 chunk=1-8 stop=5 elapsed_sec=9.430 cuda_allocated_mb=10133.7 cuda_reserved_mb=43250.0
+[oracle 2026-06-02 23:13:36] timing phase=event event_id=batch1_dedup:b0:f0:l12:voxel16777215:e5 event_type=dedup layer_id=12 frame_id=0 num_subsets=8 measured_subsets=8 replay_sec=9.430 target_sec=0.038 loss_sec=0.014 elapsed_sec=9.490 cuda_allocated_mb=10133.7 cuda_reserved_mb=43250.0
+[oracle 2026-06-02 23:13:36] batch1: measuring event 7/16 id=batch1_dedup:b0:f1:l1:voxel16773116:e6 layer=1 frame=1 subsets=8 future_frames=4
+[oracle 2026-06-02 23:13:36] batch1_dedup:b0:f1:l1:voxel16773116:e6: replay subsets 1-8/8 batch=8 frames=0:6
+[oracle 2026-06-02 23:13:48] timing phase=replay event_id=batch1_dedup:b0:f1:l1:voxel16773116:e6 event_type=dedup layer_id=1 frame_id=1 num_subsets=8 chunk_size=8 chunk=1-8 stop=6 elapsed_sec=11.237 cuda_allocated_mb=10255.4 cuda_reserved_mb=43250.0
+[oracle 2026-06-02 23:13:48] timing phase=event event_id=batch1_dedup:b0:f1:l1:voxel16773116:e6 event_type=dedup layer_id=1 frame_id=1 num_subsets=8 measured_subsets=8 replay_sec=11.237 target_sec=0.038 loss_sec=0.014 elapsed_sec=11.297 cuda_allocated_mb=10255.4 cuda_reserved_mb=43250.0
+[oracle 2026-06-02 23:13:48] batch1: measuring event 8/16 id=batch1_dedup:b0:f1:l1:voxel16773117:e7 layer=1 frame=1 subsets=8 future_frames=4
+[oracle 2026-06-02 23:13:48] batch1_dedup:b0:f1:l1:voxel16773117:e7: replay subsets 1-8/8 batch=8 frames=0:6
+[oracle 2026-06-02 23:13:59] timing phase=replay event_id=batch1_dedup:b0:f1:l1:voxel16773117:e7 event_type=dedup layer_id=1 frame_id=1 num_subsets=8 chunk_size=8 chunk=1-8 stop=6 elapsed_sec=11.251 cuda_allocated_mb=10255.8 cuda_reserved_mb=43250.0
+[oracle 2026-06-02 23:13:59] timing phase=event event_id=batch1_dedup:b0:f1:l1:voxel16773117:e7 event_type=dedup layer_id=1 frame_id=1 num_subsets=8 measured_subsets=8 replay_sec=11.251 target_sec=0.039 loss_sec=0.015 elapsed_sec=11.311 cuda_allocated_mb=10255.8 cuda_reserved_mb=43250.0
+[oracle 2026-06-02 23:13:59] batch1: measuring event 9/16 id=batch1_dedup:b0:f1:l13:voxel-4100:e8 layer=13 frame=1 subsets=8 future_frames=4
+[oracle 2026-06-02 23:13:59] batch1_dedup:b0:f1:l13:voxel-4100:e8: replay subsets 1-8/8 batch=8 frames=0:6
+[oracle 2026-06-02 23:14:10] timing phase=replay event_id=batch1_dedup:b0:f1:l13:voxel-4100:e8 event_type=dedup layer_id=13 frame_id=1 num_subsets=8 chunk_size=8 chunk=1-8 stop=6 elapsed_sec=11.371 cuda_allocated_mb=10255.3 cuda_reserved_mb=43250.0
+[oracle 2026-06-02 23:14:10] timing phase=event event_id=batch1_dedup:b0:f1:l13:voxel-4100:e8 event_type=dedup layer_id=13 frame_id=1 num_subsets=8 measured_subsets=8 replay_sec=11.371 target_sec=0.037 loss_sec=0.014 elapsed_sec=11.430 cuda_allocated_mb=10255.3 cuda_reserved_mb=43250.0
+[oracle 2026-06-02 23:14:10] batch1: measuring event 10/16 id=batch1_dedup:b0:f1:l13:voxel16773116:e9 layer=13 frame=1 subsets=8 future_frames=4
+[oracle 2026-06-02 23:14:10] batch1_dedup:b0:f1:l13:voxel16773116:e9: replay subsets 1-8/8 batch=8 frames=0:6
+[oracle 2026-06-02 23:14:22] timing phase=replay event_id=batch1_dedup:b0:f1:l13:voxel16773116:e9 event_type=dedup layer_id=13 frame_id=1 num_subsets=8 chunk_size=8 chunk=1-8 stop=6 elapsed_sec=11.304 cuda_allocated_mb=10254.4 cuda_reserved_mb=43250.0
+[oracle 2026-06-02 23:14:22] timing phase=event event_id=batch1_dedup:b0:f1:l13:voxel16773116:e9 event_type=dedup layer_id=13 frame_id=1 num_subsets=8 measured_subsets=8 replay_sec=11.304 target_sec=0.038 loss_sec=0.014 elapsed_sec=11.363 cuda_allocated_mb=10254.4 cuda_reserved_mb=43250.0
+[oracle 2026-06-02 23:14:22] batch1: measuring event 11/16 id=batch1_dedup:b0:f1:l13:voxel16773117:e10 layer=13 frame=1 subsets=8 future_frames=4
+[oracle 2026-06-02 23:14:22] batch1_dedup:b0:f1:l13:voxel16773117:e10: replay subsets 1-8/8 batch=8 frames=0:6
+[oracle 2026-06-02 23:14:33] timing phase=replay event_id=batch1_dedup:b0:f1:l13:voxel16773117:e10 event_type=dedup layer_id=13 frame_id=1 num_subsets=8 chunk_size=8 chunk=1-8 stop=6 elapsed_sec=11.270 cuda_allocated_mb=10256.0 cuda_reserved_mb=43252.0
+[oracle 2026-06-02 23:14:33] timing phase=event event_id=batch1_dedup:b0:f1:l13:voxel16773117:e10 event_type=dedup layer_id=13 frame_id=1 num_subsets=8 measured_subsets=8 replay_sec=11.270 target_sec=0.038 loss_sec=0.015 elapsed_sec=11.330 cuda_allocated_mb=10256.0 cuda_reserved_mb=43252.0
+[oracle 2026-06-02 23:14:33] batch1: measuring event 12/16 id=batch1_dedup:b0:f2:l2:voxel16773116:e11 layer=2 frame=2 subsets=8 future_frames=4
+[oracle 2026-06-02 23:14:33] batch1_dedup:b0:f2:l2:voxel16773116:e11: replay subsets 1-8/8 batch=8 frames=0:7
+[oracle 2026-06-02 23:14:46] timing phase=replay event_id=batch1_dedup:b0:f2:l2:voxel16773116:e11 event_type=dedup layer_id=2 frame_id=2 num_subsets=8 chunk_size=8 chunk=1-8 stop=7 elapsed_sec=13.269 cuda_allocated_mb=10376.4 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:14:46] timing phase=event event_id=batch1_dedup:b0:f2:l2:voxel16773116:e11 event_type=dedup layer_id=2 frame_id=2 num_subsets=8 measured_subsets=8 replay_sec=13.269 target_sec=0.038 loss_sec=0.015 elapsed_sec=13.330 cuda_allocated_mb=10376.4 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:14:46] batch1: measuring event 13/16 id=batch1_dedup:b0:f2:l2:voxel16773117:e12 layer=2 frame=2 subsets=3 future_frames=4
+[oracle 2026-06-02 23:14:46] batch1_dedup:b0:f2:l2:voxel16773117:e12: replay subsets 1-3/3 batch=3 frames=0:7
+[oracle 2026-06-02 23:14:51] timing phase=replay event_id=batch1_dedup:b0:f2:l2:voxel16773117:e12 event_type=dedup layer_id=2 frame_id=2 num_subsets=3 chunk_size=3 chunk=1-3 stop=7 elapsed_sec=4.992 cuda_allocated_mb=9849.6 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:14:51] timing phase=event event_id=batch1_dedup:b0:f2:l2:voxel16773117:e12 event_type=dedup layer_id=2 frame_id=2 num_subsets=3 measured_subsets=3 replay_sec=4.992 target_sec=0.014 loss_sec=0.006 elapsed_sec=5.019 cuda_allocated_mb=9849.6 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:14:51] batch1: measuring event 14/16 id=batch1_dedup:b0:f2:l2:voxel16777213:e13 layer=2 frame=2 subsets=2 future_frames=4
+[oracle 2026-06-02 23:14:51] batch1_dedup:b0:f2:l2:voxel16777213:e13: replay subsets 1-2/2 batch=2 frames=0:7
+[oracle 2026-06-02 23:14:55] timing phase=replay event_id=batch1_dedup:b0:f2:l2:voxel16777213:e13 event_type=dedup layer_id=2 frame_id=2 num_subsets=2 chunk_size=2 chunk=1-2 stop=7 elapsed_sec=3.377 cuda_allocated_mb=9745.5 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:14:55] timing phase=event event_id=batch1_dedup:b0:f2:l2:voxel16777213:e13 event_type=dedup layer_id=2 frame_id=2 num_subsets=2 measured_subsets=2 replay_sec=3.377 target_sec=0.010 loss_sec=0.004 elapsed_sec=3.396 cuda_allocated_mb=9745.5 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:14:55] batch1: measuring event 15/16 id=batch1_dedup:b0:f2:l14:voxel16773116:e14 layer=14 frame=2 subsets=8 future_frames=4
+[oracle 2026-06-02 23:14:55] batch1_dedup:b0:f2:l14:voxel16773116:e14: replay subsets 1-8/8 batch=8 frames=0:7
+[oracle 2026-06-02 23:15:08] timing phase=replay event_id=batch1_dedup:b0:f2:l14:voxel16773116:e14 event_type=dedup layer_id=14 frame_id=2 num_subsets=8 chunk_size=8 chunk=1-8 stop=7 elapsed_sec=13.189 cuda_allocated_mb=10376.6 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:15:08] timing phase=event event_id=batch1_dedup:b0:f2:l14:voxel16773116:e14 event_type=dedup layer_id=14 frame_id=2 num_subsets=8 measured_subsets=8 replay_sec=13.189 target_sec=0.038 loss_sec=0.015 elapsed_sec=13.250 cuda_allocated_mb=10376.6 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:15:08] batch1: measuring event 16/16 id=batch1_dedup:b0:f2:l14:voxel16773117:e15 layer=14 frame=2 subsets=3 future_frames=4
+[oracle 2026-06-02 23:15:08] batch1_dedup:b0:f2:l14:voxel16773117:e15: replay subsets 1-3/3 batch=3 frames=0:7
+[oracle 2026-06-02 23:15:13] timing phase=replay event_id=batch1_dedup:b0:f2:l14:voxel16773117:e15 event_type=dedup layer_id=14 frame_id=2 num_subsets=3 chunk_size=3 chunk=1-3 stop=7 elapsed_sec=5.051 cuda_allocated_mb=9847.3 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:15:13] timing phase=event event_id=batch1_dedup:b0:f2:l14:voxel16773117:e15 event_type=dedup layer_id=14 frame_id=2 num_subsets=3 measured_subsets=3 replay_sec=5.051 target_sec=0.014 loss_sec=0.005 elapsed_sec=5.078 cuda_allocated_mb=9847.3 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:15:13] flushed partial shard: events=32 path=checkpoints/token_oracle/smoke_phase1.pt reason=batch 2/10 event 16 collected summary={"num_sequences": 2, "num_events": 32, "partial": true, "event_type_counts": {"dedup": 32}, "dataset_counts": {"WildRGBD": 1, "hypersim": 1}, "frame_histogram": {"0": 10, "1": 11, "2": 11}, "layer_histogram": {"0": 4, "1": 5, "2": 6, "12": 6, "13": 6, "14": 5}, "subsets_per_event": {"min": 2, "mean": 7.5, "p50": 8.0, "p90": 8.0, "max": 8}, "events_per_hour": 1683370.9662948994, "elapsed_sec": 0.06843411363661289}
+[oracle 2026-06-02 23:15:13] timing phase=flush events=32 batch_idx=-1 force=0 elapsed_sec=0.069
+[oracle 2026-06-02 23:15:13] batch 2/10 done: batch_events=16 total_events=32
+[oracle 2026-06-02 23:15:13] flushed partial shard: events=32 path=checkpoints/token_oracle/smoke_phase1.pt reason=batch 2/10 done summary={"num_sequences": 2, "num_events": 32, "partial": true, "event_type_counts": {"dedup": 32}, "dataset_counts": {"WildRGBD": 1, "hypersim": 1}, "frame_histogram": {"0": 10, "1": 11, "2": 11}, "layer_histogram": {"0": 4, "1": 5, "2": 6, "12": 6, "13": 6, "14": 5}, "subsets_per_event": {"min": 2, "mean": 7.5, "p50": 8.0, "p90": 8.0, "max": 8}, "events_per_hour": 2114018.984389149, "elapsed_sec": 0.05449336115270853}
+[oracle 2026-06-02 23:15:13] timing phase=flush events=32 batch_idx=1 force=0 elapsed_sec=0.055
+[oracle 2026-06-02 23:15:14] batch 3/10 start: events_so_far=32
+[oracle 2026-06-02 23:15:14] batch 3/10 provenance: sequences=1 first=train_dataset/VirtualKITTI2//path/to/mount/lyj/processed_vkitti/mast3r_dat...st3r_data/processed_vkitti/Scene06/fog/Camera_1 frames=24
+[oracle 2026-06-02 23:15:15] batch2: running probe over 24 frames
+[oracle 2026-06-02 23:15:22] batch2: probe captured 0 eviction, 143 dedup, 0 fifo candidates, 16 total have future frames
+[oracle 2026-06-02 23:15:22] timing phase=probe event_prefix=batch2 frames=24 eviction=0 dedup=143 fifo=0 candidate_events=16 elapsed_sec=7.144 cuda_allocated_mb=9333.7 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:15:22] batch2: running high-budget teacher for 24 frames
+[oracle 2026-06-02 23:15:26] batch2: teacher outputs ready
+[oracle 2026-06-02 23:15:26] timing phase=teacher event_prefix=batch2 frames=24 elapsed_sec=3.837 cuda_allocated_mb=9414.1 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:15:26] batch2: measuring event 1/16 id=batch2_dedup:b0:f0:l0:voxel-4097:e0 layer=0 frame=0 subsets=8 future_frames=4
+[oracle 2026-06-02 23:15:26] batch2_dedup:b0:f0:l0:voxel-4097:e0: replay subsets 1-8/8 batch=8 frames=0:5
+[oracle 2026-06-02 23:15:35] timing phase=replay event_id=batch2_dedup:b0:f0:l0:voxel-4097:e0 event_type=dedup layer_id=0 frame_id=0 num_subsets=8 chunk_size=8 chunk=1-8 stop=5 elapsed_sec=9.315 cuda_allocated_mb=9832.3 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:15:35] timing phase=event event_id=batch2_dedup:b0:f0:l0:voxel-4097:e0 event_type=dedup layer_id=0 frame_id=0 num_subsets=8 measured_subsets=8 replay_sec=9.315 target_sec=0.039 loss_sec=0.015 elapsed_sec=9.375 cuda_allocated_mb=9832.3 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:15:35] batch2: measuring event 2/16 id=batch2_dedup:b0:f0:l0:voxel-1:e1 layer=0 frame=0 subsets=8 future_frames=4
+[oracle 2026-06-02 23:15:35] batch2_dedup:b0:f0:l0:voxel-1:e1: replay subsets 1-8/8 batch=8 frames=0:5
+[oracle 2026-06-02 23:15:44] timing phase=replay event_id=batch2_dedup:b0:f0:l0:voxel-1:e1 event_type=dedup layer_id=0 frame_id=0 num_subsets=8 chunk_size=8 chunk=1-8 stop=5 elapsed_sec=9.224 cuda_allocated_mb=9833.4 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:15:44] timing phase=event event_id=batch2_dedup:b0:f0:l0:voxel-1:e1 event_type=dedup layer_id=0 frame_id=0 num_subsets=8 measured_subsets=8 replay_sec=9.224 target_sec=0.037 loss_sec=0.014 elapsed_sec=9.282 cuda_allocated_mb=9833.4 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:15:44] batch2: measuring event 3/16 id=batch2_dedup:b0:f0:l12:voxel-4097:e2 layer=12 frame=0 subsets=8 future_frames=4
+[oracle 2026-06-02 23:15:44] batch2_dedup:b0:f0:l12:voxel-4097:e2: replay subsets 1-8/8 batch=8 frames=0:5
+[oracle 2026-06-02 23:15:53] timing phase=replay event_id=batch2_dedup:b0:f0:l12:voxel-4097:e2 event_type=dedup layer_id=12 frame_id=0 num_subsets=8 chunk_size=8 chunk=1-8 stop=5 elapsed_sec=9.062 cuda_allocated_mb=9834.0 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:15:53] timing phase=event event_id=batch2_dedup:b0:f0:l12:voxel-4097:e2 event_type=dedup layer_id=12 frame_id=0 num_subsets=8 measured_subsets=8 replay_sec=9.062 target_sec=0.037 loss_sec=0.014 elapsed_sec=9.119 cuda_allocated_mb=9834.0 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:15:53] batch2: measuring event 4/16 id=batch2_dedup:b0:f0:l12:voxel-1:e3 layer=12 frame=0 subsets=8 future_frames=4
+[oracle 2026-06-02 23:15:53] batch2_dedup:b0:f0:l12:voxel-1:e3: replay subsets 1-8/8 batch=8 frames=0:5
+[oracle 2026-06-02 23:16:02] timing phase=replay event_id=batch2_dedup:b0:f0:l12:voxel-1:e3 event_type=dedup layer_id=12 frame_id=0 num_subsets=8 chunk_size=8 chunk=1-8 stop=5 elapsed_sec=9.093 cuda_allocated_mb=9832.3 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:16:02] timing phase=event event_id=batch2_dedup:b0:f0:l12:voxel-1:e3 event_type=dedup layer_id=12 frame_id=0 num_subsets=8 measured_subsets=8 replay_sec=9.093 target_sec=0.038 loss_sec=0.014 elapsed_sec=9.151 cuda_allocated_mb=9832.3 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:16:02] batch2: measuring event 5/16 id=batch2_dedup:b0:f0:l12:voxel0:e4 layer=12 frame=0 subsets=8 future_frames=4
+[oracle 2026-06-02 23:16:02] batch2_dedup:b0:f0:l12:voxel0:e4: replay subsets 1-8/8 batch=8 frames=0:5
+[oracle 2026-06-02 23:16:12] timing phase=replay event_id=batch2_dedup:b0:f0:l12:voxel0:e4 event_type=dedup layer_id=12 frame_id=0 num_subsets=8 chunk_size=8 chunk=1-8 stop=5 elapsed_sec=9.106 cuda_allocated_mb=9833.5 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:16:12] timing phase=event event_id=batch2_dedup:b0:f0:l12:voxel0:e4 event_type=dedup layer_id=12 frame_id=0 num_subsets=8 measured_subsets=8 replay_sec=9.106 target_sec=0.037 loss_sec=0.014 elapsed_sec=9.163 cuda_allocated_mb=9833.5 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:16:12] batch2: measuring event 6/16 id=batch2_dedup:b0:f1:l1:voxel-4097:e5 layer=1 frame=1 subsets=8 future_frames=4
+[oracle 2026-06-02 23:16:12] batch2_dedup:b0:f1:l1:voxel-4097:e5: replay subsets 1-8/8 batch=8 frames=0:6
+[oracle 2026-06-02 23:16:23] timing phase=replay event_id=batch2_dedup:b0:f1:l1:voxel-4097:e5 event_type=dedup layer_id=1 frame_id=1 num_subsets=8 chunk_size=8 chunk=1-8 stop=6 elapsed_sec=11.065 cuda_allocated_mb=9916.5 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:16:23] timing phase=event event_id=batch2_dedup:b0:f1:l1:voxel-4097:e5 event_type=dedup layer_id=1 frame_id=1 num_subsets=8 measured_subsets=8 replay_sec=11.065 target_sec=0.038 loss_sec=0.014 elapsed_sec=11.123 cuda_allocated_mb=9916.5 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:16:23] batch2: measuring event 7/16 id=batch2_dedup:b0:f1:l1:voxel-1:e6 layer=1 frame=1 subsets=8 future_frames=4
+[oracle 2026-06-02 23:16:23] batch2_dedup:b0:f1:l1:voxel-1:e6: replay subsets 1-8/8 batch=8 frames=0:6
+[oracle 2026-06-02 23:16:34] timing phase=replay event_id=batch2_dedup:b0:f1:l1:voxel-1:e6 event_type=dedup layer_id=1 frame_id=1 num_subsets=8 chunk_size=8 chunk=1-8 stop=6 elapsed_sec=11.051 cuda_allocated_mb=9915.6 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:16:34] timing phase=event event_id=batch2_dedup:b0:f1:l1:voxel-1:e6 event_type=dedup layer_id=1 frame_id=1 num_subsets=8 measured_subsets=8 replay_sec=11.051 target_sec=0.038 loss_sec=0.014 elapsed_sec=11.110 cuda_allocated_mb=9915.6 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:16:34] batch2: measuring event 8/16 id=batch2_dedup:b0:f1:l1:voxel0:e7 layer=1 frame=1 subsets=8 future_frames=4
+[oracle 2026-06-02 23:16:34] batch2_dedup:b0:f1:l1:voxel0:e7: replay subsets 1-8/8 batch=8 frames=0:6
+[oracle 2026-06-02 23:16:45] timing phase=replay event_id=batch2_dedup:b0:f1:l1:voxel0:e7 event_type=dedup layer_id=1 frame_id=1 num_subsets=8 chunk_size=8 chunk=1-8 stop=6 elapsed_sec=11.054 cuda_allocated_mb=9914.9 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:16:45] timing phase=event event_id=batch2_dedup:b0:f1:l1:voxel0:e7 event_type=dedup layer_id=1 frame_id=1 num_subsets=8 measured_subsets=8 replay_sec=11.054 target_sec=0.038 loss_sec=0.014 elapsed_sec=11.113 cuda_allocated_mb=9914.9 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:16:45] batch2: measuring event 9/16 id=batch2_dedup:b0:f1:l13:voxel-4097:e8 layer=13 frame=1 subsets=8 future_frames=4
+[oracle 2026-06-02 23:16:45] batch2_dedup:b0:f1:l13:voxel-4097:e8: replay subsets 1-8/8 batch=8 frames=0:6
+[oracle 2026-06-02 23:16:56] timing phase=replay event_id=batch2_dedup:b0:f1:l13:voxel-4097:e8 event_type=dedup layer_id=13 frame_id=1 num_subsets=8 chunk_size=8 chunk=1-8 stop=6 elapsed_sec=11.268 cuda_allocated_mb=9913.9 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:16:56] timing phase=event event_id=batch2_dedup:b0:f1:l13:voxel-4097:e8 event_type=dedup layer_id=13 frame_id=1 num_subsets=8 measured_subsets=8 replay_sec=11.268 target_sec=0.038 loss_sec=0.014 elapsed_sec=11.327 cuda_allocated_mb=9913.9 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:16:56] batch2: measuring event 10/16 id=batch2_dedup:b0:f1:l13:voxel-1:e9 layer=13 frame=1 subsets=8 future_frames=4
+[oracle 2026-06-02 23:16:56] batch2_dedup:b0:f1:l13:voxel-1:e9: replay subsets 1-8/8 batch=8 frames=0:6
+[oracle 2026-06-02 23:17:08] timing phase=replay event_id=batch2_dedup:b0:f1:l13:voxel-1:e9 event_type=dedup layer_id=13 frame_id=1 num_subsets=8 chunk_size=8 chunk=1-8 stop=6 elapsed_sec=11.578 cuda_allocated_mb=9914.8 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:17:08] timing phase=event event_id=batch2_dedup:b0:f1:l13:voxel-1:e9 event_type=dedup layer_id=13 frame_id=1 num_subsets=8 measured_subsets=8 replay_sec=11.578 target_sec=0.040 loss_sec=0.015 elapsed_sec=11.640 cuda_allocated_mb=9914.8 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:17:08] batch2: measuring event 11/16 id=batch2_dedup:b0:f1:l13:voxel0:e10 layer=13 frame=1 subsets=8 future_frames=4
+[oracle 2026-06-02 23:17:08] batch2_dedup:b0:f1:l13:voxel0:e10: replay subsets 1-8/8 batch=8 frames=0:6
+[oracle 2026-06-02 23:17:20] timing phase=replay event_id=batch2_dedup:b0:f1:l13:voxel0:e10 event_type=dedup layer_id=13 frame_id=1 num_subsets=8 chunk_size=8 chunk=1-8 stop=6 elapsed_sec=11.595 cuda_allocated_mb=9914.8 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:17:20] timing phase=event event_id=batch2_dedup:b0:f1:l13:voxel0:e10 event_type=dedup layer_id=13 frame_id=1 num_subsets=8 measured_subsets=8 replay_sec=11.595 target_sec=0.039 loss_sec=0.014 elapsed_sec=11.655 cuda_allocated_mb=9914.8 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:17:20] batch2: measuring event 12/16 id=batch2_dedup:b0:f2:l2:voxel-4097:e11 layer=2 frame=2 subsets=8 future_frames=4
+[oracle 2026-06-02 23:17:20] batch2_dedup:b0:f2:l2:voxel-4097:e11: replay subsets 1-8/8 batch=8 frames=0:7
+[oracle 2026-06-02 23:17:33] timing phase=replay event_id=batch2_dedup:b0:f2:l2:voxel-4097:e11 event_type=dedup layer_id=2 frame_id=2 num_subsets=8 chunk_size=8 chunk=1-8 stop=7 elapsed_sec=13.555 cuda_allocated_mb=10000.1 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:17:33] timing phase=event event_id=batch2_dedup:b0:f2:l2:voxel-4097:e11 event_type=dedup layer_id=2 frame_id=2 num_subsets=8 measured_subsets=8 replay_sec=13.555 target_sec=0.040 loss_sec=0.015 elapsed_sec=13.618 cuda_allocated_mb=10000.1 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:17:33] batch2: measuring event 13/16 id=batch2_dedup:b0:f2:l2:voxel-1:e12 layer=2 frame=2 subsets=8 future_frames=4
+[oracle 2026-06-02 23:17:33] batch2_dedup:b0:f2:l2:voxel-1:e12: replay subsets 1-8/8 batch=8 frames=0:7
+[oracle 2026-06-02 23:17:47] timing phase=replay event_id=batch2_dedup:b0:f2:l2:voxel-1:e12 event_type=dedup layer_id=2 frame_id=2 num_subsets=8 chunk_size=8 chunk=1-8 stop=7 elapsed_sec=13.485 cuda_allocated_mb=9998.1 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:17:47] timing phase=event event_id=batch2_dedup:b0:f2:l2:voxel-1:e12 event_type=dedup layer_id=2 frame_id=2 num_subsets=8 measured_subsets=8 replay_sec=13.485 target_sec=0.043 loss_sec=0.016 elapsed_sec=13.552 cuda_allocated_mb=9998.1 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:17:47] batch2: measuring event 14/16 id=batch2_dedup:b0:f2:l2:voxel0:e13 layer=2 frame=2 subsets=8 future_frames=4
+[oracle 2026-06-02 23:17:47] batch2_dedup:b0:f2:l2:voxel0:e13: replay subsets 1-8/8 batch=8 frames=0:7
+[oracle 2026-06-02 23:18:00] timing phase=replay event_id=batch2_dedup:b0:f2:l2:voxel0:e13 event_type=dedup layer_id=2 frame_id=2 num_subsets=8 chunk_size=8 chunk=1-8 stop=7 elapsed_sec=13.701 cuda_allocated_mb=9998.6 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:18:01] timing phase=event event_id=batch2_dedup:b0:f2:l2:voxel0:e13 event_type=dedup layer_id=2 frame_id=2 num_subsets=8 measured_subsets=8 replay_sec=13.701 target_sec=0.040 loss_sec=0.015 elapsed_sec=13.764 cuda_allocated_mb=9998.6 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:18:01] batch2: measuring event 15/16 id=batch2_dedup:b0:f2:l14:voxel-4097:e14 layer=14 frame=2 subsets=8 future_frames=4
+[oracle 2026-06-02 23:18:01] batch2_dedup:b0:f2:l14:voxel-4097:e14: replay subsets 1-8/8 batch=8 frames=0:7
+[oracle 2026-06-02 23:18:14] timing phase=replay event_id=batch2_dedup:b0:f2:l14:voxel-4097:e14 event_type=dedup layer_id=14 frame_id=2 num_subsets=8 chunk_size=8 chunk=1-8 stop=7 elapsed_sec=13.276 cuda_allocated_mb=9997.5 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:18:14] timing phase=event event_id=batch2_dedup:b0:f2:l14:voxel-4097:e14 event_type=dedup layer_id=14 frame_id=2 num_subsets=8 measured_subsets=8 replay_sec=13.276 target_sec=0.039 loss_sec=0.015 elapsed_sec=13.337 cuda_allocated_mb=9997.5 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:18:14] batch2: measuring event 16/16 id=batch2_dedup:b0:f2:l14:voxel-1:e15 layer=14 frame=2 subsets=8 future_frames=4
+[oracle 2026-06-02 23:18:14] batch2_dedup:b0:f2:l14:voxel-1:e15: replay subsets 1-8/8 batch=8 frames=0:7
+[oracle 2026-06-02 23:18:27] timing phase=replay event_id=batch2_dedup:b0:f2:l14:voxel-1:e15 event_type=dedup layer_id=14 frame_id=2 num_subsets=8 chunk_size=8 chunk=1-8 stop=7 elapsed_sec=13.289 cuda_allocated_mb=9998.1 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:18:27] timing phase=event event_id=batch2_dedup:b0:f2:l14:voxel-1:e15 event_type=dedup layer_id=14 frame_id=2 num_subsets=8 measured_subsets=8 replay_sec=13.289 target_sec=0.039 loss_sec=0.015 elapsed_sec=13.350 cuda_allocated_mb=9998.1 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:18:27] flushed partial shard: events=48 path=checkpoints/token_oracle/smoke_phase1.pt reason=batch 3/10 event 16 collected summary={"num_sequences": 3, "num_events": 48, "partial": true, "event_type_counts": {"dedup": 48}, "dataset_counts": {"WildRGBD": 1, "hypersim": 1, "VirtualKITTI2": 1}, "frame_histogram": {"0": 15, "1": 17, "2": 16}, "layer_histogram": {"0": 6, "1": 8, "2": 9, "12": 9, "13": 9, "14": 7}, "subsets_per_event": {"min": 2, "mean": 7.666666666666667, "p50": 8.0, "p90": 8.0, "max": 8}, "events_per_hour": 2438206.3898632266, "elapsed_sec": 0.07087176898494363}
+[oracle 2026-06-02 23:18:27] timing phase=flush events=48 batch_idx=-1 force=0 elapsed_sec=0.072
+[oracle 2026-06-02 23:18:27] batch 3/10 done: batch_events=16 total_events=48
+[oracle 2026-06-02 23:18:27] flushed partial shard: events=48 path=checkpoints/token_oracle/smoke_phase1.pt reason=batch 3/10 done summary={"num_sequences": 3, "num_events": 48, "partial": true, "event_type_counts": {"dedup": 48}, "dataset_counts": {"WildRGBD": 1, "hypersim": 1, "VirtualKITTI2": 1}, "frame_histogram": {"0": 15, "1": 17, "2": 16}, "layer_histogram": {"0": 6, "1": 8, "2": 9, "12": 9, "13": 9, "14": 7}, "subsets_per_event": {"min": 2, "mean": 7.666666666666667, "p50": 8.0, "p90": 8.0, "max": 8}, "events_per_hour": 2413117.986177204, "elapsed_sec": 0.07160859974101186}
+[oracle 2026-06-02 23:18:27] timing phase=flush events=48 batch_idx=2 force=0 elapsed_sec=0.072
+[oracle 2026-06-02 23:18:28] batch 4/10 start: events_so_far=48
+[oracle 2026-06-02 23:18:28] batch 4/10 provenance: sequences=1 first=train_dataset/arkitscenes_highres/42445619_42445619_56326.904.png:...:42445619_42445619_56334.201.png frames=24
+[oracle 2026-06-02 23:18:28] batch3: running probe over 24 frames
+[oracle 2026-06-02 23:18:35] batch3: probe captured 0 eviction, 144 dedup, 0 fifo candidates, 16 total have future frames
+[oracle 2026-06-02 23:18:35] timing phase=probe event_prefix=batch3 frames=24 eviction=0 dedup=144 fifo=0 candidate_events=16 elapsed_sec=6.689 cuda_allocated_mb=9333.7 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:18:35] batch3: running high-budget teacher for 24 frames
+[oracle 2026-06-02 23:18:39] batch3: teacher outputs ready
+[oracle 2026-06-02 23:18:39] timing phase=teacher event_prefix=batch3 frames=24 elapsed_sec=3.924 cuda_allocated_mb=9414.1 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:18:39] batch3: measuring event 1/16 id=batch3_dedup:b0:f0:l0:voxel50327550:e0 layer=0 frame=0 subsets=8 future_frames=4
+[oracle 2026-06-02 23:18:39] batch3_dedup:b0:f0:l0:voxel50327550:e0: replay subsets 1-8/8 batch=8 frames=0:5
+[oracle 2026-06-02 23:18:48] timing phase=replay event_id=batch3_dedup:b0:f0:l0:voxel50327550:e0 event_type=dedup layer_id=0 frame_id=0 num_subsets=8 chunk_size=8 chunk=1-8 stop=5 elapsed_sec=9.324 cuda_allocated_mb=9833.5 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:18:48] timing phase=event event_id=batch3_dedup:b0:f0:l0:voxel50327550:e0 event_type=dedup layer_id=0 frame_id=0 num_subsets=8 measured_subsets=8 replay_sec=9.324 target_sec=0.040 loss_sec=0.015 elapsed_sec=9.385 cuda_allocated_mb=9833.5 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:18:48] batch3: measuring event 2/16 id=batch3_dedup:b0:f0:l0:voxel50327551:e1 layer=0 frame=0 subsets=8 future_frames=4
+[oracle 2026-06-02 23:18:48] batch3_dedup:b0:f0:l0:voxel50327551:e1: replay subsets 1-8/8 batch=8 frames=0:5
+[oracle 2026-06-02 23:18:58] timing phase=replay event_id=batch3_dedup:b0:f0:l0:voxel50327551:e1 event_type=dedup layer_id=0 frame_id=0 num_subsets=8 chunk_size=8 chunk=1-8 stop=5 elapsed_sec=9.272 cuda_allocated_mb=9834.6 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:18:58] timing phase=event event_id=batch3_dedup:b0:f0:l0:voxel50327551:e1 event_type=dedup layer_id=0 frame_id=0 num_subsets=8 measured_subsets=8 replay_sec=9.272 target_sec=0.039 loss_sec=0.015 elapsed_sec=9.332 cuda_allocated_mb=9834.6 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:18:58] batch3: measuring event 3/16 id=batch3_dedup:b0:f0:l0:voxel50327552:e2 layer=0 frame=0 subsets=8 future_frames=4
+[oracle 2026-06-02 23:18:58] batch3_dedup:b0:f0:l0:voxel50327552:e2: replay subsets 1-8/8 batch=8 frames=0:5
+[oracle 2026-06-02 23:19:07] timing phase=replay event_id=batch3_dedup:b0:f0:l0:voxel50327552:e2 event_type=dedup layer_id=0 frame_id=0 num_subsets=8 chunk_size=8 chunk=1-8 stop=5 elapsed_sec=9.488 cuda_allocated_mb=9834.4 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:19:07] timing phase=event event_id=batch3_dedup:b0:f0:l0:voxel50327552:e2 event_type=dedup layer_id=0 frame_id=0 num_subsets=8 measured_subsets=8 replay_sec=9.488 target_sec=0.040 loss_sec=0.015 elapsed_sec=9.550 cuda_allocated_mb=9834.4 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:19:07] batch3: measuring event 4/16 id=batch3_dedup:b0:f0:l12:voxel50327550:e3 layer=12 frame=0 subsets=8 future_frames=4
+[oracle 2026-06-02 23:19:07] batch3_dedup:b0:f0:l12:voxel50327550:e3: replay subsets 1-8/8 batch=8 frames=0:5
+[oracle 2026-06-02 23:19:17] timing phase=replay event_id=batch3_dedup:b0:f0:l12:voxel50327550:e3 event_type=dedup layer_id=12 frame_id=0 num_subsets=8 chunk_size=8 chunk=1-8 stop=5 elapsed_sec=9.536 cuda_allocated_mb=9833.7 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:19:17] timing phase=event event_id=batch3_dedup:b0:f0:l12:voxel50327550:e3 event_type=dedup layer_id=12 frame_id=0 num_subsets=8 measured_subsets=8 replay_sec=9.536 target_sec=0.041 loss_sec=0.015 elapsed_sec=9.600 cuda_allocated_mb=9833.7 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:19:17] batch3: measuring event 5/16 id=batch3_dedup:b0:f0:l12:voxel50327551:e4 layer=12 frame=0 subsets=8 future_frames=4
+[oracle 2026-06-02 23:19:17] batch3_dedup:b0:f0:l12:voxel50327551:e4: replay subsets 1-8/8 batch=8 frames=0:5
+[oracle 2026-06-02 23:19:27] timing phase=replay event_id=batch3_dedup:b0:f0:l12:voxel50327551:e4 event_type=dedup layer_id=12 frame_id=0 num_subsets=8 chunk_size=8 chunk=1-8 stop=5 elapsed_sec=9.567 cuda_allocated_mb=9832.1 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:19:27] timing phase=event event_id=batch3_dedup:b0:f0:l12:voxel50327551:e4 event_type=dedup layer_id=12 frame_id=0 num_subsets=8 measured_subsets=8 replay_sec=9.567 target_sec=0.040 loss_sec=0.016 elapsed_sec=9.631 cuda_allocated_mb=9832.1 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:19:27] batch3: measuring event 6/16 id=batch3_dedup:b0:f0:l12:voxel50327552:e5 layer=12 frame=0 subsets=8 future_frames=4
+[oracle 2026-06-02 23:19:27] batch3_dedup:b0:f0:l12:voxel50327552:e5: replay subsets 1-8/8 batch=8 frames=0:5
+[oracle 2026-06-02 23:19:36] timing phase=replay event_id=batch3_dedup:b0:f0:l12:voxel50327552:e5 event_type=dedup layer_id=12 frame_id=0 num_subsets=8 chunk_size=8 chunk=1-8 stop=5 elapsed_sec=9.396 cuda_allocated_mb=9833.5 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:19:36] timing phase=event event_id=batch3_dedup:b0:f0:l12:voxel50327552:e5 event_type=dedup layer_id=12 frame_id=0 num_subsets=8 measured_subsets=8 replay_sec=9.396 target_sec=0.038 loss_sec=0.015 elapsed_sec=9.457 cuda_allocated_mb=9833.5 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:19:36] batch3: measuring event 7/16 id=batch3_dedup:b0:f1:l1:voxel16777218:e6 layer=1 frame=1 subsets=8 future_frames=4
+[oracle 2026-06-02 23:19:36] batch3_dedup:b0:f1:l1:voxel16777218:e6: replay subsets 1-8/8 batch=8 frames=0:6
+[oracle 2026-06-02 23:19:47] timing phase=replay event_id=batch3_dedup:b0:f1:l1:voxel16777218:e6 event_type=dedup layer_id=1 frame_id=1 num_subsets=8 chunk_size=8 chunk=1-8 stop=6 elapsed_sec=11.249 cuda_allocated_mb=9914.9 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:19:47] timing phase=event event_id=batch3_dedup:b0:f1:l1:voxel16777218:e6 event_type=dedup layer_id=1 frame_id=1 num_subsets=8 measured_subsets=8 replay_sec=11.249 target_sec=0.039 loss_sec=0.015 elapsed_sec=11.310 cuda_allocated_mb=9914.9 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:19:47] batch3: measuring event 8/16 id=batch3_dedup:b0:f1:l1:voxel16781313:e7 layer=1 frame=1 subsets=2 future_frames=4
+[oracle 2026-06-02 23:19:47] batch3_dedup:b0:f1:l1:voxel16781313:e7: replay subsets 1-2/2 batch=2 frames=0:6
+[oracle 2026-06-02 23:19:50] timing phase=replay event_id=batch3_dedup:b0:f1:l1:voxel16781313:e7 event_type=dedup layer_id=1 frame_id=1 num_subsets=2 chunk_size=2 chunk=1-2 stop=6 elapsed_sec=2.809 cuda_allocated_mb=9544.1 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:19:50] timing phase=event event_id=batch3_dedup:b0:f1:l1:voxel16781313:e7 event_type=dedup layer_id=1 frame_id=1 num_subsets=2 measured_subsets=2 replay_sec=2.809 target_sec=0.010 loss_sec=0.004 elapsed_sec=2.828 cuda_allocated_mb=9544.1 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:19:50] batch3: measuring event 9/16 id=batch3_dedup:b0:f1:l1:voxel16781314:e8 layer=1 frame=1 subsets=8 future_frames=4
+[oracle 2026-06-02 23:19:50] batch3_dedup:b0:f1:l1:voxel16781314:e8: replay subsets 1-8/8 batch=8 frames=0:6
+[oracle 2026-06-02 23:20:01] timing phase=replay event_id=batch3_dedup:b0:f1:l1:voxel16781314:e8 event_type=dedup layer_id=1 frame_id=1 num_subsets=8 chunk_size=8 chunk=1-8 stop=6 elapsed_sec=11.159 cuda_allocated_mb=9917.0 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:20:01] timing phase=event event_id=batch3_dedup:b0:f1:l1:voxel16781314:e8 event_type=dedup layer_id=1 frame_id=1 num_subsets=8 measured_subsets=8 replay_sec=11.159 target_sec=0.050 loss_sec=0.019 elapsed_sec=11.237 cuda_allocated_mb=9917.0 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:20:01] batch3: measuring event 10/16 id=batch3_dedup:b0:f1:l13:voxel16777218:e9 layer=13 frame=1 subsets=8 future_frames=4
+[oracle 2026-06-02 23:20:01] batch3_dedup:b0:f1:l13:voxel16777218:e9: replay subsets 1-8/8 batch=8 frames=0:6
+[oracle 2026-06-02 23:20:13] timing phase=replay event_id=batch3_dedup:b0:f1:l13:voxel16777218:e9 event_type=dedup layer_id=13 frame_id=1 num_subsets=8 chunk_size=8 chunk=1-8 stop=6 elapsed_sec=11.376 cuda_allocated_mb=9915.1 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:20:13] timing phase=event event_id=batch3_dedup:b0:f1:l13:voxel16777218:e9 event_type=dedup layer_id=13 frame_id=1 num_subsets=8 measured_subsets=8 replay_sec=11.376 target_sec=0.040 loss_sec=0.015 elapsed_sec=11.440 cuda_allocated_mb=9915.1 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:20:13] batch3: measuring event 11/16 id=batch3_dedup:b0:f1:l13:voxel16781313:e10 layer=13 frame=1 subsets=2 future_frames=4
+[oracle 2026-06-02 23:20:13] batch3_dedup:b0:f1:l13:voxel16781313:e10: replay subsets 1-2/2 batch=2 frames=0:6
+[oracle 2026-06-02 23:20:16] timing phase=replay event_id=batch3_dedup:b0:f1:l13:voxel16781313:e10 event_type=dedup layer_id=13 frame_id=1 num_subsets=2 chunk_size=2 chunk=1-2 stop=6 elapsed_sec=2.877 cuda_allocated_mb=9545.1 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:20:16] timing phase=event event_id=batch3_dedup:b0:f1:l13:voxel16781313:e10 event_type=dedup layer_id=13 frame_id=1 num_subsets=2 measured_subsets=2 replay_sec=2.877 target_sec=0.010 loss_sec=0.004 elapsed_sec=2.897 cuda_allocated_mb=9545.1 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:20:16] batch3: measuring event 12/16 id=batch3_dedup:b0:f1:l13:voxel16781314:e11 layer=13 frame=1 subsets=8 future_frames=4
+[oracle 2026-06-02 23:20:16] batch3_dedup:b0:f1:l13:voxel16781314:e11: replay subsets 1-8/8 batch=8 frames=0:6
+[oracle 2026-06-02 23:20:27] timing phase=replay event_id=batch3_dedup:b0:f1:l13:voxel16781314:e11 event_type=dedup layer_id=13 frame_id=1 num_subsets=8 chunk_size=8 chunk=1-8 stop=6 elapsed_sec=11.373 cuda_allocated_mb=9914.6 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:20:27] timing phase=event event_id=batch3_dedup:b0:f1:l13:voxel16781314:e11 event_type=dedup layer_id=13 frame_id=1 num_subsets=8 measured_subsets=8 replay_sec=11.373 target_sec=0.039 loss_sec=0.015 elapsed_sec=11.435 cuda_allocated_mb=9914.6 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:20:27] batch3: measuring event 13/16 id=batch3_dedup:b0:f2:l2:voxel16777218:e12 layer=2 frame=2 subsets=2 future_frames=4
+[oracle 2026-06-02 23:20:27] batch3_dedup:b0:f2:l2:voxel16777218:e12: replay subsets 1-2/2 batch=2 frames=0:7
+[oracle 2026-06-02 23:20:31] timing phase=replay event_id=batch3_dedup:b0:f2:l2:voxel16777218:e12 event_type=dedup layer_id=2 frame_id=2 num_subsets=2 chunk_size=2 chunk=1-2 stop=7 elapsed_sec=3.342 cuda_allocated_mb=9565.7 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:20:31] timing phase=event event_id=batch3_dedup:b0:f2:l2:voxel16777218:e12 event_type=dedup layer_id=2 frame_id=2 num_subsets=2 measured_subsets=2 replay_sec=3.342 target_sec=0.010 loss_sec=0.004 elapsed_sec=3.363 cuda_allocated_mb=9565.7 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:20:31] batch3: measuring event 14/16 id=batch3_dedup:b0:f2:l2:voxel16781314:e13 layer=2 frame=2 subsets=5 future_frames=4
+[oracle 2026-06-02 23:20:31] batch3_dedup:b0:f2:l2:voxel16781314:e13: replay subsets 1-5/5 batch=5 frames=0:7
+[oracle 2026-06-02 23:20:39] timing phase=replay event_id=batch3_dedup:b0:f2:l2:voxel16781314:e13 event_type=dedup layer_id=2 frame_id=2 num_subsets=5 chunk_size=5 chunk=1-5 stop=7 elapsed_sec=8.254 cuda_allocated_mb=9779.3 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:20:39] timing phase=event event_id=batch3_dedup:b0:f2:l2:voxel16781314:e13 event_type=dedup layer_id=2 frame_id=2 num_subsets=5 measured_subsets=5 replay_sec=8.254 target_sec=0.025 loss_sec=0.009 elapsed_sec=8.296 cuda_allocated_mb=9779.3 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:20:39] batch3: measuring event 15/16 id=batch3_dedup:b0:f2:l2:voxel33546239:e14 layer=2 frame=2 subsets=8 future_frames=4
+[oracle 2026-06-02 23:20:39] batch3_dedup:b0:f2:l2:voxel33546239:e14: replay subsets 1-8/8 batch=8 frames=0:7
+[oracle 2026-06-02 23:20:52] timing phase=replay event_id=batch3_dedup:b0:f2:l2:voxel33546239:e14 event_type=dedup layer_id=2 frame_id=2 num_subsets=8 chunk_size=8 chunk=1-8 stop=7 elapsed_sec=13.237 cuda_allocated_mb=9999.4 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:20:52] timing phase=event event_id=batch3_dedup:b0:f2:l2:voxel33546239:e14 event_type=dedup layer_id=2 frame_id=2 num_subsets=8 measured_subsets=8 replay_sec=13.237 target_sec=0.041 loss_sec=0.015 elapsed_sec=13.302 cuda_allocated_mb=9999.4 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:20:52] batch3: measuring event 16/16 id=batch3_dedup:b0:f2:l14:voxel16777218:e15 layer=14 frame=2 subsets=2 future_frames=4
+[oracle 2026-06-02 23:20:52] batch3_dedup:b0:f2:l14:voxel16777218:e15: replay subsets 1-2/2 batch=2 frames=0:7
+[oracle 2026-06-02 23:20:56] timing phase=replay event_id=batch3_dedup:b0:f2:l14:voxel16777218:e15 event_type=dedup layer_id=14 frame_id=2 num_subsets=2 chunk_size=2 chunk=1-2 stop=7 elapsed_sec=3.423 cuda_allocated_mb=9565.5 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:20:56] timing phase=event event_id=batch3_dedup:b0:f2:l14:voxel16777218:e15 event_type=dedup layer_id=14 frame_id=2 num_subsets=2 measured_subsets=2 replay_sec=3.423 target_sec=0.010 loss_sec=0.004 elapsed_sec=3.445 cuda_allocated_mb=9565.5 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:20:56] flushed partial shard: events=64 path=checkpoints/token_oracle/smoke_phase1.pt reason=batch 4/10 event 16 collected summary={"num_sequences": 4, "num_events": 64, "partial": true, "event_type_counts": {"dedup": 64}, "dataset_counts": {"WildRGBD": 1, "hypersim": 1, "VirtualKITTI2": 1, "arkitscenes_highres": 1}, "frame_histogram": {"0": 21, "1": 23, "2": 20}, "layer_histogram": {"0": 9, "1": 11, "2": 12, "12": 12, "13": 12, "14": 8}, "subsets_per_event": {"min": 2, "mean": 7.328125, "p50": 8.0, "p90": 8.0, "max": 8}, "events_per_hour": 2649852.3098145155, "elapsed_sec": 0.08694824203848839}
+[oracle 2026-06-02 23:20:56] timing phase=flush events=64 batch_idx=-1 force=0 elapsed_sec=0.088
+[oracle 2026-06-02 23:20:56] batch 4/10 done: batch_events=16 total_events=64
+[oracle 2026-06-02 23:20:56] flushed partial shard: events=64 path=checkpoints/token_oracle/smoke_phase1.pt reason=batch 4/10 done summary={"num_sequences": 4, "num_events": 64, "partial": true, "event_type_counts": {"dedup": 64}, "dataset_counts": {"WildRGBD": 1, "hypersim": 1, "VirtualKITTI2": 1, "arkitscenes_highres": 1}, "frame_histogram": {"0": 21, "1": 23, "2": 20}, "layer_histogram": {"0": 9, "1": 11, "2": 12, "12": 12, "13": 12, "14": 8}, "subsets_per_event": {"min": 2, "mean": 7.328125, "p50": 8.0, "p90": 8.0, "max": 8}, "events_per_hour": 2483116.5044673793, "elapsed_sec": 0.09278662502765656}
+[oracle 2026-06-02 23:20:56] timing phase=flush events=64 batch_idx=3 force=0 elapsed_sec=0.094
+[oracle 2026-06-02 23:20:58] batch 5/10 start: events_so_far=64
+[oracle 2026-06-02 23:20:58] batch 5/10 provenance: sequences=1 first=train_dataset/MegaDepth/0000/0:...:0000/0 frames=24
+[oracle 2026-06-02 23:20:58] batch4: running probe over 24 frames
+[oracle 2026-06-02 23:21:06] batch4: probe captured 0 eviction, 144 dedup, 0 fifo candidates, 16 total have future frames
+[oracle 2026-06-02 23:21:06] timing phase=probe event_prefix=batch4 frames=24 eviction=0 dedup=144 fifo=0 candidate_events=16 elapsed_sec=8.225 cuda_allocated_mb=9408.3 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:21:06] batch4: running high-budget teacher for 24 frames
+[oracle 2026-06-02 23:21:11] batch4: teacher outputs ready
+[oracle 2026-06-02 23:21:11] timing phase=teacher event_prefix=batch4 frames=24 elapsed_sec=5.166 cuda_allocated_mb=9526.7 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:21:11] batch4: measuring event 1/16 id=batch4_dedup:b0:f0:l0:voxel33550335:e0 layer=0 frame=0 subsets=8 future_frames=4
+[oracle 2026-06-02 23:21:11] batch4_dedup:b0:f0:l0:voxel33550335:e0: replay subsets 1-8/8 batch=8 frames=0:5
+[oracle 2026-06-02 23:21:21] timing phase=replay event_id=batch4_dedup:b0:f0:l0:voxel33550335:e0 event_type=dedup layer_id=0 frame_id=0 num_subsets=8 chunk_size=8 chunk=1-8 stop=5 elapsed_sec=9.977 cuda_allocated_mb=10134.5 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:21:21] timing phase=event event_id=batch4_dedup:b0:f0:l0:voxel33550335:e0 event_type=dedup layer_id=0 frame_id=0 num_subsets=8 measured_subsets=8 replay_sec=9.977 target_sec=0.039 loss_sec=0.014 elapsed_sec=10.038 cuda_allocated_mb=10134.5 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:21:21] batch4: measuring event 2/16 id=batch4_dedup:b0:f0:l0:voxel33550336:e1 layer=0 frame=0 subsets=8 future_frames=4
+[oracle 2026-06-02 23:21:21] batch4_dedup:b0:f0:l0:voxel33550336:e1: replay subsets 1-8/8 batch=8 frames=0:5
+[oracle 2026-06-02 23:21:31] timing phase=replay event_id=batch4_dedup:b0:f0:l0:voxel33550336:e1 event_type=dedup layer_id=0 frame_id=0 num_subsets=8 chunk_size=8 chunk=1-8 stop=5 elapsed_sec=9.904 cuda_allocated_mb=10134.7 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:21:31] timing phase=event event_id=batch4_dedup:b0:f0:l0:voxel33550336:e1 event_type=dedup layer_id=0 frame_id=0 num_subsets=8 measured_subsets=8 replay_sec=9.904 target_sec=0.040 loss_sec=0.015 elapsed_sec=9.967 cuda_allocated_mb=10134.7 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:21:31] batch4: measuring event 3/16 id=batch4_dedup:b0:f0:l0:voxel33554431:e2 layer=0 frame=0 subsets=8 future_frames=4
+[oracle 2026-06-02 23:21:31] batch4_dedup:b0:f0:l0:voxel33554431:e2: replay subsets 1-8/8 batch=8 frames=0:5
+[oracle 2026-06-02 23:21:41] timing phase=replay event_id=batch4_dedup:b0:f0:l0:voxel33554431:e2 event_type=dedup layer_id=0 frame_id=0 num_subsets=8 chunk_size=8 chunk=1-8 stop=5 elapsed_sec=9.936 cuda_allocated_mb=10135.2 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:21:41] timing phase=event event_id=batch4_dedup:b0:f0:l0:voxel33554431:e2 event_type=dedup layer_id=0 frame_id=0 num_subsets=8 measured_subsets=8 replay_sec=9.936 target_sec=0.040 loss_sec=0.015 elapsed_sec=9.999 cuda_allocated_mb=10135.2 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:21:41] batch4: measuring event 4/16 id=batch4_dedup:b0:f0:l12:voxel33550335:e3 layer=12 frame=0 subsets=8 future_frames=4
+[oracle 2026-06-02 23:21:41] batch4_dedup:b0:f0:l12:voxel33550335:e3: replay subsets 1-8/8 batch=8 frames=0:5
+[oracle 2026-06-02 23:21:51] timing phase=replay event_id=batch4_dedup:b0:f0:l12:voxel33550335:e3 event_type=dedup layer_id=12 frame_id=0 num_subsets=8 chunk_size=8 chunk=1-8 stop=5 elapsed_sec=9.596 cuda_allocated_mb=10134.8 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:21:51] timing phase=event event_id=batch4_dedup:b0:f0:l12:voxel33550335:e3 event_type=dedup layer_id=12 frame_id=0 num_subsets=8 measured_subsets=8 replay_sec=9.596 target_sec=0.039 loss_sec=0.015 elapsed_sec=9.657 cuda_allocated_mb=10134.8 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:21:51] batch4: measuring event 5/16 id=batch4_dedup:b0:f0:l12:voxel33550336:e4 layer=12 frame=0 subsets=8 future_frames=4
+[oracle 2026-06-02 23:21:51] batch4_dedup:b0:f0:l12:voxel33550336:e4: replay subsets 1-8/8 batch=8 frames=0:5
+[oracle 2026-06-02 23:22:00] timing phase=replay event_id=batch4_dedup:b0:f0:l12:voxel33550336:e4 event_type=dedup layer_id=12 frame_id=0 num_subsets=8 chunk_size=8 chunk=1-8 stop=5 elapsed_sec=9.576 cuda_allocated_mb=10135.2 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:22:00] timing phase=event event_id=batch4_dedup:b0:f0:l12:voxel33550336:e4 event_type=dedup layer_id=12 frame_id=0 num_subsets=8 measured_subsets=8 replay_sec=9.576 target_sec=0.038 loss_sec=0.014 elapsed_sec=9.636 cuda_allocated_mb=10135.2 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:22:00] batch4: measuring event 6/16 id=batch4_dedup:b0:f0:l12:voxel33554431:e5 layer=12 frame=0 subsets=8 future_frames=4
+[oracle 2026-06-02 23:22:00] batch4_dedup:b0:f0:l12:voxel33554431:e5: replay subsets 1-8/8 batch=8 frames=0:5
+[oracle 2026-06-02 23:22:10] timing phase=replay event_id=batch4_dedup:b0:f0:l12:voxel33554431:e5 event_type=dedup layer_id=12 frame_id=0 num_subsets=8 chunk_size=8 chunk=1-8 stop=5 elapsed_sec=9.565 cuda_allocated_mb=10134.5 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:22:10] timing phase=event event_id=batch4_dedup:b0:f0:l12:voxel33554431:e5 event_type=dedup layer_id=12 frame_id=0 num_subsets=8 measured_subsets=8 replay_sec=9.565 target_sec=0.037 loss_sec=0.014 elapsed_sec=9.624 cuda_allocated_mb=10134.5 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:22:10] batch4: measuring event 7/16 id=batch4_dedup:b0:f1:l1:voxel-1:e6 layer=1 frame=1 subsets=4 future_frames=4
+[oracle 2026-06-02 23:22:10] batch4_dedup:b0:f1:l1:voxel-1:e6: replay subsets 1-4/4 batch=4 frames=0:6
+[oracle 2026-06-02 23:22:16] timing phase=replay event_id=batch4_dedup:b0:f1:l1:voxel-1:e6 event_type=dedup layer_id=1 frame_id=1 num_subsets=4 chunk_size=4 chunk=1-4 stop=6 elapsed_sec=5.796 cuda_allocated_mb=9896.2 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:22:16] timing phase=event event_id=batch4_dedup:b0:f1:l1:voxel-1:e6 event_type=dedup layer_id=1 frame_id=1 num_subsets=4 measured_subsets=4 replay_sec=5.796 target_sec=0.019 loss_sec=0.007 elapsed_sec=5.829 cuda_allocated_mb=9896.2 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:22:16] batch4: measuring event 8/16 id=batch4_dedup:b0:f1:l1:voxel16777215:e7 layer=1 frame=1 subsets=8 future_frames=4
+[oracle 2026-06-02 23:22:16] batch4_dedup:b0:f1:l1:voxel16777215:e7: replay subsets 1-8/8 batch=8 frames=0:6
+[oracle 2026-06-02 23:22:27] timing phase=replay event_id=batch4_dedup:b0:f1:l1:voxel16777215:e7 event_type=dedup layer_id=1 frame_id=1 num_subsets=8 chunk_size=8 chunk=1-8 stop=6 elapsed_sec=11.551 cuda_allocated_mb=10256.2 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:22:27] timing phase=event event_id=batch4_dedup:b0:f1:l1:voxel16777215:e7 event_type=dedup layer_id=1 frame_id=1 num_subsets=8 measured_subsets=8 replay_sec=11.551 target_sec=0.037 loss_sec=0.014 elapsed_sec=11.610 cuda_allocated_mb=10256.2 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:22:27] batch4: measuring event 9/16 id=batch4_dedup:b0:f1:l1:voxel16777216:e8 layer=1 frame=1 subsets=8 future_frames=4
+[oracle 2026-06-02 23:22:27] batch4_dedup:b0:f1:l1:voxel16777216:e8: replay subsets 1-8/8 batch=8 frames=0:6
+[oracle 2026-06-02 23:22:39] timing phase=replay event_id=batch4_dedup:b0:f1:l1:voxel16777216:e8 event_type=dedup layer_id=1 frame_id=1 num_subsets=8 chunk_size=8 chunk=1-8 stop=6 elapsed_sec=11.519 cuda_allocated_mb=10255.9 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:22:39] timing phase=event event_id=batch4_dedup:b0:f1:l1:voxel16777216:e8 event_type=dedup layer_id=1 frame_id=1 num_subsets=8 measured_subsets=8 replay_sec=11.519 target_sec=0.037 loss_sec=0.014 elapsed_sec=11.578 cuda_allocated_mb=10255.9 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:22:39] batch4: measuring event 10/16 id=batch4_dedup:b0:f1:l13:voxel-1:e9 layer=13 frame=1 subsets=4 future_frames=4
+[oracle 2026-06-02 23:22:39] batch4_dedup:b0:f1:l13:voxel-1:e9: replay subsets 1-4/4 batch=4 frames=0:6
+[oracle 2026-06-02 23:22:45] timing phase=replay event_id=batch4_dedup:b0:f1:l13:voxel-1:e9 event_type=dedup layer_id=13 frame_id=1 num_subsets=4 chunk_size=4 chunk=1-4 stop=6 elapsed_sec=5.716 cuda_allocated_mb=9895.7 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:22:45] timing phase=event event_id=batch4_dedup:b0:f1:l13:voxel-1:e9 event_type=dedup layer_id=13 frame_id=1 num_subsets=4 measured_subsets=4 replay_sec=5.716 target_sec=0.019 loss_sec=0.007 elapsed_sec=5.749 cuda_allocated_mb=9895.7 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:22:45] batch4: measuring event 11/16 id=batch4_dedup:b0:f1:l13:voxel16777215:e10 layer=13 frame=1 subsets=8 future_frames=4
+[oracle 2026-06-02 23:22:45] batch4_dedup:b0:f1:l13:voxel16777215:e10: replay subsets 1-8/8 batch=8 frames=0:6
+[oracle 2026-06-02 23:22:56] timing phase=replay event_id=batch4_dedup:b0:f1:l13:voxel16777215:e10 event_type=dedup layer_id=13 frame_id=1 num_subsets=8 chunk_size=8 chunk=1-8 stop=6 elapsed_sec=11.432 cuda_allocated_mb=10257.0 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:22:56] timing phase=event event_id=batch4_dedup:b0:f1:l13:voxel16777215:e10 event_type=dedup layer_id=13 frame_id=1 num_subsets=8 measured_subsets=8 replay_sec=11.432 target_sec=0.038 loss_sec=0.014 elapsed_sec=11.492 cuda_allocated_mb=10257.0 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:22:56] batch4: measuring event 12/16 id=batch4_dedup:b0:f1:l13:voxel16777216:e11 layer=13 frame=1 subsets=8 future_frames=4
+[oracle 2026-06-02 23:22:56] batch4_dedup:b0:f1:l13:voxel16777216:e11: replay subsets 1-8/8 batch=8 frames=0:6
+[oracle 2026-06-02 23:23:08] timing phase=replay event_id=batch4_dedup:b0:f1:l13:voxel16777216:e11 event_type=dedup layer_id=13 frame_id=1 num_subsets=8 chunk_size=8 chunk=1-8 stop=6 elapsed_sec=11.472 cuda_allocated_mb=10256.0 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:23:08] timing phase=event event_id=batch4_dedup:b0:f1:l13:voxel16777216:e11 event_type=dedup layer_id=13 frame_id=1 num_subsets=8 measured_subsets=8 replay_sec=11.472 target_sec=0.039 loss_sec=0.014 elapsed_sec=11.533 cuda_allocated_mb=10256.0 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:23:08] batch4: measuring event 13/16 id=batch4_dedup:b0:f2:l2:voxel-1:e12 layer=2 frame=2 subsets=8 future_frames=4
+[oracle 2026-06-02 23:23:08] batch4_dedup:b0:f2:l2:voxel-1:e12: replay subsets 1-8/8 batch=8 frames=0:7
+[oracle 2026-06-02 23:23:21] timing phase=replay event_id=batch4_dedup:b0:f2:l2:voxel-1:e12 event_type=dedup layer_id=2 frame_id=2 num_subsets=8 chunk_size=8 chunk=1-8 stop=7 elapsed_sec=13.415 cuda_allocated_mb=10376.2 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:23:21] timing phase=event event_id=batch4_dedup:b0:f2:l2:voxel-1:e12 event_type=dedup layer_id=2 frame_id=2 num_subsets=8 measured_subsets=8 replay_sec=13.415 target_sec=0.037 loss_sec=0.014 elapsed_sec=13.474 cuda_allocated_mb=10376.2 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:23:21] batch4: measuring event 14/16 id=batch4_dedup:b0:f2:l2:voxel0:e13 layer=2 frame=2 subsets=8 future_frames=4
+[oracle 2026-06-02 23:23:21] batch4_dedup:b0:f2:l2:voxel0:e13: replay subsets 1-8/8 batch=8 frames=0:7
+[oracle 2026-06-02 23:23:35] timing phase=replay event_id=batch4_dedup:b0:f2:l2:voxel0:e13 event_type=dedup layer_id=2 frame_id=2 num_subsets=8 chunk_size=8 chunk=1-8 stop=7 elapsed_sec=13.424 cuda_allocated_mb=10376.7 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:23:35] timing phase=event event_id=batch4_dedup:b0:f2:l2:voxel0:e13 event_type=dedup layer_id=2 frame_id=2 num_subsets=8 measured_subsets=8 replay_sec=13.424 target_sec=0.038 loss_sec=0.014 elapsed_sec=13.483 cuda_allocated_mb=10376.7 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:23:35] batch4: measuring event 15/16 id=batch4_dedup:b0:f2:l2:voxel16777215:e14 layer=2 frame=2 subsets=8 future_frames=4
+[oracle 2026-06-02 23:23:35] batch4_dedup:b0:f2:l2:voxel16777215:e14: replay subsets 1-8/8 batch=8 frames=0:7
+[oracle 2026-06-02 23:23:48] timing phase=replay event_id=batch4_dedup:b0:f2:l2:voxel16777215:e14 event_type=dedup layer_id=2 frame_id=2 num_subsets=8 chunk_size=8 chunk=1-8 stop=7 elapsed_sec=13.474 cuda_allocated_mb=10376.9 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:23:48] timing phase=event event_id=batch4_dedup:b0:f2:l2:voxel16777215:e14 event_type=dedup layer_id=2 frame_id=2 num_subsets=8 measured_subsets=8 replay_sec=13.474 target_sec=0.038 loss_sec=0.014 elapsed_sec=13.534 cuda_allocated_mb=10376.9 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:23:48] batch4: measuring event 16/16 id=batch4_dedup:b0:f2:l14:voxel-1:e15 layer=14 frame=2 subsets=8 future_frames=4
+[oracle 2026-06-02 23:23:48] batch4_dedup:b0:f2:l14:voxel-1:e15: replay subsets 1-8/8 batch=8 frames=0:7
+[oracle 2026-06-02 23:24:02] timing phase=replay event_id=batch4_dedup:b0:f2:l14:voxel-1:e15 event_type=dedup layer_id=14 frame_id=2 num_subsets=8 chunk_size=8 chunk=1-8 stop=7 elapsed_sec=13.443 cuda_allocated_mb=10376.2 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:24:02] timing phase=event event_id=batch4_dedup:b0:f2:l14:voxel-1:e15 event_type=dedup layer_id=14 frame_id=2 num_subsets=8 measured_subsets=8 replay_sec=13.443 target_sec=0.038 loss_sec=0.014 elapsed_sec=13.503 cuda_allocated_mb=10376.2 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:24:02] flushed partial shard: events=80 path=checkpoints/token_oracle/smoke_phase1.pt reason=batch 5/10 event 16 collected summary={"num_sequences": 5, "num_events": 80, "partial": true, "event_type_counts": {"dedup": 80}, "dataset_counts": {"WildRGBD": 1, "hypersim": 1, "VirtualKITTI2": 1, "arkitscenes_highres": 1, "MegaDepth": 1}, "frame_histogram": {"0": 27, "1": 29, "2": 24}, "layer_histogram": {"0": 12, "1": 14, "2": 15, "12": 15, "13": 15, "14": 9}, "subsets_per_event": {"min": 2, "mean": 7.3625, "p50": 8.0, "p90": 8.0, "max": 8}, "events_per_hour": 2998668.45376669, "elapsed_sec": 0.09604262840002775}
+[oracle 2026-06-02 23:24:02] timing phase=flush events=80 batch_idx=-1 force=0 elapsed_sec=0.097
+[oracle 2026-06-02 23:24:02] batch 5/10 done: batch_events=16 total_events=80
+[oracle 2026-06-02 23:24:02] flushed partial shard: events=80 path=checkpoints/token_oracle/smoke_phase1.pt reason=batch 5/10 done summary={"num_sequences": 5, "num_events": 80, "partial": true, "event_type_counts": {"dedup": 80}, "dataset_counts": {"WildRGBD": 1, "hypersim": 1, "VirtualKITTI2": 1, "arkitscenes_highres": 1, "MegaDepth": 1}, "frame_histogram": {"0": 27, "1": 29, "2": 24}, "layer_histogram": {"0": 12, "1": 14, "2": 15, "12": 15, "13": 15, "14": 9}, "subsets_per_event": {"min": 2, "mean": 7.3625, "p50": 8.0, "p90": 8.0, "max": 8}, "events_per_hour": 2182581.09034935, "elapsed_sec": 0.13195386016741395}
+[oracle 2026-06-02 23:24:02] timing phase=flush events=80 batch_idx=4 force=0 elapsed_sec=0.133
+[oracle 2026-06-02 23:24:03] batch 6/10 start: events_so_far=80
+[oracle 2026-06-02 23:24:03] batch 6/10 provenance: sequences=1 first=train_dataset/Co3d_v2/toaster/200_21495_40171:...:toaster/200_21495_40171 frames=24
+[oracle 2026-06-02 23:24:03] batch5: running probe over 24 frames
+[oracle 2026-06-02 23:24:10] batch5: probe captured 0 eviction, 144 dedup, 0 fifo candidates, 16 total have future frames
+[oracle 2026-06-02 23:24:10] timing phase=probe event_prefix=batch5 frames=24 eviction=0 dedup=144 fifo=0 candidate_events=16 elapsed_sec=6.701 cuda_allocated_mb=9250.4 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:24:10] batch5: running high-budget teacher for 24 frames
+[oracle 2026-06-02 23:24:13] batch5: teacher outputs ready
+[oracle 2026-06-02 23:24:13] timing phase=teacher event_prefix=batch5 frames=24 elapsed_sec=3.383 cuda_allocated_mb=9294.3 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:24:13] batch5: measuring event 1/16 id=batch5_dedup:b0:f0:l0:voxel33550334:e0 layer=0 frame=0 subsets=6 future_frames=4
+[oracle 2026-06-02 23:24:13] batch5_dedup:b0:f0:l0:voxel33550334:e0: replay subsets 1-6/6 batch=6 frames=0:5
+[oracle 2026-06-02 23:24:20] timing phase=replay event_id=batch5_dedup:b0:f0:l0:voxel33550334:e0 event_type=dedup layer_id=0 frame_id=0 num_subsets=6 chunk_size=6 chunk=1-6 stop=5 elapsed_sec=6.550 cuda_allocated_mb=9475.2 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:24:20] timing phase=event event_id=batch5_dedup:b0:f0:l0:voxel33550334:e0 event_type=dedup layer_id=0 frame_id=0 num_subsets=6 measured_subsets=6 replay_sec=6.550 target_sec=0.027 loss_sec=0.010 elapsed_sec=6.593 cuda_allocated_mb=9475.2 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:24:20] batch5: measuring event 2/16 id=batch5_dedup:b0:f0:l0:voxel33550335:e1 layer=0 frame=0 subsets=8 future_frames=4
+[oracle 2026-06-02 23:24:20] batch5_dedup:b0:f0:l0:voxel33550335:e1: replay subsets 1-8/8 batch=8 frames=0:5
+[oracle 2026-06-02 23:24:29] timing phase=replay event_id=batch5_dedup:b0:f0:l0:voxel33550335:e1 event_type=dedup layer_id=0 frame_id=0 num_subsets=8 chunk_size=8 chunk=1-8 stop=5 elapsed_sec=8.577 cuda_allocated_mb=9540.0 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:24:29] timing phase=event event_id=batch5_dedup:b0:f0:l0:voxel33550335:e1 event_type=dedup layer_id=0 frame_id=0 num_subsets=8 measured_subsets=8 replay_sec=8.577 target_sec=0.036 loss_sec=0.014 elapsed_sec=8.633 cuda_allocated_mb=9540.0 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:24:29] batch5: measuring event 3/16 id=batch5_dedup:b0:f0:l0:voxel33550336:e2 layer=0 frame=0 subsets=8 future_frames=4
+[oracle 2026-06-02 23:24:29] batch5_dedup:b0:f0:l0:voxel33550336:e2: replay subsets 1-8/8 batch=8 frames=0:5
+[oracle 2026-06-02 23:24:38] timing phase=replay event_id=batch5_dedup:b0:f0:l0:voxel33550336:e2 event_type=dedup layer_id=0 frame_id=0 num_subsets=8 chunk_size=8 chunk=1-8 stop=5 elapsed_sec=8.912 cuda_allocated_mb=9541.7 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:24:38] timing phase=event event_id=batch5_dedup:b0:f0:l0:voxel33550336:e2 event_type=dedup layer_id=0 frame_id=0 num_subsets=8 measured_subsets=8 replay_sec=8.912 target_sec=0.040 loss_sec=0.015 elapsed_sec=8.974 cuda_allocated_mb=9541.7 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:24:38] batch5: measuring event 4/16 id=batch5_dedup:b0:f0:l12:voxel33550334:e3 layer=12 frame=0 subsets=6 future_frames=4
+[oracle 2026-06-02 23:24:38] batch5_dedup:b0:f0:l12:voxel33550334:e3: replay subsets 1-6/6 batch=6 frames=0:5
+[oracle 2026-06-02 23:24:45] timing phase=replay event_id=batch5_dedup:b0:f0:l12:voxel33550334:e3 event_type=dedup layer_id=12 frame_id=0 num_subsets=6 chunk_size=6 chunk=1-6 stop=5 elapsed_sec=7.042 cuda_allocated_mb=9475.8 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:24:45] timing phase=event event_id=batch5_dedup:b0:f0:l12:voxel33550334:e3 event_type=dedup layer_id=12 frame_id=0 num_subsets=6 measured_subsets=6 replay_sec=7.042 target_sec=0.030 loss_sec=0.011 elapsed_sec=7.089 cuda_allocated_mb=9475.8 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:24:45] batch5: measuring event 5/16 id=batch5_dedup:b0:f0:l12:voxel33550335:e4 layer=12 frame=0 subsets=8 future_frames=4
+[oracle 2026-06-02 23:24:45] batch5_dedup:b0:f0:l12:voxel33550335:e4: replay subsets 1-8/8 batch=8 frames=0:5
+[oracle 2026-06-02 23:24:54] timing phase=replay event_id=batch5_dedup:b0:f0:l12:voxel33550335:e4 event_type=dedup layer_id=12 frame_id=0 num_subsets=8 chunk_size=8 chunk=1-8 stop=5 elapsed_sec=9.274 cuda_allocated_mb=9538.7 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:24:54] timing phase=event event_id=batch5_dedup:b0:f0:l12:voxel33550335:e4 event_type=dedup layer_id=12 frame_id=0 num_subsets=8 measured_subsets=8 replay_sec=9.274 target_sec=0.040 loss_sec=0.015 elapsed_sec=9.337 cuda_allocated_mb=9538.7 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:24:54] batch5: measuring event 6/16 id=batch5_dedup:b0:f0:l12:voxel33550336:e5 layer=12 frame=0 subsets=8 future_frames=4
+[oracle 2026-06-02 23:24:54] batch5_dedup:b0:f0:l12:voxel33550336:e5: replay subsets 1-8/8 batch=8 frames=0:5
+[oracle 2026-06-02 23:25:04] timing phase=replay event_id=batch5_dedup:b0:f0:l12:voxel33550336:e5 event_type=dedup layer_id=12 frame_id=0 num_subsets=8 chunk_size=8 chunk=1-8 stop=5 elapsed_sec=9.498 cuda_allocated_mb=9539.9 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:25:04] timing phase=event event_id=batch5_dedup:b0:f0:l12:voxel33550336:e5 event_type=dedup layer_id=12 frame_id=0 num_subsets=8 measured_subsets=8 replay_sec=9.498 target_sec=0.040 loss_sec=0.015 elapsed_sec=9.561 cuda_allocated_mb=9539.9 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:25:04] batch5: measuring event 7/16 id=batch5_dedup:b0:f1:l1:voxel16777214:e6 layer=1 frame=1 subsets=4 future_frames=4
+[oracle 2026-06-02 23:25:04] batch5_dedup:b0:f1:l1:voxel16777214:e6: replay subsets 1-4/4 batch=4 frames=0:6
+[oracle 2026-06-02 23:25:09] timing phase=replay event_id=batch5_dedup:b0:f1:l1:voxel16777214:e6 event_type=dedup layer_id=1 frame_id=1 num_subsets=4 chunk_size=4 chunk=1-4 stop=6 elapsed_sec=5.696 cuda_allocated_mb=9441.1 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:25:09] timing phase=event event_id=batch5_dedup:b0:f1:l1:voxel16777214:e6 event_type=dedup layer_id=1 frame_id=1 num_subsets=4 measured_subsets=4 replay_sec=5.696 target_sec=0.020 loss_sec=0.007 elapsed_sec=5.731 cuda_allocated_mb=9441.1 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:25:09] batch5: measuring event 8/16 id=batch5_dedup:b0:f1:l1:voxel33550334:e7 layer=1 frame=1 subsets=4 future_frames=4
+[oracle 2026-06-02 23:25:09] batch5_dedup:b0:f1:l1:voxel33550334:e7: replay subsets 1-4/4 batch=4 frames=0:6
+[oracle 2026-06-02 23:25:15] timing phase=replay event_id=batch5_dedup:b0:f1:l1:voxel33550334:e7 event_type=dedup layer_id=1 frame_id=1 num_subsets=4 chunk_size=4 chunk=1-4 stop=6 elapsed_sec=5.666 cuda_allocated_mb=9441.1 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:25:15] timing phase=event event_id=batch5_dedup:b0:f1:l1:voxel33550334:e7 event_type=dedup layer_id=1 frame_id=1 num_subsets=4 measured_subsets=4 replay_sec=5.666 target_sec=0.020 loss_sec=0.008 elapsed_sec=5.701 cuda_allocated_mb=9441.1 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:25:15] batch5: measuring event 9/16 id=batch5_dedup:b0:f1:l1:voxel33550335:e8 layer=1 frame=1 subsets=8 future_frames=4
+[oracle 2026-06-02 23:25:15] batch5_dedup:b0:f1:l1:voxel33550335:e8: replay subsets 1-8/8 batch=8 frames=0:6
+[oracle 2026-06-02 23:25:26] timing phase=replay event_id=batch5_dedup:b0:f1:l1:voxel33550335:e8 event_type=dedup layer_id=1 frame_id=1 num_subsets=8 chunk_size=8 chunk=1-8 stop=6 elapsed_sec=11.293 cuda_allocated_mb=9586.5 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:25:26] timing phase=event event_id=batch5_dedup:b0:f1:l1:voxel33550335:e8 event_type=dedup layer_id=1 frame_id=1 num_subsets=8 measured_subsets=8 replay_sec=11.293 target_sec=0.040 loss_sec=0.015 elapsed_sec=11.355 cuda_allocated_mb=9586.5 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:25:26] batch5: measuring event 10/16 id=batch5_dedup:b0:f1:l13:voxel16777214:e9 layer=13 frame=1 subsets=4 future_frames=4
+[oracle 2026-06-02 23:25:26] batch5_dedup:b0:f1:l13:voxel16777214:e9: replay subsets 1-4/4 batch=4 frames=0:6
+[oracle 2026-06-02 23:25:32] timing phase=replay event_id=batch5_dedup:b0:f1:l13:voxel16777214:e9 event_type=dedup layer_id=13 frame_id=1 num_subsets=4 chunk_size=4 chunk=1-4 stop=6 elapsed_sec=5.702 cuda_allocated_mb=9440.7 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:25:32] timing phase=event event_id=batch5_dedup:b0:f1:l13:voxel16777214:e9 event_type=dedup layer_id=13 frame_id=1 num_subsets=4 measured_subsets=4 replay_sec=5.702 target_sec=0.020 loss_sec=0.007 elapsed_sec=5.738 cuda_allocated_mb=9440.7 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:25:32] batch5: measuring event 11/16 id=batch5_dedup:b0:f1:l13:voxel33550334:e10 layer=13 frame=1 subsets=3 future_frames=4
+[oracle 2026-06-02 23:25:32] batch5_dedup:b0:f1:l13:voxel33550334:e10: replay subsets 1-3/3 batch=3 frames=0:6
+[oracle 2026-06-02 23:25:36] timing phase=replay event_id=batch5_dedup:b0:f1:l13:voxel33550334:e10 event_type=dedup layer_id=13 frame_id=1 num_subsets=3 chunk_size=3 chunk=1-3 stop=6 elapsed_sec=4.293 cuda_allocated_mb=9402.2 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:25:36] timing phase=event event_id=batch5_dedup:b0:f1:l13:voxel33550334:e10 event_type=dedup layer_id=13 frame_id=1 num_subsets=3 measured_subsets=3 replay_sec=4.293 target_sec=0.015 loss_sec=0.005 elapsed_sec=4.320 cuda_allocated_mb=9402.2 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:25:36] batch5: measuring event 12/16 id=batch5_dedup:b0:f1:l13:voxel33550335:e11 layer=13 frame=1 subsets=8 future_frames=4
+[oracle 2026-06-02 23:25:36] batch5_dedup:b0:f1:l13:voxel33550335:e11: replay subsets 1-8/8 batch=8 frames=0:6
+[oracle 2026-06-02 23:25:48] timing phase=replay event_id=batch5_dedup:b0:f1:l13:voxel33550335:e11 event_type=dedup layer_id=13 frame_id=1 num_subsets=8 chunk_size=8 chunk=1-8 stop=6 elapsed_sec=11.328 cuda_allocated_mb=9587.5 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:25:48] timing phase=event event_id=batch5_dedup:b0:f1:l13:voxel33550335:e11 event_type=dedup layer_id=13 frame_id=1 num_subsets=8 measured_subsets=8 replay_sec=11.328 target_sec=0.040 loss_sec=0.015 elapsed_sec=11.390 cuda_allocated_mb=9587.5 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:25:48] batch5: measuring event 13/16 id=batch5_dedup:b0:f2:l2:voxel16773119:e12 layer=2 frame=2 subsets=5 future_frames=4
+[oracle 2026-06-02 23:25:48] batch5_dedup:b0:f2:l2:voxel16773119:e12: replay subsets 1-5/5 batch=5 frames=0:7
+[oracle 2026-06-02 23:25:56] timing phase=replay event_id=batch5_dedup:b0:f2:l2:voxel16773119:e12 event_type=dedup layer_id=2 frame_id=2 num_subsets=5 chunk_size=5 chunk=1-5 stop=7 elapsed_sec=8.403 cuda_allocated_mb=9506.4 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:25:56] timing phase=event event_id=batch5_dedup:b0:f2:l2:voxel16773119:e12 event_type=dedup layer_id=2 frame_id=2 num_subsets=5 measured_subsets=5 replay_sec=8.403 target_sec=0.025 loss_sec=0.009 elapsed_sec=8.446 cuda_allocated_mb=9506.4 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:25:56] batch5: measuring event 14/16 id=batch5_dedup:b0:f2:l2:voxel16777214:e13 layer=2 frame=2 subsets=2 future_frames=4
+[oracle 2026-06-02 23:25:56] batch5_dedup:b0:f2:l2:voxel16777214:e13: replay subsets 1-2/2 batch=2 frames=0:7
+[oracle 2026-06-02 23:26:00] timing phase=replay event_id=batch5_dedup:b0:f2:l2:voxel16777214:e13 event_type=dedup layer_id=2 frame_id=2 num_subsets=2 chunk_size=2 chunk=1-2 stop=7 elapsed_sec=3.350 cuda_allocated_mb=9379.5 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:26:00] timing phase=event event_id=batch5_dedup:b0:f2:l2:voxel16777214:e13 event_type=dedup layer_id=2 frame_id=2 num_subsets=2 measured_subsets=2 replay_sec=3.350 target_sec=0.010 loss_sec=0.004 elapsed_sec=3.370 cuda_allocated_mb=9379.5 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:26:00] batch5: measuring event 15/16 id=batch5_dedup:b0:f2:l2:voxel16777216:e14 layer=2 frame=2 subsets=8 future_frames=4
+[oracle 2026-06-02 23:26:00] batch5_dedup:b0:f2:l2:voxel16777216:e14: replay subsets 1-8/8 batch=8 frames=0:7
+[oracle 2026-06-02 23:26:13] timing phase=replay event_id=batch5_dedup:b0:f2:l2:voxel16777216:e14 event_type=dedup layer_id=2 frame_id=2 num_subsets=8 chunk_size=8 chunk=1-8 stop=7 elapsed_sec=12.901 cuda_allocated_mb=9636.9 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:26:13] timing phase=event event_id=batch5_dedup:b0:f2:l2:voxel16777216:e14 event_type=dedup layer_id=2 frame_id=2 num_subsets=8 measured_subsets=8 replay_sec=12.901 target_sec=0.040 loss_sec=0.015 elapsed_sec=12.963 cuda_allocated_mb=9636.9 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:26:13] batch5: measuring event 16/16 id=batch5_dedup:b0:f2:l14:voxel16773119:e15 layer=14 frame=2 subsets=5 future_frames=4
+[oracle 2026-06-02 23:26:13] batch5_dedup:b0:f2:l14:voxel16773119:e15: replay subsets 1-5/5 batch=5 frames=0:7
+[oracle 2026-06-02 23:26:21] timing phase=replay event_id=batch5_dedup:b0:f2:l14:voxel16773119:e15 event_type=dedup layer_id=14 frame_id=2 num_subsets=5 chunk_size=5 chunk=1-5 stop=7 elapsed_sec=8.254 cuda_allocated_mb=9505.2 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:26:21] timing phase=event event_id=batch5_dedup:b0:f2:l14:voxel16773119:e15 event_type=dedup layer_id=14 frame_id=2 num_subsets=5 measured_subsets=5 replay_sec=8.254 target_sec=0.025 loss_sec=0.009 elapsed_sec=8.297 cuda_allocated_mb=9505.2 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:26:21] flushed partial shard: events=96 path=checkpoints/token_oracle/smoke_phase1.pt reason=batch 6/10 event 16 collected summary={"num_sequences": 6, "num_events": 96, "partial": true, "event_type_counts": {"dedup": 96}, "dataset_counts": {"WildRGBD": 1, "hypersim": 1, "VirtualKITTI2": 1, "arkitscenes_highres": 1, "MegaDepth": 1, "Co3d_v2": 1}, "frame_histogram": {"0": 33, "1": 35, "2": 28}, "layer_histogram": {"0": 15, "1": 17, "2": 18, "12": 18, "13": 18, "14": 10}, "subsets_per_event": {"min": 2, "mean": 7.125, "p50": 8.0, "p90": 8.0, "max": 8}, "events_per_hour": 3135887.1883813133, "elapsed_sec": 0.11020804615691304}
+[oracle 2026-06-02 23:26:21] timing phase=flush events=96 batch_idx=-1 force=0 elapsed_sec=0.111
+[oracle 2026-06-02 23:26:21] batch 6/10 done: batch_events=16 total_events=96
+[oracle 2026-06-02 23:26:21] flushed partial shard: events=96 path=checkpoints/token_oracle/smoke_phase1.pt reason=batch 6/10 done summary={"num_sequences": 6, "num_events": 96, "partial": true, "event_type_counts": {"dedup": 96}, "dataset_counts": {"WildRGBD": 1, "hypersim": 1, "VirtualKITTI2": 1, "arkitscenes_highres": 1, "MegaDepth": 1, "Co3d_v2": 1}, "frame_histogram": {"0": 33, "1": 35, "2": 28}, "layer_histogram": {"0": 15, "1": 17, "2": 18, "12": 18, "13": 18, "14": 10}, "subsets_per_event": {"min": 2, "mean": 7.125, "p50": 8.0, "p90": 8.0, "max": 8}, "events_per_hour": 3190426.2408606936, "elapsed_sec": 0.10832408396527171}
+[oracle 2026-06-02 23:26:21] timing phase=flush events=96 batch_idx=5 force=0 elapsed_sec=0.109
+[oracle 2026-06-02 23:26:22] batch 7/10 start: events_so_far=96
+[oracle 2026-06-02 23:26:22] batch 7/10 provenance: sequences=1 first=train_dataset/PointOdyssey/cnb_dlab_0225_3rd_02209:...:cnb_dlab_0225_3rd_02278 frames=24
+[oracle 2026-06-02 23:26:22] batch6: running probe over 24 frames
+[oracle 2026-06-02 23:26:30] batch6: probe captured 0 eviction, 144 dedup, 0 fifo candidates, 16 total have future frames
+[oracle 2026-06-02 23:26:30] timing phase=probe event_prefix=batch6 frames=24 eviction=0 dedup=144 fifo=0 candidate_events=16 elapsed_sec=7.078 cuda_allocated_mb=9296.6 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:26:30] batch6: running high-budget teacher for 24 frames
+[oracle 2026-06-02 23:26:33] batch6: teacher outputs ready
+[oracle 2026-06-02 23:26:33] timing phase=teacher event_prefix=batch6 frames=24 elapsed_sec=3.728 cuda_allocated_mb=9366.3 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:26:33] batch6: measuring event 1/16 id=batch6_dedup:b0:f0:l0:voxel16773121:e0 layer=0 frame=0 subsets=2 future_frames=4
+[oracle 2026-06-02 23:26:33] batch6_dedup:b0:f0:l0:voxel16773121:e0: replay subsets 1-2/2 batch=2 frames=0:5
+[oracle 2026-06-02 23:26:36] timing phase=replay event_id=batch6_dedup:b0:f0:l0:voxel16773121:e0 event_type=dedup layer_id=0 frame_id=0 num_subsets=2 chunk_size=2 chunk=1-2 stop=5 elapsed_sec=2.431 cuda_allocated_mb=9450.4 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:26:36] timing phase=event event_id=batch6_dedup:b0:f0:l0:voxel16773121:e0 event_type=dedup layer_id=0 frame_id=0 num_subsets=2 measured_subsets=2 replay_sec=2.431 target_sec=0.010 loss_sec=0.004 elapsed_sec=2.451 cuda_allocated_mb=9450.4 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:26:36] batch6: measuring event 2/16 id=batch6_dedup:b0:f0:l0:voxel16777215:e1 layer=0 frame=0 subsets=7 future_frames=4
+[oracle 2026-06-02 23:26:36] batch6_dedup:b0:f0:l0:voxel16777215:e1: replay subsets 1-7/7 batch=7 frames=0:5
+[oracle 2026-06-02 23:26:44] timing phase=replay event_id=batch6_dedup:b0:f0:l0:voxel16777215:e1 event_type=dedup layer_id=0 frame_id=0 num_subsets=7 chunk_size=7 chunk=1-7 stop=5 elapsed_sec=8.292 cuda_allocated_mb=9656.5 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:26:44] timing phase=event event_id=batch6_dedup:b0:f0:l0:voxel16777215:e1 event_type=dedup layer_id=0 frame_id=0 num_subsets=7 measured_subsets=7 replay_sec=8.292 target_sec=0.035 loss_sec=0.013 elapsed_sec=8.346 cuda_allocated_mb=9656.5 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:26:44] batch6: measuring event 3/16 id=batch6_dedup:b0:f0:l0:voxel16777216:e2 layer=0 frame=0 subsets=8 future_frames=4
+[oracle 2026-06-02 23:26:44] batch6_dedup:b0:f0:l0:voxel16777216:e2: replay subsets 1-8/8 batch=8 frames=0:5
+[oracle 2026-06-02 23:26:54] timing phase=replay event_id=batch6_dedup:b0:f0:l0:voxel16777216:e2 event_type=dedup layer_id=0 frame_id=0 num_subsets=8 chunk_size=8 chunk=1-8 stop=5 elapsed_sec=9.488 cuda_allocated_mb=9694.2 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:26:54] timing phase=event event_id=batch6_dedup:b0:f0:l0:voxel16777216:e2 event_type=dedup layer_id=0 frame_id=0 num_subsets=8 measured_subsets=8 replay_sec=9.488 target_sec=0.040 loss_sec=0.015 elapsed_sec=9.548 cuda_allocated_mb=9694.2 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:26:54] batch6: measuring event 4/16 id=batch6_dedup:b0:f0:l12:voxel16773121:e3 layer=12 frame=0 subsets=2 future_frames=4
+[oracle 2026-06-02 23:26:54] batch6_dedup:b0:f0:l12:voxel16773121:e3: replay subsets 1-2/2 batch=2 frames=0:5
+[oracle 2026-06-02 23:26:56] timing phase=replay event_id=batch6_dedup:b0:f0:l12:voxel16773121:e3 event_type=dedup layer_id=12 frame_id=0 num_subsets=2 chunk_size=2 chunk=1-2 stop=5 elapsed_sec=2.403 cuda_allocated_mb=9450.0 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:26:56] timing phase=event event_id=batch6_dedup:b0:f0:l12:voxel16773121:e3 event_type=dedup layer_id=12 frame_id=0 num_subsets=2 measured_subsets=2 replay_sec=2.403 target_sec=0.010 loss_sec=0.004 elapsed_sec=2.423 cuda_allocated_mb=9450.0 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:26:56] batch6: measuring event 5/16 id=batch6_dedup:b0:f0:l12:voxel16777215:e4 layer=12 frame=0 subsets=7 future_frames=4
+[oracle 2026-06-02 23:26:56] batch6_dedup:b0:f0:l12:voxel16777215:e4: replay subsets 1-7/7 batch=7 frames=0:5
+[oracle 2026-06-02 23:27:04] timing phase=replay event_id=batch6_dedup:b0:f0:l12:voxel16777215:e4 event_type=dedup layer_id=12 frame_id=0 num_subsets=7 chunk_size=7 chunk=1-7 stop=5 elapsed_sec=8.286 cuda_allocated_mb=9657.0 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:27:04] timing phase=event event_id=batch6_dedup:b0:f0:l12:voxel16777215:e4 event_type=dedup layer_id=12 frame_id=0 num_subsets=7 measured_subsets=7 replay_sec=8.286 target_sec=0.036 loss_sec=0.014 elapsed_sec=8.342 cuda_allocated_mb=9657.0 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:27:04] batch6: measuring event 6/16 id=batch6_dedup:b0:f0:l12:voxel16777216:e5 layer=12 frame=0 subsets=8 future_frames=4
+[oracle 2026-06-02 23:27:04] batch6_dedup:b0:f0:l12:voxel16777216:e5: replay subsets 1-8/8 batch=8 frames=0:5
+[oracle 2026-06-02 23:27:14] timing phase=replay event_id=batch6_dedup:b0:f0:l12:voxel16777216:e5 event_type=dedup layer_id=12 frame_id=0 num_subsets=8 chunk_size=8 chunk=1-8 stop=5 elapsed_sec=9.485 cuda_allocated_mb=9693.6 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:27:14] timing phase=event event_id=batch6_dedup:b0:f0:l12:voxel16777216:e5 event_type=dedup layer_id=12 frame_id=0 num_subsets=8 measured_subsets=8 replay_sec=9.485 target_sec=0.040 loss_sec=0.015 elapsed_sec=9.547 cuda_allocated_mb=9693.6 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:27:14] batch6: measuring event 7/16 id=batch6_dedup:b0:f1:l1:voxel16773120:e6 layer=1 frame=1 subsets=3 future_frames=4
+[oracle 2026-06-02 23:27:14] batch6_dedup:b0:f1:l1:voxel16773120:e6: replay subsets 1-3/3 batch=3 frames=0:6
+[oracle 2026-06-02 23:27:18] timing phase=replay event_id=batch6_dedup:b0:f1:l1:voxel16773120:e6 event_type=dedup layer_id=1 frame_id=1 num_subsets=3 chunk_size=3 chunk=1-3 stop=6 elapsed_sec=4.300 cuda_allocated_mb=9522.7 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:27:18] timing phase=event event_id=batch6_dedup:b0:f1:l1:voxel16773120:e6 event_type=dedup layer_id=1 frame_id=1 num_subsets=3 measured_subsets=3 replay_sec=4.300 target_sec=0.015 loss_sec=0.006 elapsed_sec=4.328 cuda_allocated_mb=9522.7 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:27:18] batch6: measuring event 8/16 id=batch6_dedup:b0:f1:l1:voxel16773121:e7 layer=1 frame=1 subsets=4 future_frames=4
+[oracle 2026-06-02 23:27:18] batch6_dedup:b0:f1:l1:voxel16773121:e7: replay subsets 1-4/4 batch=4 frames=0:6
+[oracle 2026-06-02 23:27:24] timing phase=replay event_id=batch6_dedup:b0:f1:l1:voxel16773121:e7 event_type=dedup layer_id=1 frame_id=1 num_subsets=4 chunk_size=4 chunk=1-4 stop=6 elapsed_sec=5.700 cuda_allocated_mb=9568.5 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:27:24] timing phase=event event_id=batch6_dedup:b0:f1:l1:voxel16773121:e7 event_type=dedup layer_id=1 frame_id=1 num_subsets=4 measured_subsets=4 replay_sec=5.700 target_sec=0.020 loss_sec=0.007 elapsed_sec=5.734 cuda_allocated_mb=9568.5 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:27:24] batch6: measuring event 9/16 id=batch6_dedup:b0:f1:l1:voxel16777215:e8 layer=1 frame=1 subsets=8 future_frames=4
+[oracle 2026-06-02 23:27:24] batch6_dedup:b0:f1:l1:voxel16777215:e8: replay subsets 1-8/8 batch=8 frames=0:6
+[oracle 2026-06-02 23:27:35] timing phase=replay event_id=batch6_dedup:b0:f1:l1:voxel16777215:e8 event_type=dedup layer_id=1 frame_id=1 num_subsets=8 chunk_size=8 chunk=1-8 stop=6 elapsed_sec=11.384 cuda_allocated_mb=9761.3 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:27:35] timing phase=event event_id=batch6_dedup:b0:f1:l1:voxel16777215:e8 event_type=dedup layer_id=1 frame_id=1 num_subsets=8 measured_subsets=8 replay_sec=11.384 target_sec=0.040 loss_sec=0.015 elapsed_sec=11.445 cuda_allocated_mb=9761.3 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:27:35] batch6: measuring event 10/16 id=batch6_dedup:b0:f1:l13:voxel16773120:e9 layer=13 frame=1 subsets=4 future_frames=4
+[oracle 2026-06-02 23:27:35] batch6_dedup:b0:f1:l13:voxel16773120:e9: replay subsets 1-4/4 batch=4 frames=0:6
+[oracle 2026-06-02 23:27:41] timing phase=replay event_id=batch6_dedup:b0:f1:l13:voxel16773120:e9 event_type=dedup layer_id=13 frame_id=1 num_subsets=4 chunk_size=4 chunk=1-4 stop=6 elapsed_sec=5.731 cuda_allocated_mb=9568.5 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:27:41] timing phase=event event_id=batch6_dedup:b0:f1:l13:voxel16773120:e9 event_type=dedup layer_id=13 frame_id=1 num_subsets=4 measured_subsets=4 replay_sec=5.731 target_sec=0.020 loss_sec=0.008 elapsed_sec=5.767 cuda_allocated_mb=9568.5 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:27:41] batch6: measuring event 11/16 id=batch6_dedup:b0:f1:l13:voxel16773121:e10 layer=13 frame=1 subsets=3 future_frames=4
+[oracle 2026-06-02 23:27:41] batch6_dedup:b0:f1:l13:voxel16773121:e10: replay subsets 1-3/3 batch=3 frames=0:6
+[oracle 2026-06-02 23:27:46] timing phase=replay event_id=batch6_dedup:b0:f1:l13:voxel16773121:e10 event_type=dedup layer_id=13 frame_id=1 num_subsets=3 chunk_size=3 chunk=1-3 stop=6 elapsed_sec=4.305 cuda_allocated_mb=9524.0 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:27:46] timing phase=event event_id=batch6_dedup:b0:f1:l13:voxel16773121:e10 event_type=dedup layer_id=13 frame_id=1 num_subsets=3 measured_subsets=3 replay_sec=4.305 target_sec=0.015 loss_sec=0.006 elapsed_sec=4.333 cuda_allocated_mb=9524.0 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:27:46] batch6: measuring event 12/16 id=batch6_dedup:b0:f1:l13:voxel16777215:e11 layer=13 frame=1 subsets=8 future_frames=4
+[oracle 2026-06-02 23:27:46] batch6_dedup:b0:f1:l13:voxel16777215:e11: replay subsets 1-8/8 batch=8 frames=0:6
+[oracle 2026-06-02 23:27:57] timing phase=replay event_id=batch6_dedup:b0:f1:l13:voxel16777215:e11 event_type=dedup layer_id=13 frame_id=1 num_subsets=8 chunk_size=8 chunk=1-8 stop=6 elapsed_sec=11.447 cuda_allocated_mb=9759.6 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:27:57] timing phase=event event_id=batch6_dedup:b0:f1:l13:voxel16777215:e11 event_type=dedup layer_id=13 frame_id=1 num_subsets=8 measured_subsets=8 replay_sec=11.447 target_sec=0.040 loss_sec=0.015 elapsed_sec=11.509 cuda_allocated_mb=9759.6 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:27:57] batch6: measuring event 13/16 id=batch6_dedup:b0:f2:l2:voxel16773120:e12 layer=2 frame=2 subsets=6 future_frames=4
+[oracle 2026-06-02 23:27:57] batch6_dedup:b0:f2:l2:voxel16773120:e12: replay subsets 1-6/6 batch=6 frames=0:7
+[oracle 2026-06-02 23:28:07] timing phase=replay event_id=batch6_dedup:b0:f2:l2:voxel16773120:e12 event_type=dedup layer_id=2 frame_id=2 num_subsets=6 chunk_size=6 chunk=1-6 stop=7 elapsed_sec=10.023 cuda_allocated_mb=9714.9 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:28:07] timing phase=event event_id=batch6_dedup:b0:f2:l2:voxel16773120:e12 event_type=dedup layer_id=2 frame_id=2 num_subsets=6 measured_subsets=6 replay_sec=10.023 target_sec=0.030 loss_sec=0.011 elapsed_sec=10.072 cuda_allocated_mb=9714.9 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:28:07] batch6: measuring event 14/16 id=batch6_dedup:b0:f2:l2:voxel16773121:e13 layer=2 frame=2 subsets=3 future_frames=4
+[oracle 2026-06-02 23:28:07] batch6_dedup:b0:f2:l2:voxel16773121:e13: replay subsets 1-3/3 batch=3 frames=0:7
+[oracle 2026-06-02 23:28:12] timing phase=replay event_id=batch6_dedup:b0:f2:l2:voxel16773121:e13 event_type=dedup layer_id=2 frame_id=2 num_subsets=3 chunk_size=3 chunk=1-3 stop=7 elapsed_sec=5.058 cuda_allocated_mb=9550.3 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:28:12] timing phase=event event_id=batch6_dedup:b0:f2:l2:voxel16773121:e13 event_type=dedup layer_id=2 frame_id=2 num_subsets=3 measured_subsets=3 replay_sec=5.058 target_sec=0.019 loss_sec=0.007 elapsed_sec=5.093 cuda_allocated_mb=9550.3 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:28:12] batch6: measuring event 15/16 id=batch6_dedup:b0:f2:l2:voxel16777215:e14 layer=2 frame=2 subsets=8 future_frames=4
+[oracle 2026-06-02 23:28:12] batch6_dedup:b0:f2:l2:voxel16777215:e14: replay subsets 1-8/8 batch=8 frames=0:7
+[oracle 2026-06-02 23:28:26] timing phase=replay event_id=batch6_dedup:b0:f2:l2:voxel16777215:e14 event_type=dedup layer_id=2 frame_id=2 num_subsets=8 chunk_size=8 chunk=1-8 stop=7 elapsed_sec=13.602 cuda_allocated_mb=9826.2 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:28:26] timing phase=event event_id=batch6_dedup:b0:f2:l2:voxel16777215:e14 event_type=dedup layer_id=2 frame_id=2 num_subsets=8 measured_subsets=8 replay_sec=13.602 target_sec=0.043 loss_sec=0.016 elapsed_sec=13.670 cuda_allocated_mb=9826.2 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:28:26] batch6: measuring event 16/16 id=batch6_dedup:b0:f2:l14:voxel16773120:e15 layer=14 frame=2 subsets=5 future_frames=4
+[oracle 2026-06-02 23:28:26] batch6_dedup:b0:f2:l14:voxel16773120:e15: replay subsets 1-5/5 batch=5 frames=0:7
+[oracle 2026-06-02 23:28:34] timing phase=replay event_id=batch6_dedup:b0:f2:l14:voxel16773120:e15 event_type=dedup layer_id=14 frame_id=2 num_subsets=5 chunk_size=5 chunk=1-5 stop=7 elapsed_sec=8.539 cuda_allocated_mb=9654.6 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:28:34] timing phase=event event_id=batch6_dedup:b0:f2:l14:voxel16773120:e15 event_type=dedup layer_id=14 frame_id=2 num_subsets=5 measured_subsets=5 replay_sec=8.539 target_sec=0.026 loss_sec=0.010 elapsed_sec=8.585 cuda_allocated_mb=9654.6 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:28:35] flushed partial shard: events=112 path=checkpoints/token_oracle/smoke_phase1.pt reason=batch 7/10 event 16 collected summary={"num_sequences": 7, "num_events": 112, "partial": true, "event_type_counts": {"dedup": 112}, "dataset_counts": {"WildRGBD": 1, "hypersim": 1, "VirtualKITTI2": 1, "arkitscenes_highres": 1, "MegaDepth": 1, "Co3d_v2": 1, "PointOdyssey": 1}, "frame_histogram": {"0": 39, "1": 41, "2": 32}, "layer_histogram": {"0": 18, "1": 20, "2": 21, "12": 21, "13": 21, "14": 11}, "subsets_per_event": {"min": 2, "mean": 6.875, "p50": 8.0, "p90": 8.0, "max": 8}, "events_per_hour": 3297746.627662656, "elapsed_sec": 0.12226530583575368}
+[oracle 2026-06-02 23:28:35] timing phase=flush events=112 batch_idx=-1 force=0 elapsed_sec=0.123
+[oracle 2026-06-02 23:28:35] batch 7/10 done: batch_events=16 total_events=112
+[oracle 2026-06-02 23:28:35] flushed partial shard: events=112 path=checkpoints/token_oracle/smoke_phase1.pt reason=batch 7/10 done summary={"num_sequences": 7, "num_events": 112, "partial": true, "event_type_counts": {"dedup": 112}, "dataset_counts": {"WildRGBD": 1, "hypersim": 1, "VirtualKITTI2": 1, "arkitscenes_highres": 1, "MegaDepth": 1, "Co3d_v2": 1, "PointOdyssey": 1}, "frame_histogram": {"0": 39, "1": 41, "2": 32}, "layer_histogram": {"0": 18, "1": 20, "2": 21, "12": 21, "13": 21, "14": 11}, "subsets_per_event": {"min": 2, "mean": 6.875, "p50": 8.0, "p90": 8.0, "max": 8}, "events_per_hour": 3397082.0730766933, "elapsed_sec": 0.11869009677320719}
+[oracle 2026-06-02 23:28:35] timing phase=flush events=112 batch_idx=6 force=0 elapsed_sec=0.120
+[oracle 2026-06-02 23:28:37] batch 8/10 start: events_so_far=112
+[oracle 2026-06-02 23:28:37] batch 8/10 provenance: sequences=1 first=train_dataset/hypersim/ai_027_004/cam_02_000064_rgb.png:...:ai_027_004/cam_02_000089_rgb.png frames=24
+[oracle 2026-06-02 23:28:37] batch7: running probe over 24 frames
+[oracle 2026-06-02 23:28:44] batch7: probe captured 0 eviction, 144 dedup, 0 fifo candidates, 16 total have future frames
+[oracle 2026-06-02 23:28:44] timing phase=probe event_prefix=batch7 frames=24 eviction=0 dedup=144 fifo=0 candidate_events=16 elapsed_sec=7.357 cuda_allocated_mb=9341.1 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:28:44] batch7: running high-budget teacher for 24 frames
+[oracle 2026-06-02 23:28:48] batch7: teacher outputs ready
+[oracle 2026-06-02 23:28:48] timing phase=teacher event_prefix=batch7 frames=24 elapsed_sec=4.135 cuda_allocated_mb=9430.1 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:28:48] batch7: measuring event 1/16 id=batch7_dedup:b0:f0:l0:voxel16777215:e0 layer=0 frame=0 subsets=8 future_frames=4
+[oracle 2026-06-02 23:28:48] batch7_dedup:b0:f0:l0:voxel16777215:e0: replay subsets 1-8/8 batch=8 frames=0:5
+[oracle 2026-06-02 23:28:58] timing phase=replay event_id=batch7_dedup:b0:f0:l0:voxel16777215:e0 event_type=dedup layer_id=0 frame_id=0 num_subsets=8 chunk_size=8 chunk=1-8 stop=5 elapsed_sec=9.592 cuda_allocated_mb=9889.2 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:28:58] timing phase=event event_id=batch7_dedup:b0:f0:l0:voxel16777215:e0 event_type=dedup layer_id=0 frame_id=0 num_subsets=8 measured_subsets=8 replay_sec=9.592 target_sec=0.039 loss_sec=0.015 elapsed_sec=9.653 cuda_allocated_mb=9889.2 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:28:58] batch7: measuring event 2/16 id=batch7_dedup:b0:f0:l0:voxel16777216:e1 layer=0 frame=0 subsets=8 future_frames=4
+[oracle 2026-06-02 23:28:58] batch7_dedup:b0:f0:l0:voxel16777216:e1: replay subsets 1-8/8 batch=8 frames=0:5
+[oracle 2026-06-02 23:29:08] timing phase=replay event_id=batch7_dedup:b0:f0:l0:voxel16777216:e1 event_type=dedup layer_id=0 frame_id=0 num_subsets=8 chunk_size=8 chunk=1-8 stop=5 elapsed_sec=9.471 cuda_allocated_mb=9889.7 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:29:08] timing phase=event event_id=batch7_dedup:b0:f0:l0:voxel16777216:e1 event_type=dedup layer_id=0 frame_id=0 num_subsets=8 measured_subsets=8 replay_sec=9.471 target_sec=0.041 loss_sec=0.015 elapsed_sec=9.534 cuda_allocated_mb=9889.7 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:29:08] batch7: measuring event 3/16 id=batch7_dedup:b0:f0:l0:voxel33550335:e2 layer=0 frame=0 subsets=2 future_frames=4
+[oracle 2026-06-02 23:29:08] batch7_dedup:b0:f0:l0:voxel33550335:e2: replay subsets 1-2/2 batch=2 frames=0:5
+[oracle 2026-06-02 23:29:10] timing phase=replay event_id=batch7_dedup:b0:f0:l0:voxel33550335:e2 event_type=dedup layer_id=0 frame_id=0 num_subsets=2 chunk_size=2 chunk=1-2 stop=5 elapsed_sec=2.428 cuda_allocated_mb=9548.8 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:29:10] timing phase=event event_id=batch7_dedup:b0:f0:l0:voxel33550335:e2 event_type=dedup layer_id=0 frame_id=0 num_subsets=2 measured_subsets=2 replay_sec=2.428 target_sec=0.010 loss_sec=0.004 elapsed_sec=2.447 cuda_allocated_mb=9548.8 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:29:10] batch7: measuring event 4/16 id=batch7_dedup:b0:f0:l12:voxel16777215:e3 layer=12 frame=0 subsets=8 future_frames=4
+[oracle 2026-06-02 23:29:10] batch7_dedup:b0:f0:l12:voxel16777215:e3: replay subsets 1-8/8 batch=8 frames=0:5
+[oracle 2026-06-02 23:29:20] timing phase=replay event_id=batch7_dedup:b0:f0:l12:voxel16777215:e3 event_type=dedup layer_id=12 frame_id=0 num_subsets=8 chunk_size=8 chunk=1-8 stop=5 elapsed_sec=9.446 cuda_allocated_mb=9890.9 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:29:20] timing phase=event event_id=batch7_dedup:b0:f0:l12:voxel16777215:e3 event_type=dedup layer_id=12 frame_id=0 num_subsets=8 measured_subsets=8 replay_sec=9.446 target_sec=0.039 loss_sec=0.015 elapsed_sec=9.507 cuda_allocated_mb=9890.9 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:29:20] batch7: measuring event 5/16 id=batch7_dedup:b0:f0:l12:voxel16777216:e4 layer=12 frame=0 subsets=8 future_frames=4
+[oracle 2026-06-02 23:29:20] batch7_dedup:b0:f0:l12:voxel16777216:e4: replay subsets 1-8/8 batch=8 frames=0:5
+[oracle 2026-06-02 23:29:29] timing phase=replay event_id=batch7_dedup:b0:f0:l12:voxel16777216:e4 event_type=dedup layer_id=12 frame_id=0 num_subsets=8 chunk_size=8 chunk=1-8 stop=5 elapsed_sec=9.673 cuda_allocated_mb=9889.8 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:29:29] timing phase=event event_id=batch7_dedup:b0:f0:l12:voxel16777216:e4 event_type=dedup layer_id=12 frame_id=0 num_subsets=8 measured_subsets=8 replay_sec=9.673 target_sec=0.040 loss_sec=0.015 elapsed_sec=9.735 cuda_allocated_mb=9889.8 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:29:29] batch7: measuring event 6/16 id=batch7_dedup:b0:f0:l12:voxel33550335:e5 layer=12 frame=0 subsets=2 future_frames=4
+[oracle 2026-06-02 23:29:29] batch7_dedup:b0:f0:l12:voxel33550335:e5: replay subsets 1-2/2 batch=2 frames=0:5
+[oracle 2026-06-02 23:29:32] timing phase=replay event_id=batch7_dedup:b0:f0:l12:voxel33550335:e5 event_type=dedup layer_id=12 frame_id=0 num_subsets=2 chunk_size=2 chunk=1-2 stop=5 elapsed_sec=2.420 cuda_allocated_mb=9549.5 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:29:32] timing phase=event event_id=batch7_dedup:b0:f0:l12:voxel33550335:e5 event_type=dedup layer_id=12 frame_id=0 num_subsets=2 measured_subsets=2 replay_sec=2.420 target_sec=0.010 loss_sec=0.004 elapsed_sec=2.440 cuda_allocated_mb=9549.5 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:29:32] batch7: measuring event 7/16 id=batch7_dedup:b0:f1:l1:voxel0:e6 layer=1 frame=1 subsets=8 future_frames=4
+[oracle 2026-06-02 23:29:32] batch7_dedup:b0:f1:l1:voxel0:e6: replay subsets 1-8/8 batch=8 frames=0:6
+[oracle 2026-06-02 23:29:43] timing phase=replay event_id=batch7_dedup:b0:f1:l1:voxel0:e6 event_type=dedup layer_id=1 frame_id=1 num_subsets=8 chunk_size=8 chunk=1-8 stop=6 elapsed_sec=11.634 cuda_allocated_mb=9982.7 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:29:43] timing phase=event event_id=batch7_dedup:b0:f1:l1:voxel0:e6 event_type=dedup layer_id=1 frame_id=1 num_subsets=8 measured_subsets=8 replay_sec=11.634 target_sec=0.040 loss_sec=0.015 elapsed_sec=11.695 cuda_allocated_mb=9982.7 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:29:43] batch7: measuring event 8/16 id=batch7_dedup:b0:f1:l1:voxel1:e7 layer=1 frame=1 subsets=8 future_frames=4
+[oracle 2026-06-02 23:29:43] batch7_dedup:b0:f1:l1:voxel1:e7: replay subsets 1-8/8 batch=8 frames=0:6
+[oracle 2026-06-02 23:29:55] timing phase=replay event_id=batch7_dedup:b0:f1:l1:voxel1:e7 event_type=dedup layer_id=1 frame_id=1 num_subsets=8 chunk_size=8 chunk=1-8 stop=6 elapsed_sec=11.601 cuda_allocated_mb=9982.0 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:29:55] timing phase=event event_id=batch7_dedup:b0:f1:l1:voxel1:e7 event_type=dedup layer_id=1 frame_id=1 num_subsets=8 measured_subsets=8 replay_sec=11.601 target_sec=0.040 loss_sec=0.015 elapsed_sec=11.663 cuda_allocated_mb=9982.0 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:29:55] batch7: measuring event 9/16 id=batch7_dedup:b0:f1:l1:voxel16777215:e8 layer=1 frame=1 subsets=8 future_frames=4
+[oracle 2026-06-02 23:29:55] batch7_dedup:b0:f1:l1:voxel16777215:e8: replay subsets 1-8/8 batch=8 frames=0:6
+[oracle 2026-06-02 23:30:07] timing phase=replay event_id=batch7_dedup:b0:f1:l1:voxel16777215:e8 event_type=dedup layer_id=1 frame_id=1 num_subsets=8 chunk_size=8 chunk=1-8 stop=6 elapsed_sec=11.585 cuda_allocated_mb=9983.6 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:30:07] timing phase=event event_id=batch7_dedup:b0:f1:l1:voxel16777215:e8 event_type=dedup layer_id=1 frame_id=1 num_subsets=8 measured_subsets=8 replay_sec=11.585 target_sec=0.040 loss_sec=0.015 elapsed_sec=11.650 cuda_allocated_mb=9983.6 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:30:07] batch7: measuring event 10/16 id=batch7_dedup:b0:f1:l13:voxel0:e9 layer=13 frame=1 subsets=8 future_frames=4
+[oracle 2026-06-02 23:30:07] batch7_dedup:b0:f1:l13:voxel0:e9: replay subsets 1-8/8 batch=8 frames=0:6
+[oracle 2026-06-02 23:30:18] timing phase=replay event_id=batch7_dedup:b0:f1:l13:voxel0:e9 event_type=dedup layer_id=13 frame_id=1 num_subsets=8 chunk_size=8 chunk=1-8 stop=6 elapsed_sec=11.583 cuda_allocated_mb=9982.1 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:30:18] timing phase=event event_id=batch7_dedup:b0:f1:l13:voxel0:e9 event_type=dedup layer_id=13 frame_id=1 num_subsets=8 measured_subsets=8 replay_sec=11.583 target_sec=0.039 loss_sec=0.015 elapsed_sec=11.646 cuda_allocated_mb=9982.1 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:30:18] batch7: measuring event 11/16 id=batch7_dedup:b0:f1:l13:voxel1:e10 layer=13 frame=1 subsets=8 future_frames=4
+[oracle 2026-06-02 23:30:18] batch7_dedup:b0:f1:l13:voxel1:e10: replay subsets 1-8/8 batch=8 frames=0:6
+[oracle 2026-06-02 23:30:30] timing phase=replay event_id=batch7_dedup:b0:f1:l13:voxel1:e10 event_type=dedup layer_id=13 frame_id=1 num_subsets=8 chunk_size=8 chunk=1-8 stop=6 elapsed_sec=11.553 cuda_allocated_mb=9981.4 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:30:30] timing phase=event event_id=batch7_dedup:b0:f1:l13:voxel1:e10 event_type=dedup layer_id=13 frame_id=1 num_subsets=8 measured_subsets=8 replay_sec=11.553 target_sec=0.040 loss_sec=0.015 elapsed_sec=11.617 cuda_allocated_mb=9981.4 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:30:30] batch7: measuring event 12/16 id=batch7_dedup:b0:f1:l13:voxel16777215:e11 layer=13 frame=1 subsets=8 future_frames=4
+[oracle 2026-06-02 23:30:30] batch7_dedup:b0:f1:l13:voxel16777215:e11: replay subsets 1-8/8 batch=8 frames=0:6
+[oracle 2026-06-02 23:30:42] timing phase=replay event_id=batch7_dedup:b0:f1:l13:voxel16777215:e11 event_type=dedup layer_id=13 frame_id=1 num_subsets=8 chunk_size=8 chunk=1-8 stop=6 elapsed_sec=11.578 cuda_allocated_mb=9982.1 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:30:42] timing phase=event event_id=batch7_dedup:b0:f1:l13:voxel16777215:e11 event_type=dedup layer_id=13 frame_id=1 num_subsets=8 measured_subsets=8 replay_sec=11.578 target_sec=0.040 loss_sec=0.015 elapsed_sec=11.641 cuda_allocated_mb=9982.1 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:30:42] batch7: measuring event 13/16 id=batch7_dedup:b0:f2:l2:voxel-16777214:e12 layer=2 frame=2 subsets=8 future_frames=4
+[oracle 2026-06-02 23:30:42] batch7_dedup:b0:f2:l2:voxel-16777214:e12: replay subsets 1-8/8 batch=8 frames=0:7
+[oracle 2026-06-02 23:30:55] timing phase=replay event_id=batch7_dedup:b0:f2:l2:voxel-16777214:e12 event_type=dedup layer_id=2 frame_id=2 num_subsets=8 chunk_size=8 chunk=1-8 stop=7 elapsed_sec=13.586 cuda_allocated_mb=10073.1 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:30:55] timing phase=event event_id=batch7_dedup:b0:f2:l2:voxel-16777214:e12 event_type=dedup layer_id=2 frame_id=2 num_subsets=8 measured_subsets=8 replay_sec=13.586 target_sec=0.040 loss_sec=0.015 elapsed_sec=13.649 cuda_allocated_mb=10073.1 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:30:55] batch7: measuring event 14/16 id=batch7_dedup:b0:f2:l2:voxel-4094:e13 layer=2 frame=2 subsets=8 future_frames=4
+[oracle 2026-06-02 23:30:55] batch7_dedup:b0:f2:l2:voxel-4094:e13: replay subsets 1-8/8 batch=8 frames=0:7
+[oracle 2026-06-02 23:31:09] timing phase=replay event_id=batch7_dedup:b0:f2:l2:voxel-4094:e13 event_type=dedup layer_id=2 frame_id=2 num_subsets=8 chunk_size=8 chunk=1-8 stop=7 elapsed_sec=13.550 cuda_allocated_mb=10075.1 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:31:09] timing phase=event event_id=batch7_dedup:b0:f2:l2:voxel-4094:e13 event_type=dedup layer_id=2 frame_id=2 num_subsets=8 measured_subsets=8 replay_sec=13.550 target_sec=0.040 loss_sec=0.015 elapsed_sec=13.613 cuda_allocated_mb=10075.1 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:31:09] batch7: measuring event 15/16 id=batch7_dedup:b0:f2:l2:voxel0:e14 layer=2 frame=2 subsets=4 future_frames=4
+[oracle 2026-06-02 23:31:09] batch7_dedup:b0:f2:l2:voxel0:e14: replay subsets 1-4/4 batch=4 frames=0:7
+[oracle 2026-06-02 23:31:16] timing phase=replay event_id=batch7_dedup:b0:f2:l2:voxel0:e14 event_type=dedup layer_id=2 frame_id=2 num_subsets=4 chunk_size=4 chunk=1-4 stop=7 elapsed_sec=6.848 cuda_allocated_mb=9750.3 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:31:16] timing phase=event event_id=batch7_dedup:b0:f2:l2:voxel0:e14 event_type=dedup layer_id=2 frame_id=2 num_subsets=4 measured_subsets=4 replay_sec=6.848 target_sec=0.020 loss_sec=0.008 elapsed_sec=6.884 cuda_allocated_mb=9750.3 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:31:16] batch7: measuring event 16/16 id=batch7_dedup:b0:f2:l14:voxel-16777214:e15 layer=14 frame=2 subsets=8 future_frames=4
+[oracle 2026-06-02 23:31:16] batch7_dedup:b0:f2:l14:voxel-16777214:e15: replay subsets 1-8/8 batch=8 frames=0:7
+[oracle 2026-06-02 23:31:29] timing phase=replay event_id=batch7_dedup:b0:f2:l14:voxel-16777214:e15 event_type=dedup layer_id=14 frame_id=2 num_subsets=8 chunk_size=8 chunk=1-8 stop=7 elapsed_sec=13.181 cuda_allocated_mb=10073.2 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:31:29] timing phase=event event_id=batch7_dedup:b0:f2:l14:voxel-16777214:e15 event_type=dedup layer_id=14 frame_id=2 num_subsets=8 measured_subsets=8 replay_sec=13.181 target_sec=0.038 loss_sec=0.015 elapsed_sec=13.242 cuda_allocated_mb=10073.2 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:31:29] flushed partial shard: events=128 path=checkpoints/token_oracle/smoke_phase1.pt reason=batch 8/10 event 16 collected summary={"num_sequences": 8, "num_events": 128, "partial": true, "event_type_counts": {"dedup": 128}, "dataset_counts": {"WildRGBD": 1, "hypersim": 2, "VirtualKITTI2": 1, "arkitscenes_highres": 1, "MegaDepth": 1, "Co3d_v2": 1, "PointOdyssey": 1}, "frame_histogram": {"0": 45, "1": 47, "2": 36}, "layer_histogram": {"0": 21, "1": 23, "2": 24, "12": 24, "13": 24, "14": 12}, "subsets_per_event": {"min": 2, "mean": 6.890625, "p50": 8.0, "p90": 8.0, "max": 8}, "events_per_hour": 3660770.775073957, "elapsed_sec": 0.12587513076141477}
+[oracle 2026-06-02 23:31:29] timing phase=flush events=128 batch_idx=-1 force=0 elapsed_sec=0.127
+[oracle 2026-06-02 23:31:29] batch 8/10 done: batch_events=16 total_events=128
+[oracle 2026-06-02 23:31:29] flushed partial shard: events=128 path=checkpoints/token_oracle/smoke_phase1.pt reason=batch 8/10 done summary={"num_sequences": 8, "num_events": 128, "partial": true, "event_type_counts": {"dedup": 128}, "dataset_counts": {"WildRGBD": 1, "hypersim": 2, "VirtualKITTI2": 1, "arkitscenes_highres": 1, "MegaDepth": 1, "Co3d_v2": 1, "PointOdyssey": 1}, "frame_histogram": {"0": 45, "1": 47, "2": 36}, "layer_histogram": {"0": 21, "1": 23, "2": 24, "12": 24, "13": 24, "14": 12}, "subsets_per_event": {"min": 2, "mean": 6.890625, "p50": 8.0, "p90": 8.0, "max": 8}, "events_per_hour": 3556249.8749536145, "elapsed_sec": 0.12957469699904323}
+[oracle 2026-06-02 23:31:29] timing phase=flush events=128 batch_idx=7 force=0 elapsed_sec=0.131
+[oracle 2026-06-02 23:31:31] batch 9/10 start: events_so_far=128
+[oracle 2026-06-02 23:31:31] batch 9/10 provenance: sequences=1 first=train_dataset/arkitscenes/41048071_41048071_4480.812.png:...:41048071_41048071_4471.116.png frames=24
+[oracle 2026-06-02 23:31:31] batch8: running probe over 24 frames
+[oracle 2026-06-02 23:31:39] batch8: probe captured 0 eviction, 144 dedup, 0 fifo candidates, 16 total have future frames
+[oracle 2026-06-02 23:31:39] timing phase=probe event_prefix=batch8 frames=24 eviction=0 dedup=144 fifo=0 candidate_events=16 elapsed_sec=8.229 cuda_allocated_mb=9408.4 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:31:39] batch8: running high-budget teacher for 24 frames
+[oracle 2026-06-02 23:31:44] batch8: teacher outputs ready
+[oracle 2026-06-02 23:31:44] timing phase=teacher event_prefix=batch8 frames=24 elapsed_sec=5.185 cuda_allocated_mb=9526.8 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:31:44] batch8: measuring event 1/16 id=batch8_dedup:b0:f0:l0:voxel33546238:e0 layer=0 frame=0 subsets=8 future_frames=4
+[oracle 2026-06-02 23:31:44] batch8_dedup:b0:f0:l0:voxel33546238:e0: replay subsets 1-8/8 batch=8 frames=0:5
+[oracle 2026-06-02 23:31:54] timing phase=replay event_id=batch8_dedup:b0:f0:l0:voxel33546238:e0 event_type=dedup layer_id=0 frame_id=0 num_subsets=8 chunk_size=8 chunk=1-8 stop=5 elapsed_sec=9.891 cuda_allocated_mb=10135.2 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:31:54] timing phase=event event_id=batch8_dedup:b0:f0:l0:voxel33546238:e0 event_type=dedup layer_id=0 frame_id=0 num_subsets=8 measured_subsets=8 replay_sec=9.891 target_sec=0.038 loss_sec=0.015 elapsed_sec=9.951 cuda_allocated_mb=10135.2 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:31:54] batch8: measuring event 2/16 id=batch8_dedup:b0:f0:l0:voxel33546239:e1 layer=0 frame=0 subsets=6 future_frames=4
+[oracle 2026-06-02 23:31:54] batch8_dedup:b0:f0:l0:voxel33546239:e1: replay subsets 1-6/6 batch=6 frames=0:5
+[oracle 2026-06-02 23:32:02] timing phase=replay event_id=batch8_dedup:b0:f0:l0:voxel33546239:e1 event_type=dedup layer_id=0 frame_id=0 num_subsets=6 chunk_size=6 chunk=1-6 stop=5 elapsed_sec=7.229 cuda_allocated_mb=9985.9 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:32:02] timing phase=event event_id=batch8_dedup:b0:f0:l0:voxel33546239:e1 event_type=dedup layer_id=0 frame_id=0 num_subsets=6 measured_subsets=6 replay_sec=7.229 target_sec=0.029 loss_sec=0.011 elapsed_sec=7.276 cuda_allocated_mb=9985.9 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:32:02] batch8: measuring event 3/16 id=batch8_dedup:b0:f0:l0:voxel33550334:e2 layer=0 frame=0 subsets=8 future_frames=4
+[oracle 2026-06-02 23:32:02] batch8_dedup:b0:f0:l0:voxel33550334:e2: replay subsets 1-8/8 batch=8 frames=0:5
+[oracle 2026-06-02 23:32:11] timing phase=replay event_id=batch8_dedup:b0:f0:l0:voxel33550334:e2 event_type=dedup layer_id=0 frame_id=0 num_subsets=8 chunk_size=8 chunk=1-8 stop=5 elapsed_sec=9.798 cuda_allocated_mb=10134.6 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:32:11] timing phase=event event_id=batch8_dedup:b0:f0:l0:voxel33550334:e2 event_type=dedup layer_id=0 frame_id=0 num_subsets=8 measured_subsets=8 replay_sec=9.798 target_sec=0.039 loss_sec=0.015 elapsed_sec=9.859 cuda_allocated_mb=10134.6 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:32:11] batch8: measuring event 4/16 id=batch8_dedup:b0:f0:l12:voxel33546238:e3 layer=12 frame=0 subsets=8 future_frames=4
+[oracle 2026-06-02 23:32:11] batch8_dedup:b0:f0:l12:voxel33546238:e3: replay subsets 1-8/8 batch=8 frames=0:5
+[oracle 2026-06-02 23:32:21] timing phase=replay event_id=batch8_dedup:b0:f0:l12:voxel33546238:e3 event_type=dedup layer_id=12 frame_id=0 num_subsets=8 chunk_size=8 chunk=1-8 stop=5 elapsed_sec=9.617 cuda_allocated_mb=10135.2 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:32:21] timing phase=event event_id=batch8_dedup:b0:f0:l12:voxel33546238:e3 event_type=dedup layer_id=12 frame_id=0 num_subsets=8 measured_subsets=8 replay_sec=9.617 target_sec=0.038 loss_sec=0.014 elapsed_sec=9.676 cuda_allocated_mb=10135.2 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:32:21] batch8: measuring event 5/16 id=batch8_dedup:b0:f0:l12:voxel33546239:e4 layer=12 frame=0 subsets=6 future_frames=4
+[oracle 2026-06-02 23:32:21] batch8_dedup:b0:f0:l12:voxel33546239:e4: replay subsets 1-6/6 batch=6 frames=0:5
+[oracle 2026-06-02 23:32:28] timing phase=replay event_id=batch8_dedup:b0:f0:l12:voxel33546239:e4 event_type=dedup layer_id=12 frame_id=0 num_subsets=6 chunk_size=6 chunk=1-6 stop=5 elapsed_sec=7.089 cuda_allocated_mb=9988.0 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:32:28] timing phase=event event_id=batch8_dedup:b0:f0:l12:voxel33546239:e4 event_type=dedup layer_id=12 frame_id=0 num_subsets=6 measured_subsets=6 replay_sec=7.089 target_sec=0.029 loss_sec=0.011 elapsed_sec=7.134 cuda_allocated_mb=9988.0 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:32:28] batch8: measuring event 6/16 id=batch8_dedup:b0:f0:l12:voxel33550334:e5 layer=12 frame=0 subsets=8 future_frames=4
+[oracle 2026-06-02 23:32:28] batch8_dedup:b0:f0:l12:voxel33550334:e5: replay subsets 1-8/8 batch=8 frames=0:5
+[oracle 2026-06-02 23:32:38] timing phase=replay event_id=batch8_dedup:b0:f0:l12:voxel33550334:e5 event_type=dedup layer_id=12 frame_id=0 num_subsets=8 chunk_size=8 chunk=1-8 stop=5 elapsed_sec=9.377 cuda_allocated_mb=10134.6 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:32:38] timing phase=event event_id=batch8_dedup:b0:f0:l12:voxel33550334:e5 event_type=dedup layer_id=12 frame_id=0 num_subsets=8 measured_subsets=8 replay_sec=9.377 target_sec=0.038 loss_sec=0.014 elapsed_sec=9.436 cuda_allocated_mb=10134.6 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:32:38] batch8: measuring event 7/16 id=batch8_dedup:b0:f1:l1:voxel-4:e6 layer=1 frame=1 subsets=8 future_frames=4
+[oracle 2026-06-02 23:32:38] batch8_dedup:b0:f1:l1:voxel-4:e6: replay subsets 1-8/8 batch=8 frames=0:6
+[oracle 2026-06-02 23:32:49] timing phase=replay event_id=batch8_dedup:b0:f1:l1:voxel-4:e6 event_type=dedup layer_id=1 frame_id=1 num_subsets=8 chunk_size=8 chunk=1-8 stop=6 elapsed_sec=11.672 cuda_allocated_mb=10256.7 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:32:49] timing phase=event event_id=batch8_dedup:b0:f1:l1:voxel-4:e6 event_type=dedup layer_id=1 frame_id=1 num_subsets=8 measured_subsets=8 replay_sec=11.672 target_sec=0.040 loss_sec=0.015 elapsed_sec=11.735 cuda_allocated_mb=10256.7 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:32:49] batch8: measuring event 8/16 id=batch8_dedup:b0:f1:l1:voxel4092:e7 layer=1 frame=1 subsets=8 future_frames=4
+[oracle 2026-06-02 23:32:49] batch8_dedup:b0:f1:l1:voxel4092:e7: replay subsets 1-8/8 batch=8 frames=0:6
+[oracle 2026-06-02 23:33:01] timing phase=replay event_id=batch8_dedup:b0:f1:l1:voxel4092:e7 event_type=dedup layer_id=1 frame_id=1 num_subsets=8 chunk_size=8 chunk=1-8 stop=6 elapsed_sec=11.818 cuda_allocated_mb=10255.9 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:33:01] timing phase=event event_id=batch8_dedup:b0:f1:l1:voxel4092:e7 event_type=dedup layer_id=1 frame_id=1 num_subsets=8 measured_subsets=8 replay_sec=11.818 target_sec=0.039 loss_sec=0.015 elapsed_sec=11.880 cuda_allocated_mb=10255.9 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:33:01] batch8: measuring event 9/16 id=batch8_dedup:b0:f1:l1:voxel4093:e8 layer=1 frame=1 subsets=8 future_frames=4
+[oracle 2026-06-02 23:33:01] batch8_dedup:b0:f1:l1:voxel4093:e8: replay subsets 1-8/8 batch=8 frames=0:6
+[oracle 2026-06-02 23:33:13] timing phase=replay event_id=batch8_dedup:b0:f1:l1:voxel4093:e8 event_type=dedup layer_id=1 frame_id=1 num_subsets=8 chunk_size=8 chunk=1-8 stop=6 elapsed_sec=11.978 cuda_allocated_mb=10256.1 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:33:13] timing phase=event event_id=batch8_dedup:b0:f1:l1:voxel4093:e8 event_type=dedup layer_id=1 frame_id=1 num_subsets=8 measured_subsets=8 replay_sec=11.978 target_sec=0.040 loss_sec=0.015 elapsed_sec=12.041 cuda_allocated_mb=10256.1 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:33:13] batch8: measuring event 10/16 id=batch8_dedup:b0:f1:l13:voxel-4:e9 layer=13 frame=1 subsets=8 future_frames=4
+[oracle 2026-06-02 23:33:13] batch8_dedup:b0:f1:l13:voxel-4:e9: replay subsets 1-8/8 batch=8 frames=0:6
+[oracle 2026-06-02 23:33:25] timing phase=replay event_id=batch8_dedup:b0:f1:l13:voxel-4:e9 event_type=dedup layer_id=13 frame_id=1 num_subsets=8 chunk_size=8 chunk=1-8 stop=6 elapsed_sec=11.875 cuda_allocated_mb=10256.6 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:33:25] timing phase=event event_id=batch8_dedup:b0:f1:l13:voxel-4:e9 event_type=dedup layer_id=13 frame_id=1 num_subsets=8 measured_subsets=8 replay_sec=11.875 target_sec=0.040 loss_sec=0.015 elapsed_sec=11.939 cuda_allocated_mb=10256.6 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:33:25] batch8: measuring event 11/16 id=batch8_dedup:b0:f1:l13:voxel4092:e10 layer=13 frame=1 subsets=8 future_frames=4
+[oracle 2026-06-02 23:33:25] batch8_dedup:b0:f1:l13:voxel4092:e10: replay subsets 1-8/8 batch=8 frames=0:6
+[oracle 2026-06-02 23:33:37] timing phase=replay event_id=batch8_dedup:b0:f1:l13:voxel4092:e10 event_type=dedup layer_id=13 frame_id=1 num_subsets=8 chunk_size=8 chunk=1-8 stop=6 elapsed_sec=12.023 cuda_allocated_mb=10257.9 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:33:37] timing phase=event event_id=batch8_dedup:b0:f1:l13:voxel4092:e10 event_type=dedup layer_id=13 frame_id=1 num_subsets=8 measured_subsets=8 replay_sec=12.023 target_sec=0.040 loss_sec=0.015 elapsed_sec=12.087 cuda_allocated_mb=10257.9 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:33:37] batch8: measuring event 12/16 id=batch8_dedup:b0:f1:l13:voxel4093:e11 layer=13 frame=1 subsets=8 future_frames=4
+[oracle 2026-06-02 23:33:37] batch8_dedup:b0:f1:l13:voxel4093:e11: replay subsets 1-8/8 batch=8 frames=0:6
+[oracle 2026-06-02 23:33:49] timing phase=replay event_id=batch8_dedup:b0:f1:l13:voxel4093:e11 event_type=dedup layer_id=13 frame_id=1 num_subsets=8 chunk_size=8 chunk=1-8 stop=6 elapsed_sec=11.881 cuda_allocated_mb=10255.4 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:33:49] timing phase=event event_id=batch8_dedup:b0:f1:l13:voxel4093:e11 event_type=dedup layer_id=13 frame_id=1 num_subsets=8 measured_subsets=8 replay_sec=11.881 target_sec=0.039 loss_sec=0.015 elapsed_sec=11.944 cuda_allocated_mb=10255.4 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:33:49] batch8: measuring event 13/16 id=batch8_dedup:b0:f2:l2:voxel-16773123:e12 layer=2 frame=2 subsets=8 future_frames=4
+[oracle 2026-06-02 23:33:49] batch8_dedup:b0:f2:l2:voxel-16773123:e12: replay subsets 1-8/8 batch=8 frames=0:7
+[oracle 2026-06-02 23:34:03] timing phase=replay event_id=batch8_dedup:b0:f2:l2:voxel-16773123:e12 event_type=dedup layer_id=2 frame_id=2 num_subsets=8 chunk_size=8 chunk=1-8 stop=7 elapsed_sec=13.922 cuda_allocated_mb=10376.4 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:34:03] timing phase=event event_id=batch8_dedup:b0:f2:l2:voxel-16773123:e12 event_type=dedup layer_id=2 frame_id=2 num_subsets=8 measured_subsets=8 replay_sec=13.922 target_sec=0.040 loss_sec=0.015 elapsed_sec=13.987 cuda_allocated_mb=10376.4 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:34:03] batch8: measuring event 14/16 id=batch8_dedup:b0:f2:l2:voxel-16773122:e13 layer=2 frame=2 subsets=5 future_frames=4
+[oracle 2026-06-02 23:34:03] batch8_dedup:b0:f2:l2:voxel-16773122:e13: replay subsets 1-5/5 batch=5 frames=0:7
+[oracle 2026-06-02 23:34:12] timing phase=replay event_id=batch8_dedup:b0:f2:l2:voxel-16773122:e13 event_type=dedup layer_id=2 frame_id=2 num_subsets=5 chunk_size=5 chunk=1-5 stop=7 elapsed_sec=8.638 cuda_allocated_mb=10064.9 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:34:12] timing phase=event event_id=batch8_dedup:b0:f2:l2:voxel-16773122:e13 event_type=dedup layer_id=2 frame_id=2 num_subsets=5 measured_subsets=5 replay_sec=8.638 target_sec=0.026 loss_sec=0.010 elapsed_sec=8.682 cuda_allocated_mb=10064.9 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:34:12] batch8: measuring event 15/16 id=batch8_dedup:b0:f2:l2:voxel-16764931:e14 layer=2 frame=2 subsets=8 future_frames=4
+[oracle 2026-06-02 23:34:12] batch8_dedup:b0:f2:l2:voxel-16764931:e14: replay subsets 1-8/8 batch=8 frames=0:7
+[oracle 2026-06-02 23:34:26] timing phase=replay event_id=batch8_dedup:b0:f2:l2:voxel-16764931:e14 event_type=dedup layer_id=2 frame_id=2 num_subsets=8 chunk_size=8 chunk=1-8 stop=7 elapsed_sec=13.947 cuda_allocated_mb=10377.0 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:34:26] timing phase=event event_id=batch8_dedup:b0:f2:l2:voxel-16764931:e14 event_type=dedup layer_id=2 frame_id=2 num_subsets=8 measured_subsets=8 replay_sec=13.947 target_sec=0.040 loss_sec=0.015 elapsed_sec=14.010 cuda_allocated_mb=10377.0 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:34:26] batch8: measuring event 16/16 id=batch8_dedup:b0:f2:l14:voxel-16773123:e15 layer=14 frame=2 subsets=8 future_frames=4
+[oracle 2026-06-02 23:34:26] batch8_dedup:b0:f2:l14:voxel-16773123:e15: replay subsets 1-8/8 batch=8 frames=0:7
+[oracle 2026-06-02 23:34:40] timing phase=replay event_id=batch8_dedup:b0:f2:l14:voxel-16773123:e15 event_type=dedup layer_id=14 frame_id=2 num_subsets=8 chunk_size=8 chunk=1-8 stop=7 elapsed_sec=13.944 cuda_allocated_mb=10376.9 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:34:40] timing phase=event event_id=batch8_dedup:b0:f2:l14:voxel-16773123:e15 event_type=dedup layer_id=14 frame_id=2 num_subsets=8 measured_subsets=8 replay_sec=13.944 target_sec=0.040 loss_sec=0.015 elapsed_sec=14.007 cuda_allocated_mb=10376.9 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:34:40] flushed partial shard: events=144 path=checkpoints/token_oracle/smoke_phase1.pt reason=batch 9/10 event 16 collected summary={"num_sequences": 9, "num_events": 144, "partial": true, "event_type_counts": {"dedup": 144}, "dataset_counts": {"WildRGBD": 1, "hypersim": 2, "VirtualKITTI2": 1, "arkitscenes_highres": 1, "MegaDepth": 1, "Co3d_v2": 1, "PointOdyssey": 1, "arkitscenes": 1}, "frame_histogram": {"0": 51, "1": 53, "2": 40}, "layer_histogram": {"0": 24, "1": 26, "2": 27, "12": 27, "13": 27, "14": 13}, "subsets_per_event": {"min": 2, "mean": 6.965277777777778, "p50": 8.0, "p90": 8.0, "max": 8}, "events_per_hour": 3512278.909128338, "elapsed_sec": 0.14759647892788053}
+[oracle 2026-06-02 23:34:40] timing phase=flush events=144 batch_idx=-1 force=0 elapsed_sec=0.149
+[oracle 2026-06-02 23:34:40] batch 9/10 done: batch_events=16 total_events=144
+[oracle 2026-06-02 23:34:40] flushed partial shard: events=144 path=checkpoints/token_oracle/smoke_phase1.pt reason=batch 9/10 done summary={"num_sequences": 9, "num_events": 144, "partial": true, "event_type_counts": {"dedup": 144}, "dataset_counts": {"WildRGBD": 1, "hypersim": 2, "VirtualKITTI2": 1, "arkitscenes_highres": 1, "MegaDepth": 1, "Co3d_v2": 1, "PointOdyssey": 1, "arkitscenes": 1}, "frame_histogram": {"0": 51, "1": 53, "2": 40}, "layer_histogram": {"0": 24, "1": 26, "2": 27, "12": 27, "13": 27, "14": 13}, "subsets_per_event": {"min": 2, "mean": 6.965277777777778, "p50": 8.0, "p90": 8.0, "max": 8}, "events_per_hour": 3680575.8664840953, "elapsed_sec": 0.14084752462804317}
+[oracle 2026-06-02 23:34:40] timing phase=flush events=144 batch_idx=8 force=0 elapsed_sec=0.142
+[oracle 2026-06-02 23:38:16] batch 10/10 start: events_so_far=144
+[oracle 2026-06-02 23:38:16] batch 10/10 provenance: sequences=1 first=train_dataset/BlendedMVS/584bc3997072670e72bfe58d:...:584bc3997072670e72bfe58d frames=24
+[oracle 2026-06-02 23:38:16] batch9: running probe over 24 frames
+[oracle 2026-06-02 23:38:23] batch9: probe captured 0 eviction, 142 dedup, 0 fifo candidates, 16 total have future frames
+[oracle 2026-06-02 23:38:23] timing phase=probe event_prefix=batch9 frames=24 eviction=0 dedup=142 fifo=0 candidate_events=16 elapsed_sec=7.183 cuda_allocated_mb=9296.7 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:38:23] batch9: running high-budget teacher for 24 frames
+[oracle 2026-06-02 23:38:27] batch9: teacher outputs ready
+[oracle 2026-06-02 23:38:27] timing phase=teacher event_prefix=batch9 frames=24 elapsed_sec=3.774 cuda_allocated_mb=9366.3 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:38:27] batch9: measuring event 1/16 id=batch9_dedup:b0:f0:l0:voxel33550337:e0 layer=0 frame=0 subsets=8 future_frames=4
+[oracle 2026-06-02 23:38:27] batch9_dedup:b0:f0:l0:voxel33550337:e0: replay subsets 1-8/8 batch=8 frames=0:5
+[oracle 2026-06-02 23:38:37] timing phase=replay event_id=batch9_dedup:b0:f0:l0:voxel33550337:e0 event_type=dedup layer_id=0 frame_id=0 num_subsets=8 chunk_size=8 chunk=1-8 stop=5 elapsed_sec=9.670 cuda_allocated_mb=9695.3 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:38:37] timing phase=event event_id=batch9_dedup:b0:f0:l0:voxel33550337:e0 event_type=dedup layer_id=0 frame_id=0 num_subsets=8 measured_subsets=8 replay_sec=9.670 target_sec=0.041 loss_sec=0.015 elapsed_sec=9.735 cuda_allocated_mb=9695.3 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:38:37] batch9: measuring event 2/16 id=batch9_dedup:b0:f0:l0:voxel50327550:e1 layer=0 frame=0 subsets=8 future_frames=4
+[oracle 2026-06-02 23:38:37] batch9_dedup:b0:f0:l0:voxel50327550:e1: replay subsets 1-8/8 batch=8 frames=0:5
+[oracle 2026-06-02 23:38:46] timing phase=replay event_id=batch9_dedup:b0:f0:l0:voxel50327550:e1 event_type=dedup layer_id=0 frame_id=0 num_subsets=8 chunk_size=8 chunk=1-8 stop=5 elapsed_sec=9.540 cuda_allocated_mb=9695.4 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:38:47] timing phase=event event_id=batch9_dedup:b0:f0:l0:voxel50327550:e1 event_type=dedup layer_id=0 frame_id=0 num_subsets=8 measured_subsets=8 replay_sec=9.540 target_sec=0.040 loss_sec=0.015 elapsed_sec=9.604 cuda_allocated_mb=9695.4 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:38:47] batch9: measuring event 3/16 id=batch9_dedup:b0:f0:l0:voxel50327551:e2 layer=0 frame=0 subsets=8 future_frames=4
+[oracle 2026-06-02 23:38:47] batch9_dedup:b0:f0:l0:voxel50327551:e2: replay subsets 1-8/8 batch=8 frames=0:5
+[oracle 2026-06-02 23:38:56] timing phase=replay event_id=batch9_dedup:b0:f0:l0:voxel50327551:e2 event_type=dedup layer_id=0 frame_id=0 num_subsets=8 chunk_size=8 chunk=1-8 stop=5 elapsed_sec=9.595 cuda_allocated_mb=9694.4 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:38:56] timing phase=event event_id=batch9_dedup:b0:f0:l0:voxel50327551:e2 event_type=dedup layer_id=0 frame_id=0 num_subsets=8 measured_subsets=8 replay_sec=9.595 target_sec=0.041 loss_sec=0.015 elapsed_sec=9.659 cuda_allocated_mb=9694.4 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:38:56] batch9: measuring event 4/16 id=batch9_dedup:b0:f0:l12:voxel33550337:e3 layer=12 frame=0 subsets=8 future_frames=4
+[oracle 2026-06-02 23:38:56] batch9_dedup:b0:f0:l12:voxel33550337:e3: replay subsets 1-8/8 batch=8 frames=0:5
+[oracle 2026-06-02 23:39:06] timing phase=replay event_id=batch9_dedup:b0:f0:l12:voxel33550337:e3 event_type=dedup layer_id=12 frame_id=0 num_subsets=8 chunk_size=8 chunk=1-8 stop=5 elapsed_sec=9.669 cuda_allocated_mb=9694.7 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:39:06] timing phase=event event_id=batch9_dedup:b0:f0:l12:voxel33550337:e3 event_type=dedup layer_id=12 frame_id=0 num_subsets=8 measured_subsets=8 replay_sec=9.669 target_sec=0.041 loss_sec=0.015 elapsed_sec=9.734 cuda_allocated_mb=9694.7 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:39:06] batch9: measuring event 5/16 id=batch9_dedup:b0:f0:l12:voxel50327550:e4 layer=12 frame=0 subsets=8 future_frames=4
+[oracle 2026-06-02 23:39:06] batch9_dedup:b0:f0:l12:voxel50327550:e4: replay subsets 1-8/8 batch=8 frames=0:5
+[oracle 2026-06-02 23:39:16] timing phase=replay event_id=batch9_dedup:b0:f0:l12:voxel50327550:e4 event_type=dedup layer_id=12 frame_id=0 num_subsets=8 chunk_size=8 chunk=1-8 stop=5 elapsed_sec=9.604 cuda_allocated_mb=9694.5 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:39:16] timing phase=event event_id=batch9_dedup:b0:f0:l12:voxel50327550:e4 event_type=dedup layer_id=12 frame_id=0 num_subsets=8 measured_subsets=8 replay_sec=9.604 target_sec=0.040 loss_sec=0.015 elapsed_sec=9.668 cuda_allocated_mb=9694.5 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:39:16] batch9: measuring event 6/16 id=batch9_dedup:b0:f0:l12:voxel50327551:e5 layer=12 frame=0 subsets=8 future_frames=4
+[oracle 2026-06-02 23:39:16] batch9_dedup:b0:f0:l12:voxel50327551:e5: replay subsets 1-8/8 batch=8 frames=0:5
+[oracle 2026-06-02 23:39:25] timing phase=replay event_id=batch9_dedup:b0:f0:l12:voxel50327551:e5 event_type=dedup layer_id=12 frame_id=0 num_subsets=8 chunk_size=8 chunk=1-8 stop=5 elapsed_sec=9.601 cuda_allocated_mb=9694.5 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:39:25] timing phase=event event_id=batch9_dedup:b0:f0:l12:voxel50327551:e5 event_type=dedup layer_id=12 frame_id=0 num_subsets=8 measured_subsets=8 replay_sec=9.601 target_sec=0.041 loss_sec=0.015 elapsed_sec=9.666 cuda_allocated_mb=9694.5 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:39:25] batch9: measuring event 7/16 id=batch9_dedup:b0:f1:l1:voxel33550337:e6 layer=1 frame=1 subsets=8 future_frames=4
+[oracle 2026-06-02 23:39:25] batch9_dedup:b0:f1:l1:voxel33550337:e6: replay subsets 1-8/8 batch=8 frames=0:6
+[oracle 2026-06-02 23:39:37] timing phase=replay event_id=batch9_dedup:b0:f1:l1:voxel33550337:e6 event_type=dedup layer_id=1 frame_id=1 num_subsets=8 chunk_size=8 chunk=1-8 stop=6 elapsed_sec=11.556 cuda_allocated_mb=9759.9 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:39:37] timing phase=event event_id=batch9_dedup:b0:f1:l1:voxel33550337:e6 event_type=dedup layer_id=1 frame_id=1 num_subsets=8 measured_subsets=8 replay_sec=11.556 target_sec=0.040 loss_sec=0.015 elapsed_sec=11.620 cuda_allocated_mb=9759.9 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:39:37] batch9: measuring event 8/16 id=batch9_dedup:b0:f1:l1:voxel50327549:e7 layer=1 frame=1 subsets=2 future_frames=4
+[oracle 2026-06-02 23:39:37] batch9_dedup:b0:f1:l1:voxel50327549:e7: replay subsets 1-2/2 batch=2 frames=0:6
+[oracle 2026-06-02 23:39:40] timing phase=replay event_id=batch9_dedup:b0:f1:l1:voxel50327549:e7 event_type=dedup layer_id=1 frame_id=1 num_subsets=2 chunk_size=2 chunk=1-2 stop=6 elapsed_sec=2.929 cuda_allocated_mb=9467.9 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:39:40] timing phase=event event_id=batch9_dedup:b0:f1:l1:voxel50327549:e7 event_type=dedup layer_id=1 frame_id=1 num_subsets=2 measured_subsets=2 replay_sec=2.929 target_sec=0.010 loss_sec=0.004 elapsed_sec=2.949 cuda_allocated_mb=9467.9 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:39:40] batch9: measuring event 9/16 id=batch9_dedup:b0:f1:l1:voxel50327550:e8 layer=1 frame=1 subsets=8 future_frames=4
+[oracle 2026-06-02 23:39:40] batch9_dedup:b0:f1:l1:voxel50327550:e8: replay subsets 1-8/8 batch=8 frames=0:6
+[oracle 2026-06-02 23:39:51] timing phase=replay event_id=batch9_dedup:b0:f1:l1:voxel50327550:e8 event_type=dedup layer_id=1 frame_id=1 num_subsets=8 chunk_size=8 chunk=1-8 stop=6 elapsed_sec=11.201 cuda_allocated_mb=9760.6 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:39:51] timing phase=event event_id=batch9_dedup:b0:f1:l1:voxel50327550:e8 event_type=dedup layer_id=1 frame_id=1 num_subsets=8 measured_subsets=8 replay_sec=11.201 target_sec=0.041 loss_sec=0.015 elapsed_sec=11.266 cuda_allocated_mb=9760.6 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:39:51] batch9: measuring event 10/16 id=batch9_dedup:b0:f1:l13:voxel33550337:e9 layer=13 frame=1 subsets=8 future_frames=4
+[oracle 2026-06-02 23:39:51] batch9_dedup:b0:f1:l13:voxel33550337:e9: replay subsets 1-8/8 batch=8 frames=0:6
+[oracle 2026-06-02 23:40:03] timing phase=replay event_id=batch9_dedup:b0:f1:l13:voxel33550337:e9 event_type=dedup layer_id=13 frame_id=1 num_subsets=8 chunk_size=8 chunk=1-8 stop=6 elapsed_sec=11.556 cuda_allocated_mb=9760.2 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:40:03] timing phase=event event_id=batch9_dedup:b0:f1:l13:voxel33550337:e9 event_type=dedup layer_id=13 frame_id=1 num_subsets=8 measured_subsets=8 replay_sec=11.556 target_sec=0.040 loss_sec=0.015 elapsed_sec=11.620 cuda_allocated_mb=9760.2 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:40:03] batch9: measuring event 11/16 id=batch9_dedup:b0:f1:l13:voxel50327549:e10 layer=13 frame=1 subsets=2 future_frames=4
+[oracle 2026-06-02 23:40:03] batch9_dedup:b0:f1:l13:voxel50327549:e10: replay subsets 1-2/2 batch=2 frames=0:6
+[oracle 2026-06-02 23:40:06] timing phase=replay event_id=batch9_dedup:b0:f1:l13:voxel50327549:e10 event_type=dedup layer_id=13 frame_id=1 num_subsets=2 chunk_size=2 chunk=1-2 stop=6 elapsed_sec=2.826 cuda_allocated_mb=9467.5 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:40:06] timing phase=event event_id=batch9_dedup:b0:f1:l13:voxel50327549:e10 event_type=dedup layer_id=13 frame_id=1 num_subsets=2 measured_subsets=2 replay_sec=2.826 target_sec=0.010 loss_sec=0.004 elapsed_sec=2.845 cuda_allocated_mb=9467.5 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:40:06] batch9: measuring event 12/16 id=batch9_dedup:b0:f1:l13:voxel50327550:e11 layer=13 frame=1 subsets=8 future_frames=4
+[oracle 2026-06-02 23:40:06] batch9_dedup:b0:f1:l13:voxel50327550:e11: replay subsets 1-8/8 batch=8 frames=0:6
+[oracle 2026-06-02 23:40:17] timing phase=replay event_id=batch9_dedup:b0:f1:l13:voxel50327550:e11 event_type=dedup layer_id=13 frame_id=1 num_subsets=8 chunk_size=8 chunk=1-8 stop=6 elapsed_sec=11.242 cuda_allocated_mb=9759.5 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:40:17] timing phase=event event_id=batch9_dedup:b0:f1:l13:voxel50327550:e11 event_type=dedup layer_id=13 frame_id=1 num_subsets=8 measured_subsets=8 replay_sec=11.242 target_sec=0.040 loss_sec=0.015 elapsed_sec=11.305 cuda_allocated_mb=9759.5 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:40:17] batch9: measuring event 13/16 id=batch9_dedup:b0:f2:l2:voxel33550337:e12 layer=2 frame=2 subsets=8 future_frames=4
+[oracle 2026-06-02 23:40:17] batch9_dedup:b0:f2:l2:voxel33550337:e12: replay subsets 1-8/8 batch=8 frames=0:7
+[oracle 2026-06-02 23:40:30] timing phase=replay event_id=batch9_dedup:b0:f2:l2:voxel33550337:e12 event_type=dedup layer_id=2 frame_id=2 num_subsets=8 chunk_size=8 chunk=1-8 stop=7 elapsed_sec=12.967 cuda_allocated_mb=9825.6 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:40:30] timing phase=event event_id=batch9_dedup:b0:f2:l2:voxel33550337:e12 event_type=dedup layer_id=2 frame_id=2 num_subsets=8 measured_subsets=8 replay_sec=12.967 target_sec=0.039 loss_sec=0.014 elapsed_sec=13.029 cuda_allocated_mb=9825.6 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:40:30] batch9: measuring event 14/16 id=batch9_dedup:b0:f2:l2:voxel33554431:e13 layer=2 frame=2 subsets=8 future_frames=4
+[oracle 2026-06-02 23:40:30] batch9_dedup:b0:f2:l2:voxel33554431:e13: replay subsets 1-8/8 batch=8 frames=0:7
+[oracle 2026-06-02 23:40:43] timing phase=replay event_id=batch9_dedup:b0:f2:l2:voxel33554431:e13 event_type=dedup layer_id=2 frame_id=2 num_subsets=8 chunk_size=8 chunk=1-8 stop=7 elapsed_sec=12.687 cuda_allocated_mb=9827.7 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:40:43] timing phase=event event_id=batch9_dedup:b0:f2:l2:voxel33554431:e13 event_type=dedup layer_id=2 frame_id=2 num_subsets=8 measured_subsets=8 replay_sec=12.687 target_sec=0.038 loss_sec=0.014 elapsed_sec=12.748 cuda_allocated_mb=9827.7 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:40:43] batch9: measuring event 15/16 id=batch9_dedup:b0:f2:l2:voxel50327549:e14 layer=2 frame=2 subsets=2 future_frames=4
+[oracle 2026-06-02 23:40:43] batch9_dedup:b0:f2:l2:voxel50327549:e14: replay subsets 1-2/2 batch=2 frames=0:7
+[oracle 2026-06-02 23:40:46] timing phase=replay event_id=batch9_dedup:b0:f2:l2:voxel50327549:e14 event_type=dedup layer_id=2 frame_id=2 num_subsets=2 chunk_size=2 chunk=1-2 stop=7 elapsed_sec=3.270 cuda_allocated_mb=9483.2 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:40:46] timing phase=event event_id=batch9_dedup:b0:f2:l2:voxel50327549:e14 event_type=dedup layer_id=2 frame_id=2 num_subsets=2 measured_subsets=2 replay_sec=3.270 target_sec=0.010 loss_sec=0.004 elapsed_sec=3.291 cuda_allocated_mb=9483.2 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:40:46] batch9: measuring event 16/16 id=batch9_dedup:b0:f2:l14:voxel33550337:e15 layer=14 frame=2 subsets=8 future_frames=4
+[oracle 2026-06-02 23:40:46] batch9_dedup:b0:f2:l14:voxel33550337:e15: replay subsets 1-8/8 batch=8 frames=0:7
+[oracle 2026-06-02 23:41:00] timing phase=replay event_id=batch9_dedup:b0:f2:l14:voxel33550337:e15 event_type=dedup layer_id=14 frame_id=2 num_subsets=8 chunk_size=8 chunk=1-8 stop=7 elapsed_sec=13.563 cuda_allocated_mb=9827.1 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:41:00] timing phase=event event_id=batch9_dedup:b0:f2:l14:voxel33550337:e15 event_type=dedup layer_id=14 frame_id=2 num_subsets=8 measured_subsets=8 replay_sec=13.563 target_sec=0.040 loss_sec=0.015 elapsed_sec=13.628 cuda_allocated_mb=9827.1 cuda_reserved_mb=43258.0
+[oracle 2026-06-02 23:41:00] flushed partial shard: events=160 path=checkpoints/token_oracle/smoke_phase1.pt reason=batch 10/10 event 16 collected summary={"num_sequences": 10, "num_events": 160, "partial": true, "event_type_counts": {"dedup": 160}, "dataset_counts": {"WildRGBD": 1, "hypersim": 2, "VirtualKITTI2": 1, "arkitscenes_highres": 1, "MegaDepth": 1, "Co3d_v2": 1, "PointOdyssey": 1, "arkitscenes": 1, "BlendedMVS": 1}, "frame_histogram": {"0": 57, "1": 59, "2": 44}, "layer_histogram": {"0": 27, "1": 29, "2": 30, "12": 30, "13": 30, "14": 14}, "subsets_per_event": {"min": 2, "mean": 6.95625, "p50": 8.0, "p90": 8.0, "max": 8}, "events_per_hour": 3572674.3097589687, "elapsed_sec": 0.16122376406565309}
+[oracle 2026-06-02 23:41:00] timing phase=flush events=160 batch_idx=-1 force=0 elapsed_sec=0.162
+[oracle 2026-06-02 23:41:00] batch 10/10 done: batch_events=16 total_events=160
+[oracle 2026-06-02 23:41:00] flushed partial shard: events=160 path=checkpoints/token_oracle/smoke_phase1.pt reason=batch 10/10 done summary={"num_sequences": 10, "num_events": 160, "partial": true, "event_type_counts": {"dedup": 160}, "dataset_counts": {"WildRGBD": 1, "hypersim": 2, "VirtualKITTI2": 1, "arkitscenes_highres": 1, "MegaDepth": 1, "Co3d_v2": 1, "PointOdyssey": 1, "arkitscenes": 1, "BlendedMVS": 1}, "frame_histogram": {"0": 57, "1": 59, "2": 44}, "layer_histogram": {"0": 27, "1": 29, "2": 30, "12": 30, "13": 30, "14": 14}, "subsets_per_event": {"min": 2, "mean": 6.95625, "p50": 8.0, "p90": 8.0, "max": 8}, "events_per_hour": 3602325.9259136724, "elapsed_sec": 0.15989669226109982}
+[oracle 2026-06-02 23:41:00] timing phase=flush events=160 batch_idx=9 force=0 elapsed_sec=0.161
+[oracle 2026-06-02 23:41:00] flushed final shard: events=160 path=checkpoints/token_oracle/smoke_phase1.pt reason=final summary={"num_sequences": 10, "num_events": 160, "partial": false, "event_type_counts": {"dedup": 160}, "dataset_counts": {"WildRGBD": 1, "hypersim": 2, "VirtualKITTI2": 1, "arkitscenes_highres": 1, "MegaDepth": 1, "Co3d_v2": 1, "PointOdyssey": 1, "arkitscenes": 1, "BlendedMVS": 1}, "frame_histogram": {"0": 57, "1": 59, "2": 44}, "layer_histogram": {"0": 27, "1": 29, "2": 30, "12": 30, "13": 30, "14": 14}, "subsets_per_event": {"min": 2, "mean": 6.95625, "p50": 8.0, "p90": 8.0, "max": 8}, "events_per_hour": 3922594.2771775383, "elapsed_sec": 0.14684159494936466}
+[oracle 2026-06-02 23:41:00] timing phase=flush events=160 batch_idx=-1 force=1 elapsed_sec=0.148
+[oracle 2026-06-02 23:41:00] collector done: events=160 elapsed_sec=2013.6
+Wrote 160 oracle events to checkpoints/token_oracle/smoke_phase1.pt
