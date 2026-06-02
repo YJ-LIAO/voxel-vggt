@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import copy
 import importlib
+import json
 import os
 import time
 from dataclasses import asdict, dataclass
@@ -51,21 +52,107 @@ class FrontendOracleCollectorConfig:
     flush_every_events: int = 16
     flush_every_batches: int = 1
     log_every_subsets: int = 1
-    subset_replay_batch_size: int = 1
-    layers_per_frame: int = 0
-    max_events_per_sequence: int = 0
+    subset_replay_batch_size: int = 16
+    # --- Phase 1 sampling-policy parameters ---
+    layers_per_frame: int = 2                              # was 0; Decision 4
+    max_events_per_sequence: int = 16                      # was 0; Decision 3
+    max_events_per_frame: int = 6                          # Decision 3
+    max_candidate_events_per_sequence: int = 256           # Decision 3
+    max_subsets_per_dedup_event: int = 8                   # Decision 2
+    max_subsets_per_eviction_event: int = 8                # Decision 2
+    max_subsets_per_fifo_event: int = 8                    # Decision 2
+    event_selection_policy: str = "stratified_round_robin" # Decision 3
+    stratified_layer_bucket_width: int = 6                 # Decision 3
     num_views: int | None = None
     max_fetch_errors: int = 256
-    max_candidate_events_per_sequence: int | None = None
-    max_events_per_frame: int = 6
-    event_selection_policy: str = "stratified_round_robin"
-    stratified_layer_bucket_width: int = 6
+    # --- Stress profiles (Decision 5) ---
+    oracle_profile: str = "real_policy"
+    frontend_total_budget_override: int | None = None
+    fifo_keep_topk_override: int | None = None
     store_replay_payload: bool = False
+    # --- Phase 4 manifest (Decision 9) ---
+    sequence_manifest_path: str | None = None
+    sequence_partition_policy: str = "hash_mod"
+    num_sequence_shards: int | None = None
+    sequence_shard_id: int | None = None
 
 
 def default_oracle_log(message: str) -> None:
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     print(f"[oracle {timestamp}] {message}", flush=True)
+
+
+def compute_shard_summary(events, partial=False, elapsed_sec=0.0):
+    """Compute shard summary metrics per spec."""
+    if not events:
+        return {
+            "num_sequences": 0, "num_events": 0, "partial": partial,
+            "event_type_counts": {}, "dataset_counts": {},
+            "frame_histogram": {}, "layer_histogram": {},
+            "subsets_per_event": {"min": 0, "mean": 0, "p50": 0, "p90": 0, "max": 0},
+            "events_per_hour": 0.0, "elapsed_sec": elapsed_sec,
+        }
+
+    seq_ids = set()
+    for e in events:
+        prov = e.get("sequence_provenance", {})
+        seq_id = prov.get("sequence_id", id(e))
+        seq_ids.add(seq_id)
+
+    et_counts = {}
+    for e in events:
+        et = e.get("event_type", "unknown")
+        et_counts[et] = et_counts.get(et, 0) + 1
+
+    ds_counts = {}
+    seen_seq_ds = set()
+    for e in events:
+        prov = e.get("sequence_provenance", {})
+        ds = prov.get("dataset", "unknown")
+        sid = prov.get("sequence_id", id(e))
+        key = (ds, sid)
+        if key not in seen_seq_ds:
+            seen_seq_ds.add(key)
+            ds_counts[ds] = ds_counts.get(ds, 0) + 1
+
+    frame_hist = {}
+    layer_hist = {}
+    for e in events:
+        fid = int(e.get("frame_id", 0))
+        lid = int(e.get("layer_id", 0))
+        frame_hist[fid] = frame_hist.get(fid, 0) + 1
+        layer_hist[lid] = layer_hist.get(lid, 0) + 1
+
+    def _subset_count(event):
+        if "subsets" in event:
+            return len(event.get("subsets", []))
+        return len(event.get("candidate_subsets", []))
+
+    subset_counts = [_subset_count(e) for e in events]
+    import numpy as np
+    arr = np.array(subset_counts, dtype=float)
+    subsets_stats = {
+        "min": int(arr.min()),
+        "mean": float(arr.mean()),
+        "p50": float(np.percentile(arr, 50)),
+        "p90": float(np.percentile(arr, 90)),
+        "max": int(arr.max()),
+    }
+
+    events_per_hour = len(events) / max(elapsed_sec / 3600, 1e-6)
+
+    return {
+        "num_sequences": len(seq_ids),
+        "num_events": len(events),
+        "partial": partial,
+        "event_type_counts": et_counts,
+        "dataset_counts": ds_counts,
+        "frame_histogram": dict(sorted(frame_hist.items())),
+        "layer_histogram": dict(sorted(layer_hist.items())),
+        "subsets_per_event": subsets_stats,
+        "events_per_hour": events_per_hour,
+        "elapsed_sec": elapsed_sec,
+    }
 
 
 class OracleShardFlusher:
@@ -116,9 +203,13 @@ class OracleShardFlusher:
         self.last_batch_idx = batch_idx_int
         if self.log_fn is not None:
             state = "final shard" if force else "partial shard"
+            summary = compute_shard_summary(
+                events, partial=not bool(force), elapsed_sec=time.monotonic() - started,
+            )
+            summary_json = json.dumps(summary, default=str)
             self.log_fn(
                 f"flushed {state}: events={event_count} path={self.output_path} "
-                f"reason={shard['flush_reason']}"
+                f"reason={shard['flush_reason']} summary={summary_json}"
             )
             self.log_fn(
                 "timing phase=flush "
@@ -809,8 +900,24 @@ def log_replay_timing(
     )
 
 
-def load_frontend_oracle_config(config_path: str | Path, num_views: int | None = None):
+def load_frontend_oracle_config(config_path: str | Path, num_views: int | None = None, collector_cfg=None):
+    """Load frontend config YAML with optional stress-profile overrides.
+
+    Overrides are applied BEFORE OmegaConf.resolve() so they participate in interpolation.
+    """
     cfg = OmegaConf.load(config_path)
+    if collector_cfg is not None:
+        profile = collector_cfg.get("oracle_profile", "real_policy") if hasattr(collector_cfg, "get") else getattr(collector_cfg, "oracle_profile", "real_policy")
+        if profile == "low_budget_eviction":
+            override = collector_cfg.get("frontend_total_budget_override") if hasattr(collector_cfg, "get") else getattr(collector_cfg, "frontend_total_budget_override", None)
+            if override is not None:
+                cfg.frontend_total_budget = int(override)
+        elif profile == "fifo_topk":
+            override = collector_cfg.get("fifo_keep_topk_override") if hasattr(collector_cfg, "get") else getattr(collector_cfg, "fifo_keep_topk_override", None)
+            if override is not None:
+                if not hasattr(cfg, "frontend_cache"):
+                    cfg.frontend_cache = {}
+                cfg.frontend_cache.fifo_keep_topk = int(override)
     if num_views is not None:
         cfg.num_views = int(num_views)
     OmegaConf.resolve(cfg)

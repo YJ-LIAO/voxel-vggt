@@ -1,8 +1,12 @@
 import os
 import sys
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import torch
+import tempfile
+import yaml
+from omegaconf import OmegaConf
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src"))
 if ROOT not in sys.path:
@@ -1413,3 +1417,84 @@ class TestTask6Wiring:
 
         assert len(select_calls) == 1
         assert select_calls[0]["policy"] == "stratified_round_robin"
+
+
+class TestStressProfileOverrides:
+    def _write_yaml(self, content):
+        f = tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False)
+        yaml.dump(content, f)
+        f.close()
+        return f.name
+
+    def test_low_budget_eviction_overrides_total_budget(self):
+        from ovggt.training.frontend_oracle_collector import load_frontend_oracle_config
+        path = self._write_yaml({"frontend_total_budget": 200000, "num_views": 4, "frontend_cache": {"fifo_keep_topk": 0}})
+        collector_cfg = OmegaConf.create({"oracle_profile": "low_budget_eviction", "frontend_total_budget_override": 20000, "fifo_keep_topk_override": None})
+        cfg = load_frontend_oracle_config(path, collector_cfg=collector_cfg)
+        assert cfg.frontend_total_budget == 20000
+
+    def test_fifo_topk_overrides_fifo_keep_topk(self):
+        from ovggt.training.frontend_oracle_collector import load_frontend_oracle_config
+        path = self._write_yaml({"frontend_total_budget": 200000, "num_views": 4, "frontend_cache": {"fifo_keep_topk": 0}})
+        collector_cfg = OmegaConf.create({"oracle_profile": "fifo_topk", "frontend_total_budget_override": None, "fifo_keep_topk_override": 8})
+        cfg = load_frontend_oracle_config(path, collector_cfg=collector_cfg)
+        assert cfg.frontend_cache.fifo_keep_topk == 8
+
+    def test_real_policy_applies_no_overrides(self):
+        from ovggt.training.frontend_oracle_collector import load_frontend_oracle_config
+        path = self._write_yaml({"frontend_total_budget": 200000, "num_views": 4, "frontend_cache": {"fifo_keep_topk": 0}})
+        collector_cfg = OmegaConf.create({"oracle_profile": "real_policy", "frontend_total_budget_override": None, "fifo_keep_topk_override": None})
+        cfg = load_frontend_oracle_config(path, collector_cfg=collector_cfg)
+        assert cfg.frontend_total_budget == 200000
+        assert cfg.frontend_cache.fifo_keep_topk == 0
+
+
+from ovggt.training.frontend_oracle_collector import FrontendOracleCollectorConfig
+
+
+class TestCollectorConfigDefaults:
+    def test_all_phase1_defaults(self):
+        cfg = FrontendOracleCollectorConfig(config="dummy", output="/tmp/dummy.pt")
+        assert cfg.max_subsets_per_dedup_event == 8
+        assert cfg.max_subsets_per_eviction_event == 8
+        assert cfg.max_subsets_per_fifo_event == 8
+        assert cfg.max_candidate_events_per_sequence == 256
+        assert cfg.max_events_per_sequence == 16
+        assert cfg.max_events_per_frame == 6
+        assert cfg.layers_per_frame == 2
+        assert cfg.event_selection_policy == "stratified_round_robin"
+        assert cfg.stratified_layer_bucket_width == 6
+        assert cfg.oracle_profile == "real_policy"
+        assert cfg.frontend_total_budget_override is None
+        assert cfg.fifo_keep_topk_override is None
+        assert cfg.sequence_manifest_path is None
+        assert cfg.sequence_partition_policy == "hash_mod"
+        assert cfg.num_sequence_shards is None
+        assert cfg.sequence_shard_id is None
+        assert cfg.store_replay_payload is False
+
+
+class TestShardSummaryMetrics:
+    def test_shard_summary_includes_required_fields(self):
+        from ovggt.training.frontend_oracle_collector import compute_shard_summary
+        events = [
+            {"event_type": "dedup", "frame_id": 0, "layer_id": 3,
+             "subsets": [{"keep_indices": torch.tensor([0, 1]), "loss": float(i)} for i in range(5)],
+             "sequence_provenance": {"sequence_id": "seq_001", "dataset": "WildRGBD"}},
+            {"event_type": "dedup", "frame_id": 0, "layer_id": 9,
+             "subsets": [{"keep_indices": torch.tensor([0, 1]), "loss": float(i)} for i in range(3)],
+             "sequence_provenance": {"sequence_id": "seq_001", "dataset": "WildRGBD"}},
+            {"event_type": "eviction", "frame_id": 3, "layer_id": 15,
+             "subsets": [{"keep_indices": torch.tensor([0]), "loss": float(i)} for i in range(2)],
+             "sequence_provenance": {"sequence_id": "seq_002", "dataset": "DTU"}},
+        ]
+        summary = compute_shard_summary(events, partial=True, elapsed_sec=3600.0)
+        assert summary["num_events"] == 3
+        assert summary["num_sequences"] == 2
+        assert summary["partial"] is True
+        assert summary["event_type_counts"]["dedup"] == 2
+        assert summary["event_type_counts"]["eviction"] == 1
+        assert summary["subsets_per_event"]["min"] == 2
+        assert summary["subsets_per_event"]["max"] == 5
+        assert summary["dataset_counts"]["WildRGBD"] == 1
+        assert summary["dataset_counts"]["DTU"] == 1
