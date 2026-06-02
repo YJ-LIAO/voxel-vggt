@@ -164,10 +164,15 @@ class FrontendCacheTests(unittest.TestCase):
         state.reorder_by_anchor_slots_()
         state.apply_voxel_dedup_(FrontendCacheConfig(enabled=True, voxel_size=0.5), current_frame_id=1)
 
-        self.assertEqual(state.num_tokens(), 3)
-        self.assertTrue(torch.equal(state.metadata.anchor_slot[0], torch.tensor([0, -1, -1])))
+        # Protected anchor (token 0) + current token 1 (score 0.2 > protected 0.0, NOT discarded)
+        # + best current from voxel (1,0,0) group (token 2, score 0.9) + CAMERA = 4 tokens
+        self.assertEqual(state.num_tokens(), 4)
+        self.assertTrue(torch.equal(state.metadata.anchor_slot[0], torch.tensor([0, -1, -1, -1])))
         self.assertEqual(int(state.metadata.token_kind[0, -1].item()), int(TokenKind.CAMERA))
-        self.assertTrue(torch.allclose(state.metadata.slot_local_xyz[0, 1], torch.tensor([1.0, 0.0, 0.0])))
+        # Token 1 (voxel 0,0,0) is kept because its score (0.2) >= protected score (0.0)
+        self.assertTrue(torch.allclose(state.metadata.slot_local_xyz[0, 1], torch.tensor([0.0, 0.0, 0.0])))
+        # Best from voxel (1,0,0) group is token 2 (score 0.9)
+        self.assertTrue(torch.allclose(state.metadata.slot_local_xyz[0, 2], torch.tensor([1.0, 0.0, 0.0])))
 
     def test_commit_pending_update_keeps_metadata_in_sync(self):
         attn = Attention(dim=8, num_heads=2)

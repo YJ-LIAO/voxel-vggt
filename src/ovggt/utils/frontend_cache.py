@@ -825,8 +825,10 @@ class LayerCacheState:
             has_match = current_to_best >= 0
             if has_match.any():
                 protected_conflict_mask[has_match] = True
+                # Only discard current token if its score is worse than the best protected token in that voxel
+                worse = current_patch_scores[has_match] < best_protected[current_to_best[has_match]]
                 discard_idx = torch.nonzero(has_match, as_tuple=False).squeeze(-1)
-                discard_current_mask[discard_idx] = True
+                discard_current_mask[discard_idx[worse]] = True
 
             if discard_current_mask.any():
                 keep_mask[current_patch_indices[discard_current_mask]] = False

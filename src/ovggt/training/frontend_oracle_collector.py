@@ -1302,6 +1302,7 @@ def collect_oracle_events_from_loader(
     event_selection_policy: str = "stratified_round_robin",
     stratified_layer_bucket_width: int = 6,
     store_replay_payload: bool = False,
+    max_subsets_per_dedup_event: int = 8,
 ) -> list[dict]:
     events: list[dict] = []
     max_batches_int = int(max_batches)
@@ -1380,6 +1381,7 @@ def collect_oracle_events_from_loader(
             event_selection_policy=event_selection_policy,
             stratified_layer_bucket_width=stratified_layer_bucket_width,
             store_replay_payload=store_replay_payload,
+            max_subsets_per_dedup_event=max_subsets_per_dedup_event,
         )
         for event in batch_events:
             if not any(event is collected for collected in collected_batch_events):
@@ -1422,6 +1424,7 @@ def collect_oracle_events_from_sequence(
     event_selection_policy: str = "stratified_round_robin",
     stratified_layer_bucket_width: int = 6,
     store_replay_payload: bool = False,
+    max_subsets_per_dedup_event: int = 8,
 ) -> list[dict]:
     if max_events <= 0:
         return []
@@ -1449,6 +1452,7 @@ def collect_oracle_events_from_sequence(
         layers_per_frame=layers_per_frame,
         num_layers=num_layers,
         voxel_size=0.25,
+        max_subsets_per_dedup_event=max_subsets_per_dedup_event,
     )
     fifo_probe = CounterfactualFifoTopKProbe(
         num_samples=num_samples,
