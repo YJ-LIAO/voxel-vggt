@@ -1196,3 +1196,61 @@ class TestDedupProbeSubsetCap:
         subsets = [s for s in probe.events[0]["candidate_subsets"] if s.get("source") != "policy_baseline"]
         keep_indices_sets = [set(s["keep_indices"].tolist()) for s in subsets]
         assert any(49 in kis for kis in keep_indices_sets)
+
+
+from ovggt.training.frontend_oracle_collector import select_oracle_events
+
+
+class TestSelectOracleEvents:
+    def _make_events(self, specs):
+        return [{"event_type": et, "frame_id": fid, "layer_id": lid, "voxel_group_id": vgid} for et, fid, lid, vgid in specs]
+
+    def test_first_n_policy_takes_first_n(self):
+        events = self._make_events([("dedup", f, 0, 0) for f in range(20)])
+        selected = select_oracle_events(events, max_events=5, max_events_per_frame=100, policy="first_n")
+        assert len(selected) == 5
+        assert [e["frame_id"] for e in selected] == [0, 1, 2, 3, 4]
+
+    def test_stratified_round_robin_spreads_across_frames(self):
+        events = []
+        for frame in range(3):
+            for _ in range(20):
+                events.append({"event_type": "dedup", "frame_id": frame, "layer_id": 0, "voxel_group_id": 0})
+        selected = select_oracle_events(events, max_events=6, max_events_per_frame=6, policy="stratified_round_robin")
+        frames_selected = set(e["frame_id"] for e in selected)
+        assert len(frames_selected) >= 2
+
+    def test_max_events_per_frame_is_respected(self):
+        events = [{"event_type": "dedup", "frame_id": 0, "layer_id": i, "voxel_group_id": 0} for i in range(20)]
+        selected = select_oracle_events(events, max_events=10, max_events_per_frame=3, policy="stratified_round_robin")
+        frame_counts = {}
+        for e in selected:
+            frame_counts[e["frame_id"]] = frame_counts.get(e["frame_id"], 0) + 1
+        assert frame_counts.get(0, 0) <= 3
+
+    def test_deterministic_on_same_input(self):
+        events = self._make_events([("dedup", i % 5, i, i) for i in range(50)])
+        s1 = select_oracle_events(events, max_events=10, max_events_per_frame=6, policy="stratified_round_robin")
+        s2 = select_oracle_events(events, max_events=10, max_events_per_frame=6, policy="stratified_round_robin")
+        assert s1 == s2
+
+    def test_groups_by_event_type_frame_layer_and_voxel(self):
+        events = []
+        for et in ["dedup", "eviction"]:
+            for frame in [0, 1]:
+                for layer in [0, 12]:
+                    events.append({"event_type": et, "frame_id": frame, "layer_id": layer, "voxel_group_id": 0})
+        selected = select_oracle_events(events, max_events=8, max_events_per_frame=8, policy="stratified_round_robin")
+        assert len(selected) == 8
+
+    def test_layer_bucket_groups_correctly(self):
+        events = [
+            {"event_type": "dedup", "frame_id": 0, "layer_id": 0, "voxel_group_id": 0},
+            {"event_type": "dedup", "frame_id": 0, "layer_id": 6, "voxel_group_id": 0},
+            {"event_type": "dedup", "frame_id": 0, "layer_id": 12, "voxel_group_id": 0},
+            {"event_type": "dedup", "frame_id": 0, "layer_id": 18, "voxel_group_id": 0},
+        ]
+        selected = select_oracle_events(events, max_events=4, max_events_per_frame=4, policy="stratified_round_robin")
+        assert len(selected) == 4
+        layers = [e["layer_id"] for e in selected]
+        assert set(layers) == {0, 6, 12, 18}

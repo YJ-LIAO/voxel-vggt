@@ -1006,6 +1006,56 @@ def build_frozen_teacher_from_config(
     )
 
 
+def _group_candidates_for_stratified_selection(
+    candidate_events: list[dict],
+    layer_bucket_width: int = 6,
+) -> list[list[dict]]:
+    groups: dict[tuple, list[dict]] = {}
+    for event in candidate_events:
+        et = event.get("event_type", "unknown")
+        fid = int(event.get("frame_id", 0))
+        lid = int(event.get("layer_id", 0))
+        bucket = lid // layer_bucket_width
+        vgid = event.get("voxel_group_id", event.get("demoted_slot", id(event)))
+        key = (et, fid, bucket, vgid)
+        groups.setdefault(key, []).append(event)
+    return [groups[k] for k in sorted(groups.keys())]
+
+
+def select_oracle_events(
+    candidate_events: list[dict],
+    max_events: int,
+    max_events_per_frame: int,
+    policy: str = "stratified_round_robin",
+    layer_bucket_width: int = 6,
+) -> list[dict]:
+    if policy == "first_n":
+        return candidate_events[:max_events]
+
+    groups = _group_candidates_for_stratified_selection(candidate_events, layer_bucket_width)
+    selected = []
+    per_frame_counts: dict[int, int] = {}
+    group_queues = [list(g) for g in groups]
+    while group_queues and len(selected) < max_events:
+        next_round = []
+        for queue in group_queues:
+            if not queue:
+                continue
+            if len(selected) >= max_events:
+                break
+            event = queue.pop(0)
+            frame_id = int(event.get("frame_id", 0))
+            if per_frame_counts.get(frame_id, 0) >= max_events_per_frame:
+                next_round.append(queue)
+                continue
+            selected.append(event)
+            per_frame_counts[frame_id] = per_frame_counts.get(frame_id, 0) + 1
+            if queue:
+                next_round.append(queue)
+        group_queues = next_round
+    return selected
+
+
 @torch.inference_mode()
 def collect_oracle_shard_from_config(collector_cfg: FrontendOracleCollectorConfig) -> dict:
     log_fn = default_oracle_log
