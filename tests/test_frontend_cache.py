@@ -212,5 +212,119 @@ class FrontendCacheTests(unittest.TestCase):
         self.assertLessEqual(state.num_tokens(), 4)
 
 
+# ---------------------------------------------------------------------------
+# Phase 1 Decision 2 instrumentation: apply_voxel_dedup_() must expose
+# scores and policy_keep_indices to the probe callback BEFORE the gather.
+# ---------------------------------------------------------------------------
+import pytest
+
+
+def _make_dedup_cache_state(num_tokens: int = 10) -> LayerCacheState:
+    """Build a LayerCacheState where all PATCH tokens share voxel (0, 0, 0).
+
+    frame_id / keyframe_id / slot_id = 1 so that with current_frame_id=1 the
+    tokens fall into current_patch_mask and actually trigger dedup.
+    """
+    B = 1
+    xyz = [(0.0, 0.0, 0.0)] * num_tokens
+    return LayerCacheState(
+        k=torch.randn(B, 2, num_tokens, 4),
+        v=torch.randn(B, 2, num_tokens, 4),
+        score_state=torch.randn(B, num_tokens, 128),
+        metadata=TokenMetadata(
+            token_kind=torch.tensor([[int(TokenKind.PATCH)] * num_tokens], dtype=torch.long),
+            frame_id=torch.tensor([[1] * num_tokens], dtype=torch.long),
+            anchor_slot=torch.tensor([[-1] * num_tokens], dtype=torch.long),
+            keyframe_id=torch.tensor([[1] * num_tokens], dtype=torch.long),
+            slot_id=torch.tensor([[1] * num_tokens], dtype=torch.long),
+            slot_local_xyz=torch.tensor([list(xyz)], dtype=torch.float32),
+            importance=torch.rand(B, num_tokens),
+            depth_conf=torch.rand(B, num_tokens),
+        ),
+        protected_count=0,
+    )
+
+
+class TestApplyVoxelDedupProbeCallbackOrdering:
+    """Verify that apply_voxel_dedup_() computes keep indices BEFORE calling
+    the probe callback, and that the callback receives actual scores and
+    policy_keep_indices."""
+
+    def test_probe_receives_scores_and_policy_keep_indices(self):
+        """The probe callback must receive non-None scores and policy_keep_indices."""
+        received = {}
+
+        class InstrumentedProbe:
+            def on_dedup_candidate(
+                self,
+                cache_state,
+                layer_id,
+                frame_id,
+                batch_index=0,
+                scores=None,
+                policy_keep_indices=None,
+            ):
+                received["scores"] = scores
+                received["policy_keep_indices"] = policy_keep_indices
+                received["called"] = True
+
+        cache = _make_dedup_cache_state(num_tokens=10)
+        config = FrontendCacheConfig(
+            enabled=True, dedup_enabled=True, voxel_size=0.25,
+        )
+        cache.apply_voxel_dedup_(
+            config=config, current_frame_id=1,
+            dedup_probe=InstrumentedProbe(),
+            batch_index=0,
+        )
+        assert received.get("called"), "Probe callback was not invoked"
+        assert received["scores"] is not None, "scores was not passed to callback"
+        assert received["policy_keep_indices"] is not None, "policy_keep_indices was not passed to callback"
+        assert received["scores"].dim() == 1, f"scores should be 1D, got {received['scores'].dim()}D"
+        assert received["policy_keep_indices"].dim() == 1, (
+            f"policy_keep_indices should be 1D, got {received['policy_keep_indices'].dim()}D"
+        )
+
+    def test_gather_uses_computed_keep_indices(self):
+        """After the callback, the gather must apply the computed policy_keep_indices,
+        not a re-derived set."""
+        received = {}
+
+        class CapturingProbe:
+            def on_dedup_candidate(
+                self,
+                cache_state,
+                layer_id,
+                frame_id,
+                batch_index=0,
+                scores=None,
+                policy_keep_indices=None,
+            ):
+                received["policy_keep_indices"] = (
+                    policy_keep_indices.detach().cpu().clone() if policy_keep_indices is not None else None
+                )
+                received["num_tokens_before"] = cache_state.num_tokens()
+
+        cache = _make_dedup_cache_state(num_tokens=10)
+        config = FrontendCacheConfig(
+            enabled=True, dedup_enabled=True, voxel_size=0.25,
+        )
+        cache.apply_voxel_dedup_(
+            config=config, current_frame_id=1,
+            dedup_probe=CapturingProbe(),
+            batch_index=0,
+        )
+        assert received["policy_keep_indices"] is not None
+        expected_kept = received["policy_keep_indices"].shape[0]
+        assert received["num_tokens_before"] == 10
+        assert expected_kept < received["num_tokens_before"], (
+            "Fixture must trigger actual dedup; otherwise this test can pass without exercising gather"
+        )
+        actual_kept = cache.num_tokens()
+        assert actual_kept == expected_kept, (
+            f"Cache has {actual_kept} tokens after gather, but policy_keep_indices had {expected_kept}"
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
