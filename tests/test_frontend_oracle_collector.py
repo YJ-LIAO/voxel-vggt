@@ -1144,3 +1144,55 @@ class TestSampleDedupKeepIndices:
         result, baseline = _sample_dedup_keep_indices(group_indices, dedup_scores, cap=8, generator=gen, policy_keep_indices=policy_keep)
         assert result == []
         assert baseline is None
+
+
+from ovggt.training.frontend_oracle_collector import CounterfactualDedupProbe
+
+class TestDedupProbeSubsetCap:
+    def test_probe_caps_subsets_when_voxel_group_exceeds_cap(self):
+        importance = [float(i) / 50.0 for i in range(50)]
+        state = _dedup_cache_state(num_tokens=50, importance=importance)
+        probe = CounterfactualDedupProbe(
+            num_samples=8, oracle_window=4, seed=42,
+            max_subsets_per_dedup_event=8,
+        )
+        scores = torch.tensor(importance)
+        policy_keep = torch.tensor([0, 1, 2, 3, 4])
+        probe.on_dedup_candidate(
+            cache_state=state, layer_id=0, frame_id=5, batch_index=0,
+            scores=scores, policy_keep_indices=policy_keep,
+        )
+        assert len(probe.events) == 1
+        event = probe.events[0]
+        assert len(event["candidate_subsets"]) <= 8
+        assert any(subset.get("source") == "policy_baseline" for subset in event["candidate_subsets"])
+
+    def test_probe_returns_full_enumeration_below_cap(self):
+        importance = [0.1, 0.2, 0.3, 0.4, 0.5]
+        state = _dedup_cache_state(num_tokens=5, importance=importance)
+        probe = CounterfactualDedupProbe(
+            num_samples=8, oracle_window=4, seed=42,
+            max_subsets_per_dedup_event=8,
+        )
+        probe.on_dedup_candidate(
+            cache_state=state, layer_id=0, frame_id=5, batch_index=0,
+            scores=torch.tensor(importance), policy_keep_indices=torch.arange(5),
+        )
+        assert len(probe.events) == 1
+        assert len(probe.events[0]["candidate_subsets"]) == 5
+
+    def test_probe_uses_actual_scores_not_importance(self):
+        importance = [0.5] * 50
+        actual_scores = torch.arange(50, dtype=torch.float)
+        state = _dedup_cache_state(num_tokens=50, importance=importance)
+        probe = CounterfactualDedupProbe(
+            num_samples=8, oracle_window=4, seed=42,
+            max_subsets_per_dedup_event=8,
+        )
+        probe.on_dedup_candidate(
+            cache_state=state, layer_id=0, frame_id=5, batch_index=0,
+            scores=actual_scores, policy_keep_indices=torch.tensor([0]),
+        )
+        subsets = [s for s in probe.events[0]["candidate_subsets"] if s.get("source") != "policy_baseline"]
+        keep_indices_sets = [set(s["keep_indices"].tolist()) for s in subsets]
+        assert any(49 in kis for kis in keep_indices_sets)

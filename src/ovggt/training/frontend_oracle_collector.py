@@ -266,6 +266,7 @@ class CounterfactualDedupProbe:
         layers_per_frame: int = 0,
         num_layers: int | None = None,
         voxel_size: float = 0.25,
+        max_subsets_per_dedup_event: int = 8,
     ) -> None:
         self.num_samples = int(num_samples)
         self.oracle_window = int(oracle_window)
@@ -276,6 +277,7 @@ class CounterfactualDedupProbe:
         self.layers_per_frame = int(layers_per_frame)
         self.num_layers = None if num_layers is None else int(num_layers)
         self.voxel_size = float(voxel_size)
+        self.max_subsets_per_dedup_event = int(max_subsets_per_dedup_event)
         self.events: list[dict] = []
 
     def on_dedup_candidate(
@@ -352,12 +354,32 @@ class CounterfactualDedupProbe:
             if group_indices.numel() < 2:
                 continue
 
-            # Sample candidate subsets: keep one, evict rest
+            # Use actual dedup scores passed from apply_voxel_dedup_ (not metadata.importance)
+            group_scores = scores[group_indices.tolist()] if scores is not None else base_scores[group_indices.tolist()]
+            generator = torch.Generator().manual_seed(self.seed + len(self.events))
+
+            keep_local_indices, policy_baseline = _sample_dedup_keep_indices(
+                group_indices,
+                dedup_scores=group_scores,
+                cap=self.max_subsets_per_dedup_event,
+                generator=generator,
+                policy_keep_indices=policy_keep_indices,
+            )
+
+            if not keep_local_indices and policy_baseline is None:
+                continue
+
             candidate_subsets = []
-            # Always include all-keep and one-evict-each strategies
-            for keep_idx in group_indices.tolist():
+            if policy_baseline is not None:
+                candidate_subsets.append({
+                    "source": "policy_baseline",
+                    "keep_indices": policy_baseline,
+                })
+
+            for keep_idx in keep_local_indices:
                 evict_indices = [idx for idx in group_indices.tolist() if idx != keep_idx]
                 candidate_subsets.append({
+                    "source": "keep_one",
                     "keep_index": keep_idx,
                     "evict_indices": evict_indices,
                     "keep_indices": torch.tensor(
@@ -366,7 +388,7 @@ class CounterfactualDedupProbe:
                     ),
                 })
 
-            if len(candidate_subsets) < 2:
+            if len(candidate_subsets) < 1:
                 continue
 
             event_id = (
@@ -385,8 +407,9 @@ class CounterfactualDedupProbe:
                 "metadata_features": metadata_features,
                 "candidate_subsets": [
                     {
-                        "keep_index": cs["keep_index"],
-                        "evict_indices": cs["evict_indices"],
+                        "source": cs.get("source", "keep_one"),
+                        **({"keep_index": cs["keep_index"]} if "keep_index" in cs else {}),
+                        **({"evict_indices": cs["evict_indices"]} if "evict_indices" in cs else {}),
                         "keep_indices": cs["keep_indices"].detach().cpu().long(),
                     }
                     for cs in candidate_subsets
