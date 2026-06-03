@@ -15,6 +15,7 @@ import torch
 import pytest
 
 from ovggt.utils.frontend_cache import LayerCacheState, TokenMetadata
+from ovggt.training.frontend_oracle_collector import CounterfactualFifoTopKProbe
 
 
 def _make_layer_cache(
@@ -276,3 +277,236 @@ class TestFifoProbeProtectAllTokens:
         assert all_in_slot0 == num_tokens, (
             f"Expected all {num_tokens} tokens in slot 0, but found {all_in_slot0}"
         )
+
+
+class TestFifoProbeSamplesMultipleKeepCounts:
+    """Test that count_candidates causes the probe to emit subsets for multiple
+    keep_count values, clamped to [0, num_slot_tokens].
+    """
+
+    def test_fifo_probe_samples_multiple_keep_counts_with_zero_and_all(self):
+        """Given demoted slot token count K=10 and count_candidates [0, 4, 20],
+        the probe should emit candidates for counts [0, 4, 10] after clamping.
+
+        Expected behavior:
+        - keep_count=0: keep_indices contains only non-demoted-slot tokens.
+        - keep_count=4: keep_indices contains non-demoted-slot tokens plus 4 demoted tokens.
+        - keep_count=10: keep_indices contains non-demoted-slot tokens plus all 10 demoted tokens.
+        - Every candidate subset has subset["keep_count"].
+        """
+        num_tokens = 20
+        num_in_demoted_slot = 10  # K=10
+        demoted_slot = 1
+        keep_count = 5  # runtime keep_count (not used when count_candidates is set)
+
+        cache = _make_layer_cache(
+            num_tokens=num_tokens,
+            demoted_slot=demoted_slot,
+            num_in_demoted_slot=num_in_demoted_slot,
+        )
+
+        # Non-demoted indices: tokens 10..19
+        expected_non_slot = set(range(num_in_demoted_slot, num_tokens))
+        # Demoted indices: tokens 0..9
+        expected_demoted = set(range(num_in_demoted_slot))
+
+        probe = CounterfactualFifoTopKProbe(
+            count_candidates=[0, 4, 20],  # 20 will be clamped to K=10
+            max_subsets_per_fifo_event=16,
+        )
+
+        probe.on_fifo_topk_candidate(
+            cache_state=cache,
+            demoted_slot=demoted_slot,
+            keep_count=keep_count,
+            layer_id=0,
+            frame_id=0,
+            batch_index=0,
+            demoted_indices_by_batch=None,
+        )
+
+        assert len(probe.events) == 1, f"Expected 1 event, got {len(probe.events)}"
+        event = probe.events[0]
+
+        # Event must include demoted_indices
+        assert "demoted_indices" in event, "Event must contain 'demoted_indices'"
+        demoted_indices = event["demoted_indices"]
+        assert demoted_indices.numel() == num_in_demoted_slot, (
+            f"demoted_indices should have {num_in_demoted_slot} elements, "
+            f"got {demoted_indices.numel()}"
+        )
+
+        subsets = event["candidate_subsets"]
+        # Collect the unique keep_counts present across subsets
+        keep_counts_found = sorted({int(s["keep_count"]) for s in subsets})
+        # Should be [0, 4, 10] (20 clamped to K=10)
+        assert keep_counts_found == [0, 4, 10], (
+            f"Expected keep_counts [0, 4, 10], got {keep_counts_found}"
+        )
+
+        # Check keep_count=0 subset
+        zero_subsets = [s for s in subsets if int(s["keep_count"]) == 0]
+        assert len(zero_subsets) >= 1, "Expected at least 1 subset with keep_count=0"
+        for s in zero_subsets:
+            keep_set = set(s["keep_indices"].tolist())
+            assert keep_set == expected_non_slot, (
+                f"keep_count=0 subset should contain only non-demoted tokens, "
+                f"got {keep_set}"
+            )
+
+        # Check keep_count=10 (all) subset
+        all_subsets = [s for s in subsets if int(s["keep_count"]) == num_in_demoted_slot]
+        assert len(all_subsets) >= 1, (
+            f"Expected at least 1 subset with keep_count={num_in_demoted_slot}"
+        )
+        for s in all_subsets:
+            keep_set = set(s["keep_indices"].tolist())
+            assert keep_set == set(range(num_tokens)), (
+                f"keep_count=10 subset should contain all tokens, got {keep_set}"
+            )
+
+        # Check keep_count=4 subsets
+        four_subsets = [s for s in subsets if int(s["keep_count"]) == 4]
+        assert len(four_subsets) >= 1, "Expected at least 1 subset with keep_count=4"
+        for s in four_subsets:
+            keep_set = set(s["keep_indices"].tolist())
+            # Must include all non-slot tokens
+            assert expected_non_slot.issubset(keep_set), (
+                f"keep_count=4 subset must include all non-demoted tokens; "
+                f"missing {expected_non_slot - keep_set}"
+            )
+            # Must include exactly 4 demoted tokens
+            demoted_kept = keep_set & expected_demoted
+            assert len(demoted_kept) == 4, (
+                f"keep_count=4 subset should have exactly 4 demoted tokens, "
+                f"got {len(demoted_kept)}"
+            )
+            # Must have demoted_keep_indices
+            assert "demoted_keep_indices" in s, (
+                "subset must include 'demoted_keep_indices'"
+            )
+            assert s["demoted_keep_indices"].numel() == 4, (
+                f"demoted_keep_indices should have 4 elements, "
+                f"got {s['demoted_keep_indices'].numel()}"
+            )
+
+    def test_fifo_probe_default_count_candidates_uses_runtime_keep_count(self):
+        """When count_candidates is None (default), probe should use the
+        runtime keep_count value only.
+        """
+        num_tokens = 15
+        num_in_demoted_slot = 5
+        demoted_slot = 1
+        keep_count = 2
+
+        cache = _make_layer_cache(
+            num_tokens=num_tokens,
+            demoted_slot=demoted_slot,
+            num_in_demoted_slot=num_in_demoted_slot,
+        )
+
+        probe = CounterfactualFifoTopKProbe()  # default: no count_candidates
+
+        probe.on_fifo_topk_candidate(
+            cache_state=cache,
+            demoted_slot=demoted_slot,
+            keep_count=keep_count,
+            layer_id=0,
+            frame_id=0,
+            batch_index=0,
+            demoted_indices_by_batch=None,
+        )
+
+        assert len(probe.events) == 1
+        subsets = probe.events[0]["candidate_subsets"]
+        # All subsets should have keep_count=2 (the runtime value)
+        keep_counts = {int(s.get("keep_count", keep_count)) for s in subsets}
+        # Old behavior: subsets may or may not have keep_count field,
+        # but if they do, they should all be 2.
+        # With new behavior, every subset must have keep_count.
+        for s in subsets:
+            assert "keep_count" in s, "Every subset must have 'keep_count' field"
+            assert int(s["keep_count"]) == keep_count, (
+                f"Expected keep_count={keep_count}, got {s['keep_count']}"
+            )
+
+    def test_fifo_probe_cap_semantics(self):
+        """max_subsets_per_fifo_event caps total subsets across all count
+        candidates. Deterministic subsets (keep_count=0 and all) are always
+        included.
+        """
+        num_tokens = 20
+        num_in_demoted_slot = 10
+        demoted_slot = 1
+
+        cache = _make_layer_cache(
+            num_tokens=num_tokens,
+            demoted_slot=demoted_slot,
+            num_in_demoted_slot=num_in_demoted_slot,
+        )
+
+        # Very tight cap: only 2 subsets allowed
+        probe = CounterfactualFifoTopKProbe(
+            count_candidates=[0, 4, 10],
+            max_subsets_per_fifo_event=2,
+        )
+
+        probe.on_fifo_topk_candidate(
+            cache_state=cache,
+            demoted_slot=demoted_slot,
+            keep_count=5,
+            layer_id=0,
+            frame_id=0,
+            batch_index=0,
+            demoted_indices_by_batch=None,
+        )
+
+        assert len(probe.events) == 1
+        event = probe.events[0]
+        subsets = event["candidate_subsets"]
+        keep_counts = sorted({int(s["keep_count"]) for s in subsets})
+
+        # With cap=2 and 3 candidate counts (0, 4, 10), the cap should be
+        # auto-raised to at least 3 (one per count) so we get all three.
+        # Check that all counts are represented.
+        assert 0 in keep_counts, "keep_count=0 must always be included"
+        assert num_in_demoted_slot in keep_counts, "all-token subset must be included"
+        assert 4 in keep_counts, (
+            "At least one positive non-all count must be represented; "
+            "cap should auto-raise if needed"
+        )
+
+    def test_fifo_probe_demoted_indices_in_event(self):
+        """Event-level output must include demoted_indices for FifoCountDataset."""
+        num_tokens = 15
+        num_in_demoted_slot = 5
+        demoted_slot = 1
+
+        cache = _make_layer_cache(
+            num_tokens=num_tokens,
+            demoted_slot=demoted_slot,
+            num_in_demoted_slot=num_in_demoted_slot,
+        )
+
+        probe = CounterfactualFifoTopKProbe(
+            count_candidates=[0, 5],
+        )
+
+        probe.on_fifo_topk_candidate(
+            cache_state=cache,
+            demoted_slot=demoted_slot,
+            keep_count=3,
+            layer_id=0,
+            frame_id=0,
+            batch_index=0,
+            demoted_indices_by_batch=None,
+        )
+
+        assert len(probe.events) == 1
+        event = probe.events[0]
+        assert "demoted_indices" in event
+        demoted_indices = event["demoted_indices"]
+        assert demoted_indices.numel() == num_in_demoted_slot
+        # Must be on CPU and long dtype
+        assert demoted_indices.device == torch.device("cpu")
+        assert demoted_indices.dtype == torch.long

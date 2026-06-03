@@ -109,6 +109,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--oracle-profile", type=str, default="real_policy", choices=["real_policy", "low_budget_eviction", "fifo_topk"])
     parser.add_argument("--frontend-total-budget-override", type=int, default=None)
     parser.add_argument("--fifo-keep-topk-override", type=int, default=None)
+    parser.add_argument(
+        "--fifo-count-candidates-for-oracle",
+        type=str,
+        default=None,
+        help="Comma-separated list of keep count values to sample for FIFO oracle (e.g., '0,8,16,32,64,128').",
+    )
     parser.add_argument("--sequence-manifest-path", type=str, default=None)
     parser.add_argument("--sequence-partition-policy", type=str, default="hash_mod", choices=["hash_mod", "contiguous"])
     parser.add_argument("--num-sequence-shards", type=int, default=None)
@@ -166,6 +172,7 @@ def main() -> None:
         num_sequence_shards=args.num_sequence_shards,
         sequence_shard_id=args.sequence_shard_id,
         dataloader_timeout=args.dataloader_timeout,
+        fifo_count_candidates_for_oracle=args.fifo_count_candidates_for_oracle,
     )
     shard = collect_oracle_shard_from_config(collector_cfg)
     shard["collector_config"] = asdict(collector_cfg)

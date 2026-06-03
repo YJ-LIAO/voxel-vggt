@@ -120,6 +120,8 @@ class FrontendOracleCollectorConfig:
     sequence_partition_policy: str = "hash_mod"
     num_sequence_shards: int | None = None
     sequence_shard_id: int | None = None
+    # --- FIFO top-K count-candidate sampling ---
+    fifo_count_candidates_for_oracle: str | None = None
 
 
 def default_oracle_log(message: str) -> None:
@@ -566,6 +568,8 @@ class CounterfactualFifoTopKProbe:
     """Records cache state when FIFO top-K protection is about to select tokens.
 
     Samples multiple top-K candidate sets for counterfactual replay.
+    When *count_candidates* is provided, emits subsets for each clamped count
+    value; otherwise falls back to the single runtime *keep_count*.
     """
 
     def __init__(
@@ -578,6 +582,8 @@ class CounterfactualFifoTopKProbe:
         sequence_provenance: dict[int, dict] | None = None,
         layers_per_frame: int = 0,
         num_layers: int | None = None,
+        count_candidates: Sequence[int] | None = None,
+        max_subsets_per_fifo_event: int = 8,
     ) -> None:
         self.num_samples = int(num_samples)
         self.oracle_window = int(oracle_window)
@@ -587,6 +593,8 @@ class CounterfactualFifoTopKProbe:
         self.sequence_provenance = dict(sequence_provenance or {})
         self.layers_per_frame = int(layers_per_frame)
         self.num_layers = None if num_layers is None else int(num_layers)
+        self.count_candidates = None if count_candidates is None else tuple(int(x) for x in count_candidates)
+        self.max_subsets_per_fifo_event = int(max_subsets_per_fifo_event)
         self.events: list[dict] = []
 
     def on_fifo_topk_candidate(
@@ -626,60 +634,134 @@ class CounterfactualFifoTopKProbe:
         # Use pre-computed indices when available; otherwise recompute for
         # backward compatibility with older callers.
         if demoted_indices_by_batch is not None and b_idx in demoted_indices_by_batch:
-            indices = demoted_indices_by_batch[b_idx]
+            demoted_indices = demoted_indices_by_batch[b_idx]
         else:
             slot_mask = metadata.anchor_slot[b_idx] == demoted_slot
-            indices = torch.nonzero(slot_mask, as_tuple=False).squeeze(-1)
+            demoted_indices = torch.nonzero(slot_mask, as_tuple=False).squeeze(-1)
 
-        # Compute all indices NOT in the demoted slot — these are always retained.
+        # Compute all indices NOT in the demoted slot -- these are always retained.
         non_slot_mask = metadata.anchor_slot[b_idx] != demoted_slot
         non_slot_indices = torch.nonzero(non_slot_mask, as_tuple=False).squeeze(-1)
 
-        num_slot_tokens = indices.numel()
-        if num_slot_tokens <= keep_count:
+        num_slot_tokens = demoted_indices.numel()
+
+        # Preserve old early-return: when not using explicit count_candidates,
+        # skip if keep_count >= num_slot_tokens (nothing to choose).
+        if self.count_candidates is None and num_slot_tokens <= keep_count:
             return
 
-        slot_score_state = cache_state.score_state[b_idx, indices].detach().cpu().float()
+        # Compute candidate counts (clamped to [0, num_slot_tokens])
+        raw_counts = self.count_candidates or (int(keep_count),)
+        candidate_counts = sorted({max(0, min(int(c), num_slot_tokens)) for c in raw_counts})
+
+        # If none of the candidate counts are valid, fall back to the early
+        # return condition: when the only count equals num_slot_tokens and
+        # there are no other counts, skip (matches old behaviour).
+        if not candidate_counts:
+            return
+
+        slot_score_state = cache_state.score_state[b_idx, demoted_indices].detach().cpu().float()
         full_metadata_features = cache_state.build_scorer_metadata_features(current_frame_id=int(frame_id))
-        slot_metadata_features = full_metadata_features[b_idx, indices].detach().cpu().float()
-        slot_importance = metadata.importance[b_idx, indices].detach().cpu().float()
+        slot_metadata_features = full_metadata_features[b_idx, demoted_indices].detach().cpu().float()
+        slot_importance = metadata.importance[b_idx, demoted_indices].detach().cpu().float()
         num_tokens = int(cache_state.num_tokens())
 
-        # Sample candidate top-K subsets
         generator = torch.Generator().manual_seed(self.seed + len(self.events))
-        candidate_subsets = []
 
-        # Strategy 1: top-K by importance (current heuristic)
-        _, top_by_importance = torch.topk(slot_importance, k=keep_count)
-        keep_imp_indices = indices[top_by_importance].sort().values
-        full_keep_imp = torch.cat([non_slot_indices, keep_imp_indices]).sort().values
+        # ---- Collect subsets across all candidate counts ----
+        all_subsets: list[dict] = []
 
-        # Strategy 2: random K
-        perm = torch.randperm(num_slot_tokens, generator=generator)[:keep_count]
-        keep_rand_indices = indices[perm].sort().values
-        full_keep_rand = torch.cat([non_slot_indices, keep_rand_indices]).sort().values
+        # Pre-compute the effective cap:
+        # Always include deterministic keep_count=0 and all-token subsets.
+        # For positive non-all counts, include top-importance, random, then jittered.
+        # Auto-raise cap if it would drop all positive counts.
+        effective_cap = int(self.max_subsets_per_fifo_event)
 
-        candidate_subsets.append({
-            "strategy": "top_importance",
-            "keep_indices": full_keep_imp.detach().cpu().long(),
-        })
-        candidate_subsets.append({
-            "strategy": "random",
-            "keep_indices": full_keep_rand.detach().cpu().long(),
-        })
+        # Count how many deterministic subsets we will have
+        has_zero = 0 in candidate_counts
+        has_all = num_slot_tokens in candidate_counts
+        num_deterministic = int(has_zero) + int(has_all)
+        num_positive_non_all = len(candidate_counts) - num_deterministic
 
-        # Strategy 3+: random permutations with jitter
-        for _ in range(min(self.num_samples - 2, 6)):
-            jitter = 0.01 * torch.rand(num_slot_tokens, generator=generator)
-            order = torch.argsort(slot_importance + jitter, descending=True)
-            keep_jitter_indices = indices[order[:keep_count]].sort().values
-            full_keep_jitter = torch.cat([non_slot_indices, keep_jitter_indices]).sort().values
-            candidate_subsets.append({
-                "strategy": "jittered_importance",
-                "keep_indices": full_keep_jitter.detach().cpu().long(),
-            })
+        if num_positive_non_all > 0:
+            min_needed = num_deterministic + num_positive_non_all  # at least 1 per count
+            if effective_cap < min_needed:
+                effective_cap = min_needed
 
-        if len(candidate_subsets) < 2:
+        budget_remaining = effective_cap
+
+        for candidate_keep_count in candidate_counts:
+            if candidate_keep_count == 0:
+                # Deterministic: only non-slot tokens
+                full_keep = non_slot_indices.sort().values
+                all_subsets.append({
+                    "strategy": "deterministic_zero",
+                    "keep_count": 0,
+                    "keep_indices": full_keep.detach().cpu().long(),
+                    "demoted_keep_indices": torch.tensor([], dtype=torch.long),
+                })
+                budget_remaining -= 1
+                continue
+
+            if candidate_keep_count >= num_slot_tokens:
+                # Deterministic: all tokens kept
+                full_keep = torch.cat([non_slot_indices, demoted_indices]).sort().values
+                all_subsets.append({
+                    "strategy": "deterministic_all",
+                    "keep_count": int(num_slot_tokens),
+                    "keep_indices": full_keep.detach().cpu().long(),
+                    "demoted_keep_indices": demoted_indices.detach().cpu().long().clone(),
+                })
+                budget_remaining -= 1
+                continue
+
+            # Positive non-all count: emit top-importance, random, then jittered
+            k = int(candidate_keep_count)
+            subsets_for_count = []
+
+            # Strategy: top-importance
+            if k <= num_slot_tokens and num_slot_tokens > 0:
+                _, top_by_importance = torch.topk(slot_importance, k=k)
+                keep_imp_indices = demoted_indices[top_by_importance].sort().values
+                full_keep_imp = torch.cat([non_slot_indices, keep_imp_indices]).sort().values
+                subsets_for_count.append({
+                    "strategy": "top_importance",
+                    "keep_count": k,
+                    "keep_indices": full_keep_imp.detach().cpu().long(),
+                    "demoted_keep_indices": keep_imp_indices.detach().cpu().long(),
+                })
+
+            # Strategy: random
+            if budget_remaining - len(subsets_for_count) > 0 and k <= num_slot_tokens:
+                perm = torch.randperm(num_slot_tokens, generator=generator)[:k]
+                keep_rand_indices = demoted_indices[perm].sort().values
+                full_keep_rand = torch.cat([non_slot_indices, keep_rand_indices]).sort().values
+                subsets_for_count.append({
+                    "strategy": "random",
+                    "keep_count": k,
+                    "keep_indices": full_keep_rand.detach().cpu().long(),
+                    "demoted_keep_indices": keep_rand_indices.detach().cpu().long(),
+                })
+
+            # Strategy: jittered importance
+            jitter_budget = budget_remaining - len(subsets_for_count)
+            if jitter_budget > 0 and k <= num_slot_tokens:
+                for _ in range(min(jitter_budget, self.num_samples - 2, 6)):
+                    jitter = 0.01 * torch.rand(num_slot_tokens, generator=generator)
+                    order = torch.argsort(slot_importance + jitter, descending=True)
+                    keep_jitter_indices = demoted_indices[order[:k]].sort().values
+                    full_keep_jitter = torch.cat([non_slot_indices, keep_jitter_indices]).sort().values
+                    subsets_for_count.append({
+                        "strategy": "jittered_importance",
+                        "keep_count": k,
+                        "keep_indices": full_keep_jitter.detach().cpu().long(),
+                        "demoted_keep_indices": keep_jitter_indices.detach().cpu().long(),
+                    })
+
+            all_subsets.extend(subsets_for_count)
+            budget_remaining -= len(subsets_for_count)
+
+        if len(all_subsets) < 2:
             return
 
         event_id = (
@@ -687,7 +769,7 @@ class CounterfactualFifoTopKProbe:
             f":slot{demoted_slot}:e{len(self.events)}"
         )
         sequence_provenance = self.sequence_provenance.get(int(batch_index))
-        self.events.append({
+        event_dict = {
             "event_id": event_id,
             "event_type": "fifo_topk",
             "layer_id": int(layer_id),
@@ -697,10 +779,14 @@ class CounterfactualFifoTopKProbe:
             "keep_count": keep_count,
             "score_state": cache_state.score_state[b_idx].detach().cpu().float(),
             "metadata_features": full_metadata_features[b_idx].detach().cpu().float(),
-            "candidate_subsets": candidate_subsets,
+            "candidate_subsets": all_subsets,
             "base_scores": slot_importance,
             "sequence_provenance": copy.deepcopy(sequence_provenance) if sequence_provenance is not None else None,
-        })
+            "demoted_indices": demoted_indices.detach().cpu().long(),
+        }
+        if effective_cap != self.max_subsets_per_fifo_event:
+            event_dict["max_subsets_per_fifo_event_effective"] = effective_cap
+        self.events.append(event_dict)
 
     def clear(self) -> None:
         self.events.clear()
@@ -978,6 +1064,9 @@ def load_frontend_oracle_config(config_path: str | Path, num_views: int | None =
                 if not hasattr(cfg, "frontend_cache"):
                     cfg.frontend_cache = {}
                 cfg.frontend_cache.fifo_keep_topk = int(override)
+            budget_override = collector_cfg.get("frontend_total_budget_override") if hasattr(collector_cfg, "get") else getattr(collector_cfg, "frontend_total_budget_override", None)
+            if budget_override is not None:
+                cfg.frontend_total_budget = int(budget_override)
     if num_views is not None:
         cfg.num_views = int(num_views)
     OmegaConf.resolve(cfg)
@@ -1297,6 +1386,12 @@ def collect_oracle_shard_from_config(collector_cfg: FrontendOracleCollectorConfi
         log_fn=log_fn,
     )
     log_fn("starting oracle event collection")
+    # Parse comma-separated count candidates string to list of ints
+    fifo_count_candidates = None
+    if collector_cfg.fifo_count_candidates_for_oracle is not None:
+        raw = str(collector_cfg.fifo_count_candidates_for_oracle).strip()
+        if raw:
+            fifo_count_candidates = [int(x.strip()) for x in raw.split(",") if x.strip()]
     events = collect_oracle_events_from_loader(
         model=model,
         data_loader=data_loader,
@@ -1328,6 +1423,8 @@ def collect_oracle_shard_from_config(collector_cfg: FrontendOracleCollectorConfi
         store_replay_payload=collector_cfg.store_replay_payload,
         max_subsets_per_dedup_event=collector_cfg.max_subsets_per_dedup_event,
         dataloader_timeout=collector_cfg.dataloader_timeout,
+        fifo_count_candidates=fifo_count_candidates,
+        max_subsets_per_fifo_event=collector_cfg.max_subsets_per_fifo_event,
     )
     shard = dict(base_shard)
     shard["events"] = events
@@ -1366,6 +1463,8 @@ def collect_oracle_events_from_loader(
     store_replay_payload: bool = False,
     max_subsets_per_dedup_event: int = 8,
     dataloader_timeout: int = 600,
+    fifo_count_candidates: Sequence[int] | None = None,
+    max_subsets_per_fifo_event: int = 8,
 ) -> list[dict]:
     events: list[dict] = []
     max_batches_int = int(max_batches)
@@ -1457,6 +1556,8 @@ def collect_oracle_events_from_loader(
             stratified_layer_bucket_width=stratified_layer_bucket_width,
             store_replay_payload=store_replay_payload,
             max_subsets_per_dedup_event=max_subsets_per_dedup_event,
+            fifo_count_candidates=fifo_count_candidates,
+            max_subsets_per_fifo_event=max_subsets_per_fifo_event,
         )
         for event in batch_events:
             if not any(event is collected for collected in collected_batch_events):
@@ -1500,6 +1601,8 @@ def collect_oracle_events_from_sequence(
     stratified_layer_bucket_width: int = 6,
     store_replay_payload: bool = False,
     max_subsets_per_dedup_event: int = 8,
+    fifo_count_candidates: Sequence[int] | None = None,
+    max_subsets_per_fifo_event: int = 8,
 ) -> list[dict]:
     if max_events <= 0:
         return []
@@ -1538,6 +1641,8 @@ def collect_oracle_events_from_sequence(
         sequence_provenance=sequence_provenance,
         layers_per_frame=layers_per_frame,
         num_layers=num_layers,
+        count_candidates=fifo_count_candidates,
+        max_subsets_per_fifo_event=max_subsets_per_fifo_event,
     )
     probe_started = time.monotonic()
     _run_frontend_with_probe(model, frames, probe, cache_results=False,

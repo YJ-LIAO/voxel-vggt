@@ -58,6 +58,7 @@ class ParallelCollectorConfig:
     sequence_partition_policy: str = "hash_mod"
     num_sequence_shards: int | None = None
     sequence_shard_id: int | None = None
+    fifo_count_candidates_for_oracle: str | None = None
 
 
 @dataclass
@@ -109,6 +110,12 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--oracle-profile", default="real_policy")
     parser.add_argument("--frontend-total-budget-override", type=int, default=None)
     parser.add_argument("--fifo-keep-topk-override", type=int, default=None)
+    parser.add_argument(
+        "--fifo-count-candidates-for-oracle",
+        type=str,
+        default=None,
+        help="Comma-separated list of keep count values to sample for FIFO oracle (e.g., '0,8,16,32,64,128').",
+    )
     parser.add_argument("--sequence-manifest-path", default=None)
     parser.add_argument("--sequence-partition-policy", default="hash_mod")
     parser.add_argument("--num-sequence-shards", type=int, default=None)
@@ -213,6 +220,8 @@ def build_collection_jobs(cfg: ParallelCollectorConfig) -> list[CollectionJob]:
             command.extend(["--frontend-total-budget-override", str(cfg.frontend_total_budget_override)])
         if cfg.fifo_keep_topk_override is not None:
             command.extend(["--fifo-keep-topk-override", str(cfg.fifo_keep_topk_override)])
+        if cfg.fifo_count_candidates_for_oracle is not None:
+            command.extend(["--fifo-count-candidates-for-oracle", str(cfg.fifo_count_candidates_for_oracle)])
         if cfg.sequence_manifest_path is not None:
             command.extend(["--sequence-manifest-path", str(cfg.sequence_manifest_path)])
         command.extend([

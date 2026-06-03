@@ -1,0 +1,40 @@
+# Counterfactual eviction oracle collection.
+#
+# The dataset/checkpoint defaults come from train_frontend_finetune.yaml. This
+# file documents the production command defaults used by
+# tools/collect_counterfactual_oracle.py.
+
+frontend_config: /path/to/mount/lyj/voxel-vggt/config/train_frontend_finetune.yaml
+dataset_key: train_dataset
+output: /path/to/mount/lyj/voxel-vggt/checkpoints/token_oracle/oracle_shard_000.pt
+
+device: cuda
+batch_size: 1
+num_workers: 0
+max_batches: 128
+max_events: 4096
+num_samples: 8
+oracle_window: 4
+max_subsets_per_dedup_event: 8
+max_subsets_per_eviction_event: 8
+max_subsets_per_fifo_event: 8
+max_candidate_events_per_sequence: 256
+max_events_per_sequence: 16
+max_events_per_frame: 6
+layers_per_frame: 2
+event_selection_policy: stratified_round_robin
+stratified_layer_bucket_width: 6
+subset_replay_batch_size: 16
+store_replay_payload: false
+oracle_profile: real_policy
+max_fetch_errors: 256
+seed: 0
+
+# Fifo topk profile settings (used when oracle_profile=fifo_topk)
+fifo_count_candidates_for_oracle: null
+fifo_keep_topk_override: null
+frontend_total_budget_override: null
+
+student_checkpoint: null
+teacher_checkpoint: null
+high_budget_teacher: true
