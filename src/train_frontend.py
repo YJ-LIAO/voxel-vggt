@@ -31,6 +31,7 @@ from dust3r.datasets.collate import frontend_collate_fn
 from dust3r.inference import sample_query_points
 from ovggt.losses.frontend_distill import FrontendDistillLoss
 from ovggt.models.ovggt import OVGGT
+from ovggt.utils.frontend_cache import FrontendCacheConfig
 from ovggt.utils.pose_enc import REL_POSE_ENCODING
 from vggt.models.vggt import VGGT
 
@@ -106,6 +107,41 @@ def load_student_pretrained_weights(model: OVGGT, checkpoint_path: str) -> None:
     del pretrained_state
 
 
+def load_token_scorer_weights_if_requested(model: OVGGT, args) -> None:
+    checkpoint_path = getattr(args, "token_scorer_checkpoint", None)
+    if not checkpoint_path:
+        return
+    if not bool(getattr(args, "use_token_scorer", False)):
+        raise ValueError("token_scorer_checkpoint requires use_token_scorer=True")
+    printer.info("Loading TokenScorer oracle weights from %s", checkpoint_path)
+    printer.info(model.load_token_scorer_checkpoint(checkpoint_path))
+
+
+def load_count_head_weights_if_requested(model: OVGGT, args) -> None:
+    checkpoint_path = getattr(args, "count_head_checkpoint", None)
+    if not checkpoint_path:
+        return
+    if not bool(getattr(args, "use_count_head", False)):
+        raise ValueError("count_head_checkpoint requires use_count_head=True")
+    printer.info("Loading count head weights from %s", checkpoint_path)
+    printer.info(model.load_count_head_checkpoint(checkpoint_path))
+
+
+def build_frontend_cache_config(args) -> FrontendCacheConfig | None:
+    raw_config = getattr(args, "frontend_cache", None)
+    if raw_config is None:
+        return None
+    if not isinstance(raw_config, dict):
+        raw_config = OmegaConf.to_container(raw_config, resolve=True)
+    if not isinstance(raw_config, dict):
+        raise ValueError("frontend_cache must be a mapping")
+    allowed = FrontendCacheConfig.__dataclass_fields__
+    unknown = sorted(set(raw_config) - set(allowed))
+    if unknown:
+        raise ValueError(f"Unknown frontend_cache option(s): {unknown}")
+    return FrontendCacheConfig(**raw_config)
+
+
 def freeze_frontend_stage_a_parameters(model: OVGGT) -> None:
     for _, param in model.named_parameters():
         param.requires_grad = True
@@ -120,12 +156,17 @@ def freeze_frontend_stage_a_parameters(model: OVGGT) -> None:
 
 
 def freeze_stage_a_scorer_only(model: OVGGT) -> None:
-    """Stage A distillation: freeze all parameters, only train TokenScorer."""
+    """Freeze OVGGT and train only token scorer heads plus score-state projections."""
     for _, param in model.named_parameters():
         param.requires_grad = False
-    # Unfreeze scorer parameters
     if model.aggregator.token_scorers is not None:
         for param in model.aggregator.token_scorers.parameters():
+            param.requires_grad = True
+    if getattr(model.aggregator, "score_state_projs", None) is not None:
+        for param in model.aggregator.score_state_projs.parameters():
+            param.requires_grad = True
+    if getattr(model.aggregator, "count_head", None) is not None:
+        for param in model.aggregator.count_head.parameters():
             param.requires_grad = True
 
 
@@ -373,25 +414,13 @@ def frontend_loss_of_one_batch(
         enabled=autocast_enabled,
         dtype=autocast_dtype,
     ):
-        # --- Stage A scorer-only: skip teacher, skip criterion, use only distill_loss ---
+        # --- Legacy heuristic scorer distillation is intentionally disabled. ---
         if scorer_only:
-            student_outputs = model(
-                batch,
-                query_points=query_points,
-                cache_results=False,
-                return_views=False,
+            raise RuntimeError(
+                "scorer_only=True used the deprecated heuristic-distillation path. "
+                "Use src/train_token_scorer_oracle.py with config/train_token_scorer_oracle.yaml "
+                "to train TokenScorer from counterfactual retention oracle shards."
             )
-            total_distill_loss = student_outputs.distill_loss
-            if total_distill_loss is None:
-                raise RuntimeError("scorer_only=True but student did not produce distill_loss. Ensure use_token_scorer=True.")
-            loss = distill_loss_weight * total_distill_loss
-            loss_details = {
-                "distill_loss": float(loss),
-                "total": float(loss),
-            }
-            del student_outputs
-            del query_points
-            return loss, loss_details
 
         # --- Full teacher-student distillation path ---
         step_device = infer_batch_device(batch, fallback=get_module_device(model))
@@ -747,15 +776,18 @@ def train(args):
     enable_track_head = int(getattr(args, "n_corres_train", 0) or 0) > 0
     if not enable_track_head:
         printer.info("Disabling track head because n_corres_train=0; this saves ~65.9M parameters.")
+    frontend_cache_config = build_frontend_cache_config(args)
     model = OVGGT(
         mode=args.frontend_mode,
         frontend_pose_encoding_type=args.frontend_pose_encoding_type,
         total_budget=frontend_total_budget,
         camera_budget=frontend_camera_budget,
         anchor_overflow_policy=anchor_overflow_policy,
+        frontend_cache_config=frontend_cache_config,
         frontend_head_checkpointing=bool(getattr(args, "frontend_head_checkpointing", False)),
         enable_track_head=enable_track_head,
         use_token_scorer=bool(getattr(args, "use_token_scorer", False)),
+        use_count_head=bool(getattr(args, "use_count_head", False)),
     )
     printer.info(
         "Frontend budgets: total_budget=%d, camera_budget=%d, anchor_overflow_policy=%s",
@@ -825,6 +857,9 @@ def train(args):
 
     if args.pretrained and not args.resume:
         load_student_pretrained_weights(model, args.pretrained)
+    if not args.resume:
+        load_token_scorer_weights_if_requested(model, args)
+        load_count_head_weights_if_requested(model, args)
 
     if teacher is not None:
         teacher_path = args.teacher or args.pretrained
@@ -845,8 +880,11 @@ def train(args):
             param.requires_grad = False
         teacher.eval()
 
-    if bool(getattr(args, "use_token_scorer", False)) and not bool(getattr(args, "finetune_full_model", False)):
-        freeze_stage_a_scorer_only(model)
+    if bool(getattr(args, "use_token_scorer", False)) or bool(getattr(args, "use_count_head", False)):
+        if not bool(getattr(args, "finetune_full_model", False)):
+            freeze_stage_a_scorer_only(model)
+        else:
+            freeze_frontend_stage_a_parameters(model)
     else:
         freeze_frontend_stage_a_parameters(model)
     summarize_trainable_parameters(model)
@@ -880,6 +918,8 @@ def train(args):
                 args.pretrained,
             )
             load_student_pretrained_weights(model, args.pretrained)
+            load_token_scorer_weights_if_requested(model, args)
+            load_count_head_weights_if_requested(model, args)
     if best_so_far is None:
         best_so_far = float("inf")
 

@@ -38,6 +38,8 @@ class FrontendCacheConfig:
     score_state_dim: int = 128
     oracle_window: int = 4
     budget_allocation: Literal["dynamic", "uniform"] = "dynamic"
+    learned_fifo_keep_count: bool = False
+    fifo_count_candidates: tuple = (0, 8, 16, 32, 64, 128)
 
 
 @dataclass

@@ -8,6 +8,7 @@ from model_hub_compat import ModelOutput, PyTorchModelHubMixin
 
 from ovggt.heads.camera_head import CameraHead
 from ovggt.heads.dpt_head import DPTHead
+from ovggt.layers.token_scorer import TOKEN_METADATA_FEATURE_DIM
 from ovggt.models.aggregator import Aggregator
 from ovggt.utils.frontend_cache import (
     FrontendCacheConfig,
@@ -63,6 +64,8 @@ class OVGGT(nn.Module, PyTorchModelHubMixin):
         frontend_head_checkpointing: bool = False,
         use_token_scorer: bool = False,
         scorer_bottleneck_dim: Optional[int] = None,
+        use_count_head: bool = False,
+        count_head_hidden_dim: Optional[int] = None,
     ):
         super().__init__()
 
@@ -103,6 +106,15 @@ class OVGGT(nn.Module, PyTorchModelHubMixin):
             self.aggregator.init_token_scorers(
                 embed_dim=embed_dim,
                 bottleneck_dim=scorer_bottleneck_dim or embed_dim // 4,
+                score_state_dim=self.frontend_cache_config.score_state_dim,
+            )
+
+        if use_count_head:
+            self.aggregator.init_count_head(
+                score_state_dim=self.frontend_cache_config.score_state_dim,
+                metadata_dim=TOKEN_METADATA_FEATURE_DIM,
+                hidden_dim=count_head_hidden_dim,
+                candidates=self.frontend_cache_config.fifo_count_candidates,
             )
 
         self.camera_head = CameraHead(
@@ -187,17 +199,98 @@ class OVGGT(nn.Module, PyTorchModelHubMixin):
             if hasattr(module, "anchor_overflow_policy"):
                 module.anchor_overflow_policy = policy
 
+    def load_token_scorer_checkpoint(self, checkpoint_path: str, map_location: str = "cpu"):
+        if self.aggregator.token_scorers is None or self.aggregator.score_state_projs is None:
+            raise ValueError("load_token_scorer_checkpoint requires OVGGT(use_token_scorer=True)")
+        checkpoint = torch.load(checkpoint_path, map_location=map_location, weights_only=False)
+        state_dict = checkpoint.get("model", checkpoint) if isinstance(checkpoint, dict) else checkpoint
+        if not isinstance(state_dict, dict):
+            raise ValueError(f"Expected checkpoint state_dict at {checkpoint_path}")
+
+        scorer_prefixes = ("aggregator.token_scorers.", "aggregator.score_state_projs.")
+        scorer_state = {
+            key: value
+            for key, value in state_dict.items()
+            if key.startswith(scorer_prefixes)
+        }
+        if not scorer_state:
+            raise ValueError(f"No token scorer weights found in {checkpoint_path}")
+        return self.load_state_dict(scorer_state, strict=False)
+
+    def load_count_head_checkpoint(self, checkpoint_path: str, map_location: str = "cpu"):
+        if self.aggregator.count_head is None:
+            raise ValueError("load_count_head_checkpoint requires OVGGT(use_count_head=True)")
+        checkpoint = torch.load(checkpoint_path, map_location=map_location, weights_only=False)
+        state_dict = checkpoint.get("model", checkpoint) if isinstance(checkpoint, dict) else checkpoint
+        if not isinstance(state_dict, dict):
+            raise ValueError(f"Expected checkpoint state_dict at {checkpoint_path}")
+
+        count_head_prefixes = ("aggregator.count_head.",)
+        count_head_state = {
+            key: value
+            for key, value in state_dict.items()
+            if key.startswith(count_head_prefixes)
+        }
+        if not count_head_state:
+            raise ValueError(f"No count head weights found in {checkpoint_path}")
+        return self.load_state_dict(count_head_state, strict=False)
+
     def load_state_dict(self, state_dict, strict: bool = True):
         upgraded_state_dict = dict(state_dict)
         self._upgrade_camera_head_state_dict(upgraded_state_dict)
         # TokenScorer compatibility: handle scorer keys in/out of checkpoint
-        scorer_keys = [k for k in upgraded_state_dict if 'token_scorers' in k]
+        scorer_prefixes = ("aggregator.token_scorers.", "aggregator.score_state_projs.")
+        scorer_keys = [k for k in upgraded_state_dict if k.startswith(scorer_prefixes)]
         model_has_scorer = hasattr(self.aggregator, 'token_scorers') and self.aggregator.token_scorers is not None
         if scorer_keys and not model_has_scorer:
             for k in scorer_keys:
                 del upgraded_state_dict[k]
-        if model_has_scorer and not scorer_keys:
-            return super().load_state_dict(upgraded_state_dict, strict=False)
+        if model_has_scorer:
+            current_state = self.state_dict()
+            for k in list(upgraded_state_dict.keys()):
+                if k.startswith(scorer_prefixes) and k not in current_state:
+                    del upgraded_state_dict[k]
+            for k, current_value in current_state.items():
+                if not k.startswith(scorer_prefixes):
+                    continue
+                if k not in upgraded_state_dict:
+                    upgraded_state_dict[k] = current_value
+                    continue
+                if tuple(upgraded_state_dict[k].shape) != tuple(current_value.shape):
+                    upgraded_state_dict[k] = current_value
+            for k in list(upgraded_state_dict.keys()):
+                if not k.startswith(scorer_prefixes) or k not in current_state:
+                    continue
+                if tuple(upgraded_state_dict[k].shape) != tuple(current_state[k].shape):
+                    upgraded_state_dict[k] = current_state[k]
+            scorer_keys = [k for k in upgraded_state_dict if k.startswith(scorer_prefixes)]
+
+        # CountHead compatibility: handle count_head keys in/out of checkpoint
+        count_head_prefixes = ("aggregator.count_head.",)
+        count_head_keys = [k for k in upgraded_state_dict if k.startswith(count_head_prefixes)]
+        model_has_count_head = hasattr(self.aggregator, 'count_head') and self.aggregator.count_head is not None
+        if count_head_keys and not model_has_count_head:
+            for k in count_head_keys:
+                del upgraded_state_dict[k]
+        if model_has_count_head:
+            current_state = self.state_dict()
+            for k in list(upgraded_state_dict.keys()):
+                if k.startswith(count_head_prefixes) and k not in current_state:
+                    del upgraded_state_dict[k]
+            for k, current_value in current_state.items():
+                if not k.startswith(count_head_prefixes):
+                    continue
+                if k not in upgraded_state_dict:
+                    upgraded_state_dict[k] = current_value
+                    continue
+                if tuple(upgraded_state_dict[k].shape) != tuple(current_value.shape):
+                    upgraded_state_dict[k] = current_value
+            for k in list(upgraded_state_dict.keys()):
+                if not k.startswith(count_head_prefixes) or k not in current_state:
+                    continue
+                if tuple(upgraded_state_dict[k].shape) != tuple(current_state[k].shape):
+                    upgraded_state_dict[k] = current_state[k]
+
         return super().load_state_dict(upgraded_state_dict, strict=strict)
 
     def forward(
@@ -578,6 +671,15 @@ class OVGGT(nn.Module, PyTorchModelHubMixin):
                             cache_states[b][layer_idx].protect_topk_on_demotion_(
                                 demoted_slot=demoted_slot,
                                 keep_count=self.frontend_cache_config.fifo_keep_topk,
+                                token_scorer=(
+                                    self.aggregator.token_scorers[layer_idx]
+                                    if self.aggregator.token_scorers is not None
+                                    else None
+                                ),
+                                layer_id=layer_idx,
+                                current_frame_id=i,
+                                fifo_probe=getattr(self, "_oracle_fifo_probe", None),
+                                batch_index=b,
                             )
                     cache_states[b][layer_idx].apply_keyframe_event_(events[b])
                     if (
@@ -605,6 +707,16 @@ class OVGGT(nn.Module, PyTorchModelHubMixin):
                         config=self.frontend_cache_config,
                         intra_frame_keep_ratio=intra_frame_keep_ratio,
                         attn_module=self.aggregator.global_blocks[layer_idx].attn,
+                        token_scorer=(
+                            self.aggregator.token_scorers[layer_idx]
+                            if self.aggregator.token_scorers is not None
+                            else None
+                        ),
+                        layer_id=layer_idx,
+                        eviction_probe=getattr(self, "_oracle_eviction_probe", None),
+                        batch_index=b,
+                        dedup_probe=getattr(self, "_oracle_dedup_probe", None),
+                        dedup_replay_probe=getattr(self, "_oracle_dedup_replay_probe", None),
                     )
                     if score is not None:
                         self.aggregator.last_scores[layer_idx] = score

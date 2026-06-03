@@ -8,7 +8,7 @@ import logging
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from typing import Optional, Tuple, Union, List, Dict, Any
+from typing import Optional, Tuple, Union, List, Dict, Any, Sequence
 
 from ovggt.layers import PatchEmbed
 from ovggt.layers.block import Block
@@ -76,6 +76,9 @@ class Aggregator(nn.Module):
         self.eviction_strategy = eviction_strategy
         self.intra_frame_keep_ratio = intra_frame_keep_ratio
         self.spatial_alpha = spatial_alpha
+        self.token_scorers = None  # initialized by init_token_scorers()
+        self.score_state_projs = None
+        self.count_head = None  # initialized by init_count_head()
 
         # Patch tokens start after camera(1) + register tokens
         self._patch_start_idx = 1 + num_register_tokens
@@ -163,6 +166,44 @@ class Aggregator(nn.Module):
             )
         self.last_scores = torch.zeros(self.depth)
 
+    def init_token_scorers(
+        self,
+        embed_dim: int,
+        bottleneck_dim: int = None,
+        score_state_dim: int = 128,
+    ):
+        from ovggt.layers.token_scorer import TokenScorer
+        self.score_state_projs = nn.ModuleList([
+            nn.Linear(embed_dim, score_state_dim)
+            for _ in range(self.depth)
+        ])
+        self.token_scorers = nn.ModuleList([
+            TokenScorer(
+                score_state_dim=score_state_dim,
+                bottleneck_dim=bottleneck_dim,
+                num_layers=self.depth,
+            )
+            for _ in range(self.depth)
+        ])
+        for idx, block in enumerate(self.global_blocks):
+            block.token_scorer = self.token_scorers[idx]
+            block.score_state_proj = self.score_state_projs[idx]
+
+    def init_count_head(
+        self,
+        score_state_dim: int = 128,
+        metadata_dim: int = 17,
+        hidden_dim: int | None = None,
+        candidates: Sequence[int] = (0, 8, 16, 32, 64, 128),
+    ) -> None:
+        from ovggt.layers.count_head import FifoCountHead
+        self.count_head = FifoCountHead(
+            score_state_dim=score_state_dim,
+            metadata_dim=metadata_dim,
+            hidden_dim=hidden_dim,
+            num_layers=self.depth,
+            candidates=candidates,
+        )
 
     def __build_patch_embed__(
         self,
@@ -289,7 +330,7 @@ class Aggregator(nn.Module):
         frame_idx = 0
         global_idx = 0
         output_list = []
-        current_budgets = self._calculate_dynamic_budgets(total_budget)
+        current_budgets = self._calculate_budgets(total_budget, frontend_cache_config)
         scores = []
         pending_updates: List[Optional[PendingLayerUpdate]] = [None] * self.depth
 
@@ -304,7 +345,7 @@ class Aggregator(nn.Module):
                 elif attn_type == "global":
                     if frontend_cache_mode:
                         layer_budget = None if current_budgets is None else current_budgets[global_idx].item()
-                        tokens, global_idx, global_intermediates, pending_update, new_importance = self._process_global_attention(
+                        tokens, global_idx, global_intermediates, pending_update, new_importance, score_state = self._process_global_attention(
                             tokens,
                             B,
                             S,
@@ -334,6 +375,7 @@ class Aggregator(nn.Module):
                                 importance_current=new_importance,
                                 frame_id=past_frame_idx,
                                 cache_budget=layer_budget,
+                                score_state_current=score_state,
                             )
                     elif use_cache:
                         if past_key_values[global_idx] is not None:
@@ -390,7 +432,7 @@ class Aggregator(nn.Module):
         del frame_intermediates
         del global_intermediates
         if frontend_cache_mode:
-            return output_list, self.patch_start_idx, cache_states, pending_updates
+            return output_list, self.patch_start_idx, cache_states, pending_updates, None
         if use_cache:      
             return output_list, self.patch_start_idx, past_key_values
         return output_list, self.patch_start_idx
@@ -459,6 +501,7 @@ class Aggregator(nn.Module):
         new_importance = None
         kept_indices = None
         pending_update = None
+        score_state = None
 
         for _ in range(self.aa_block_size):
             if not use_cache:
@@ -471,7 +514,7 @@ class Aggregator(nn.Module):
 
             scores = None
             if frontend_cache_mode:
-                tokens, pending_update, new_importance = self.global_blocks[global_idx](
+                tokens, pending_update, new_importance, score_state = self.global_blocks[global_idx](
                     tokens,
                     pos=pos,
                     attn_mask=attn_mask,
@@ -515,17 +558,27 @@ class Aggregator(nn.Module):
             # if self.use_causal_global:
             #     del attn_mask
         if frontend_cache_mode:
-            return tokens, global_idx, intermediates, pending_update, new_importance
+            return tokens, global_idx, intermediates, pending_update, new_importance, score_state
         if use_cache:
             return tokens, global_idx, intermediates, block_kv, scores, new_importance, kept_indices
         return tokens, global_idx, intermediates
         
-    def _calculate_dynamic_budgets(self, total_budget):
+    def _calculate_budgets(self, total_budget, frontend_cache_config=None):
         # Handle None budget (eviction paused for History Anchor window)
         if total_budget is None:
             return None
 
         with torch.no_grad():
+            if frontend_cache_config is not None and getattr(frontend_cache_config, "budget_allocation", "dynamic") == "uniform":
+                if total_budget < 0:
+                    total_budget = 0
+                base_budget = int(total_budget) // max(self.depth, 1)
+                budgets = torch.full((self.depth,), base_budget, dtype=torch.int64)
+                remainder = int(total_budget) - base_budget * self.depth
+                if remainder > 0:
+                    budgets[:remainder] += 1
+                return budgets
+
             diversity_scores = 1.0 - self.last_scores
             scaled_scores = diversity_scores / 0.5
             proportions = torch.softmax(scaled_scores, dim=0)
