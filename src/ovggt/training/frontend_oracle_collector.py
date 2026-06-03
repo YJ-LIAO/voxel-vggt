@@ -11,6 +11,7 @@ import copy
 import importlib
 import json
 import os
+import signal
 import time
 from dataclasses import asdict, dataclass
 from datetime import datetime
@@ -33,6 +34,49 @@ from ovggt.utils.geometry import closed_form_inverse_se3
 from ovggt.utils.pose_enc import ABS_POSE_ENCODING, world_to_camera_to_pose_encoding
 
 
+class _DataloaderTimeoutError(TimeoutError):
+    """Raised when a dataloader batch fetch exceeds the configured timeout."""
+    pass
+
+
+def _next_with_timeout(loader_iter, timeout_sec: float):
+    """Fetch next batch from a DataLoader iterator with an I/O timeout.
+
+    On Lustre/network filesystems, ``cv2.imread`` or ``np.load`` can block
+    indefinitely when an OST connection drops.  ``signal.alarm`` interrupts
+    the blocking POSIX ``read()`` syscall with SIGALRM so we can skip the
+    stuck batch instead of hanging forever.
+
+    Args:
+        loader_iter: Iterator over a PyTorch DataLoader.
+        timeout_sec: Maximum seconds to wait for one batch. 0 disables timeout.
+
+    Returns:
+        The next batch from the iterator.
+
+    Raises:
+        _DataloaderTimeoutError: If the fetch exceeds *timeout_sec*.
+        StopIteration: If the iterator is exhausted.
+    """
+    if timeout_sec <= 0:
+        return next(loader_iter)
+
+    def _alarm_handler(signum, frame):
+        raise _DataloaderTimeoutError(
+            f"Dataloader batch fetch timed out after {timeout_sec}s "
+            "(likely stuck on network filesystem I/O)"
+        )
+
+    old_handler = signal.signal(signal.SIGALRM, _alarm_handler)
+    signal.alarm(int(timeout_sec))
+    try:
+        batch = next(loader_iter)
+    finally:
+        signal.alarm(0)
+        signal.signal(signal.SIGALRM, old_handler)
+    return batch
+
+
 @dataclass
 class FrontendOracleCollectorConfig:
     config: str
@@ -52,7 +96,8 @@ class FrontendOracleCollectorConfig:
     flush_every_events: int = 16
     flush_every_batches: int = 1
     log_every_subsets: int = 1
-    subset_replay_batch_size: int = 16
+    subset_replay_batch_size: int = 1
+    dataloader_timeout: int = 600          # seconds; 0 disables timeout6
     # --- Phase 1 sampling-policy parameters ---
     layers_per_frame: int = 2                              # was 0; Decision 4
     max_events_per_sequence: int = 16                      # was 0; Decision 3
@@ -1266,6 +1311,8 @@ def collect_oracle_shard_from_config(collector_cfg: FrontendOracleCollectorConfi
         event_selection_policy=collector_cfg.event_selection_policy,
         stratified_layer_bucket_width=collector_cfg.stratified_layer_bucket_width,
         store_replay_payload=collector_cfg.store_replay_payload,
+        max_subsets_per_dedup_event=collector_cfg.max_subsets_per_dedup_event,
+        dataloader_timeout=collector_cfg.dataloader_timeout,
     )
     shard = dict(base_shard)
     shard["events"] = events
@@ -1303,6 +1350,7 @@ def collect_oracle_events_from_loader(
     stratified_layer_bucket_width: int = 6,
     store_replay_payload: bool = False,
     max_subsets_per_dedup_event: int = 8,
+    dataloader_timeout: int = 600,
 ) -> list[dict]:
     events: list[dict] = []
     max_batches_int = int(max_batches)
@@ -1313,9 +1361,21 @@ def collect_oracle_events_from_loader(
     loader_iter = iter(data_loader)
     while batch_idx < max_batches_int:
         try:
-            batch = next(loader_iter)
+            batch = _next_with_timeout(loader_iter, timeout_sec=float(dataloader_timeout))
         except StopIteration:
             break
+        except _DataloaderTimeoutError as exc:
+            fetch_errors += 1
+            if log_fn is not None:
+                log_fn(
+                    f"TIMEOUT: skipping batch {batch_idx + 1} after {dataloader_timeout}s "
+                    f"(likely Lustre I/O stall): {exc}"
+                )
+            if fetch_errors > max_fetch_errors_int:
+                raise RuntimeError(
+                    f"Exceeded max_fetch_errors={max_fetch_errors_int} while collecting oracle data"
+                ) from exc
+            continue
         except Exception as exc:
             fetch_errors += 1
             if log_fn is not None:
