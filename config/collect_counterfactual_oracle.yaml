@@ -26,14 +26,14 @@ event_selection_policy: stratified_round_robin
 stratified_layer_bucket_width: 6
 subset_replay_batch_size: 16
 store_replay_payload: false
-oracle_profile: real_policy
+oracle_profile: fifo_topk
 max_fetch_errors: 256
 seed: 0
 
 # Fifo topk profile settings (used when oracle_profile=fifo_topk)
-fifo_count_candidates_for_oracle: null
-fifo_keep_topk_override: null
-frontend_total_budget_override: null
+fifo_keep_topk_override: 80
+fifo_count_candidates_for_oracle: [0, 8, 16, 32, 64, 128]
+frontend_total_budget_override: 5000
 
 student_checkpoint: null
 teacher_checkpoint: null

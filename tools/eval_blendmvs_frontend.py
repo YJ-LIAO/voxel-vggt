@@ -64,6 +64,42 @@ def parse_args() -> argparse.Namespace:
         default=0.1,
         help="Frontend voxel size.",
     )
+    parser.add_argument(
+        "--use-token-scorer",
+        action="store_true",
+        help="Enable token scorer in the model.",
+    )
+    parser.add_argument(
+        "--token-scorer-checkpoint",
+        default=None,
+        help="Path to token scorer checkpoint (requires --use-token-scorer).",
+    )
+    parser.add_argument(
+        "--use-count-head",
+        action="store_true",
+        help="Enable count head in the model.",
+    )
+    parser.add_argument(
+        "--count-head-checkpoint",
+        default=None,
+        help="Path to count head checkpoint (requires --use-count-head).",
+    )
+    parser.add_argument(
+        "--learned-fifo-keep-count",
+        action="store_true",
+        help="Use learned count head for fifo keep count.",
+    )
+    parser.add_argument(
+        "--fifo-keep-topk",
+        type=int,
+        default=80,
+        help="Top-K tokens to retain by score when demoting oldest anchor.",
+    )
+    parser.add_argument(
+        "--fifo-count-candidates",
+        default="0,8,16,32,64,128",
+        help="Comma-separated candidate counts for learned fifo keep count.",
+    )
     return parser.parse_args()
 
 
@@ -295,19 +331,42 @@ def build_frames(image_paths: Sequence[str], device: torch.device) -> List[dict]
     return [{"img": images[idx].unsqueeze(0)} for idx in range(images.shape[0])]
 
 
-def load_model(weights_path: str, device: torch.device, frontend_enabled: bool, voxel_size: float) -> OVGGT:
-    model_kwargs = {"mode": "frontend_eval" if frontend_enabled else "legacy"}
+def load_model(
+    weights_path: str,
+    device: torch.device,
+    frontend_enabled: bool,
+    voxel_size: float,
+    use_token_scorer: bool = False,
+    use_count_head: bool = False,
+    learned_fifo_keep_count: bool = False,
+    fifo_keep_topk: int = 0,
+    fifo_count_candidates: tuple = (0, 8, 16, 32, 64, 128),
+    token_scorer_checkpoint: str = None,
+    count_head_checkpoint: str = None,
+) -> OVGGT:
+    model_kwargs = {
+        "mode": "frontend_eval" if frontend_enabled else "legacy",
+        "use_token_scorer": use_token_scorer,
+        "use_count_head": use_count_head,
+    }
     if frontend_enabled:
         model_kwargs["frontend_cache_config"] = FrontendCacheConfig(
             enabled=True,
             dedup_enabled=True,
             export_keyframe_packets=True,
             voxel_size=voxel_size,
+            fifo_keep_topk=fifo_keep_topk,
+            learned_fifo_keep_count=learned_fifo_keep_count,
+            fifo_count_candidates=fifo_count_candidates,
         )
     model = OVGGT(**model_kwargs).to(device)
     checkpoint = torch.load(weights_path, map_location="cpu", weights_only=False)
     state_dict = checkpoint["model"] if isinstance(checkpoint, dict) and "model" in checkpoint else checkpoint
     model.load_state_dict(state_dict, strict=True)
+    if token_scorer_checkpoint:
+        model.load_token_scorer_checkpoint(token_scorer_checkpoint)
+    if count_head_checkpoint:
+        model.load_count_head_checkpoint(count_head_checkpoint)
     model.eval()
     return model
 
@@ -445,9 +504,32 @@ def main() -> None:
     if not os.path.isdir(scene_dir):
         raise FileNotFoundError(scene_dir)
 
+    # Validate learned-fifo-keep-count requires count head
+    if args.learned_fifo_keep_count and not args.use_count_head:
+        raise ValueError("--learned-fifo-keep-count requires --use-count-head")
+    if args.learned_fifo_keep_count and not args.count_head_checkpoint:
+        raise ValueError("--learned-fifo-keep-count requires --count-head-checkpoint")
+
+    # Parse fifo_count_candidates from comma-separated string to tuple
+    fifo_count_candidates = tuple(
+        int(c.strip()) for c in args.fifo_count_candidates.split(",") if c.strip()
+    )
+
     sequences = parse_sequence_args(args.sequence)
     legacy_model = load_model(args.weights, device, frontend_enabled=False, voxel_size=args.voxel_size)
-    frontend_model = load_model(args.weights, device, frontend_enabled=True, voxel_size=args.voxel_size)
+    frontend_model = load_model(
+        args.weights,
+        device,
+        frontend_enabled=True,
+        voxel_size=args.voxel_size,
+        use_token_scorer=args.use_token_scorer,
+        use_count_head=args.use_count_head,
+        learned_fifo_keep_count=args.learned_fifo_keep_count,
+        fifo_keep_topk=args.fifo_keep_topk,
+        fifo_count_candidates=fifo_count_candidates,
+        token_scorer_checkpoint=args.token_scorer_checkpoint,
+        count_head_checkpoint=args.count_head_checkpoint,
+    )
 
     per_sequence = []
     legacy_metrics = []
