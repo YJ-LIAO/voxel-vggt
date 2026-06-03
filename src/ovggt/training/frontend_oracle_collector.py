@@ -597,8 +597,17 @@ class CounterfactualFifoTopKProbe:
         layer_id: int,
         frame_id: int,
         batch_index: int = 0,
+        demoted_indices_by_batch=None,
     ) -> None:
-        """Called during protect_topk_on_demotion_ when selecting top-K."""
+        """Called during protect_topk_on_demotion_ when selecting top-K.
+
+        Args:
+            demoted_indices_by_batch: Pre-computed dict mapping batch index to
+                demoted-slot indices.  When provided (v3 callers), these are
+                guaranteed to reflect the pre-mutation state.  When *not*
+                provided (legacy callers), indices are recomputed from the
+                current cache_state for backward compatibility.
+        """
         if self.max_events is not None and len(self.events) >= self.max_events:
             return
         if not should_record_oracle_layer(
@@ -613,8 +622,14 @@ class CounterfactualFifoTopKProbe:
 
         metadata = cache_state.metadata
         b_idx = batch_index
-        slot_mask = metadata.anchor_slot[b_idx] == demoted_slot
-        indices = torch.nonzero(slot_mask, as_tuple=False).squeeze(-1)
+
+        # Use pre-computed indices when available; otherwise recompute for
+        # backward compatibility with older callers.
+        if demoted_indices_by_batch is not None and b_idx in demoted_indices_by_batch:
+            indices = demoted_indices_by_batch[b_idx]
+        else:
+            slot_mask = metadata.anchor_slot[b_idx] == demoted_slot
+            indices = torch.nonzero(slot_mask, as_tuple=False).squeeze(-1)
 
         # Compute all indices NOT in the demoted slot — these are always retained.
         non_slot_mask = metadata.anchor_slot[b_idx] != demoted_slot

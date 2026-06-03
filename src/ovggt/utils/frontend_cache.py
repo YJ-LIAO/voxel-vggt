@@ -441,18 +441,51 @@ class LayerCacheState:
 
         v2: When token_scorer is available, use scorer logits instead of
         importance for ranking tokens in the demoted slot.
+
+        v3: The probe is called BEFORE any metadata mutation so it observes
+        the original demoted-slot token set.  keep_count=0 is recorded by the
+        probe while never mutating anchor_slot.  keep_count >= demoted_token_count
+        protects all demoted-slot tokens.
         """
-        if self.metadata is None or self.num_tokens() == 0 or keep_count <= 0:
+        if self.metadata is None or self.num_tokens() == 0:
             return
+
         # v2: 当 scorer 可用时，获取当前帧ID用于构建 metadata features
         if current_frame_id is None:
             current_frame_id = int(self.metadata.frame_id.max().item()) if self.metadata.frame_id.numel() > 0 else 0
+
+        # 1. Compute demoted-slot indices FIRST (before any mutation)
+        demoted_indices_by_batch: dict[int, Tensor] = {}
         for b_idx in range(self.metadata.anchor_slot.shape[0]):
             slot_mask = self.metadata.anchor_slot[b_idx] == demoted_slot
             indices = torch.nonzero(slot_mask, as_tuple=False).squeeze(-1)
-            if indices.numel() <= keep_count:
+            demoted_indices_by_batch[b_idx] = indices
+
+        # 2. Fire probe BEFORE any metadata mutation (even if keep_count=0)
+        if fifo_probe is not None:
+            fifo_probe.on_fifo_topk_candidate(
+                cache_state=self,
+                demoted_slot=demoted_slot,
+                keep_count=keep_count,
+                layer_id=layer_id,
+                frame_id=current_frame_id if current_frame_id is not None else 0,
+                batch_index=batch_index,
+                demoted_indices_by_batch=demoted_indices_by_batch,
+            )
+
+        # 3. Now guard: if keep_count <= 0, skip token reassignment
+        if keep_count <= 0:
+            return
+
+        # 4. Per batch: clamp count and protect tokens
+        for b_idx, indices in demoted_indices_by_batch.items():
+            effective_keep_count = min(max(int(keep_count), 0), int(indices.numel()))
+            if effective_keep_count <= 0:
                 continue
-            if token_scorer is not None and self.score_state is not None:
+            if effective_keep_count == int(indices.numel()):
+                # All demoted-slot tokens are protected
+                top_indices = indices
+            elif token_scorer is not None and self.score_state is not None:
                 # v2: 提取 demoted slot 的 score_state 和 metadata
                 slot_score_state = self.score_state[b_idx, indices]  # [K, Ds]
                 # 构建 slot 级别的 metadata features
@@ -464,22 +497,15 @@ class LayerCacheState:
                     layer_id,
                 )
                 scores = logits[0]  # [K]
+                _, top_local = torch.topk(scores, k=effective_keep_count)
+                top_indices = indices[top_local]
             else:
                 scores = self.metadata.importance[b_idx, indices]
-            _, top_local = torch.topk(scores, k=keep_count)
-            top_indices = indices[top_local]
+                _, top_local = torch.topk(scores, k=effective_keep_count)
+                top_indices = indices[top_local]
             # Reassign top-K to slot 0 so they survive the FIFO demotion
             self.metadata.anchor_slot[b_idx, top_indices] = 0
-        # After FIFO protection logic, call probe if present
-        if fifo_probe is not None:
-            fifo_probe.on_fifo_topk_candidate(
-                cache_state=self,
-                demoted_slot=demoted_slot,
-                keep_count=keep_count,
-                layer_id=layer_id,
-                frame_id=current_frame_id if current_frame_id is not None else 0,
-                batch_index=batch_index,
-            )
+
         self._cached_protected_count = self._compute_protected_count_raw()
         self.protected_count = self._cached_protected_count
 
