@@ -11,11 +11,17 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src"))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
+import copy
+
 import torch
 import pytest
 
 from ovggt.utils.frontend_cache import LayerCacheState, TokenMetadata
 from ovggt.training.frontend_oracle_collector import CounterfactualFifoTopKProbe
+from ovggt.training.counterfactual_replay import (
+    FifoTopKCounterfactualEvent,
+    collect_fifo_topk_counterfactual_event,
+)
 
 
 def _make_layer_cache(
@@ -510,3 +516,401 @@ class TestFifoProbeSamplesMultipleKeepCounts:
         # Must be on CPU and long dtype
         assert demoted_indices.device == torch.device("cpu")
         assert demoted_indices.dtype == torch.long
+
+
+# ---------------------------------------------------------------------------
+# Helper: fake CounterfactualReplayRunner for testing replay output schemas
+# ---------------------------------------------------------------------------
+
+class _FakeRunner:
+    """Minimal fake runner that satisfies CounterfactualReplayRunner protocol."""
+
+    def __init__(self):
+        self._snapshot = None
+
+    def snapshot(self):
+        self._snapshot = copy.deepcopy({"cache": "dummy"})
+        return self._snapshot
+
+    def restore(self, snapshot):
+        pass
+
+    def apply_keep_indices(self, layer_id, keep_indices):
+        pass
+
+    def replay_future_window(self, start_frame_idx, future_frames):
+        # Return trivial predictions so loss computation works
+        return [
+            {"camera_pose": torch.zeros(4, 4)}
+            for _ in future_frames
+        ]
+
+    def targets_for_future_window(self, future_frames):
+        return [
+            {"camera_pose": torch.zeros(4, 4)}
+            for _ in future_frames
+        ]
+
+
+def _make_fifo_event_with_subsets(
+    keep_counts=(0, 4),
+    num_tokens=10,
+    demoted_slot=1,
+    num_in_demoted=5,
+):
+    """Build a FifoTopKCounterfactualEvent with candidate subsets."""
+    score_state_dim = 8
+    metadata_dim = 4
+    # Non-demoted tokens are those NOT in the demoted slot
+    non_demoted = list(range(num_in_demoted, num_tokens))
+    demoted = list(range(num_in_demoted))
+
+    candidate_subsets = []
+    for kc in keep_counts:
+        # keep_indices includes all non-demoted + first kc demoted
+        keep = sorted(non_demoted + demoted[:kc])
+        demoted_keep = demoted[:kc]
+        candidate_subsets.append({
+            "keep_indices": torch.tensor(keep, dtype=torch.long),
+            "strategy": "fifo_topk",
+            "source": "fifo_probe",
+            "keep_count": kc,
+            "demoted_keep_indices": torch.tensor(demoted_keep, dtype=torch.long),
+        })
+
+    return FifoTopKCounterfactualEvent(
+        event_id="test-fifo-001",
+        layer_id=0,
+        frame_id=5,
+        demoted_slot=demoted_slot,
+        sequence_provenance={"dataset": "test"},
+        score_state=torch.randn(1, num_tokens, score_state_dim),
+        metadata_features=torch.randn(1, num_tokens, metadata_dim),
+        candidate_subsets=candidate_subsets,
+        keep_count=2,
+        base_scores=torch.randn(num_tokens),
+    )
+
+
+class TestFifoReplayPreservesSubsetKeepCount:
+    """Tests that collect_fifo_topk_counterfactual_event preserves subset-level
+    keep_count and demoted_keep_indices in the replay output.
+    """
+
+    def test_fifo_replay_preserves_subset_keep_count(self):
+        """Replay output must preserve keep_count, strategy, source,
+        and demoted_keep_indices from each candidate subset.
+        """
+        event = _make_fifo_event_with_subsets(keep_counts=(0, 4))
+        runner = _FakeRunner()
+        future_frames = [
+            {"frame_id": torch.tensor(6)},
+            {"frame_id": torch.tensor(7)},
+        ]
+
+        result = collect_fifo_topk_counterfactual_event(event, runner, future_frames)
+
+        # Check event-level keep_count
+        assert "keep_count" in result, "Result must contain keep_count"
+
+        subsets = result["subsets"]
+        assert len(subsets) == 2, f"Expected 2 subsets, got {len(subsets)}"
+
+        expected_counts = {0, 4}
+        found_counts = set()
+        for subset in subsets:
+            assert "keep_count" in subset, (
+                "Each measured subset must contain 'keep_count'"
+            )
+            assert "strategy" in subset, (
+                "Each measured subset must contain 'strategy'"
+            )
+            assert "source" in subset, (
+                "Each measured subset must contain 'source'"
+            )
+            assert "demoted_keep_indices" in subset, (
+                "Each measured subset must contain 'demoted_keep_indices'"
+            )
+
+            kc = int(subset["keep_count"])
+            found_counts.add(kc)
+
+            assert subset["strategy"] == "fifo_topk"
+            assert subset["source"] == "fifo_probe"
+
+            # demoted_keep_indices should be a tensor on CPU
+            dki = subset["demoted_keep_indices"]
+            assert isinstance(dki, torch.Tensor), (
+                f"demoted_keep_indices should be a Tensor, got {type(dki)}"
+            )
+            assert dki.device == torch.device("cpu")
+
+            if kc == 0:
+                assert dki.numel() == 0
+            elif kc == 4:
+                assert dki.numel() == 4
+
+        assert found_counts == expected_counts, (
+            f"Expected keep_counts {expected_counts}, got {found_counts}"
+        )
+
+
+class TestFrontendOracleCollectorPreservesFifoSubsetMetadata:
+    """Tests that measure_counterfactual_event and measure_counterfactual_subset_serial
+    preserve FIFO subset-level metadata (keep_count, strategy, source, demoted_keep_indices).
+    """
+
+    def _make_event_dict_with_subsets(
+        self,
+        keep_counts=(0, 4),
+        num_tokens=10,
+        num_in_demoted=5,
+    ):
+        """Build an event dict (as passed to measure_counterfactual_event) with subsets."""
+        non_demoted = list(range(num_in_demoted, num_tokens))
+        demoted = list(range(num_in_demoted))
+
+        candidate_subsets = []
+        for kc in keep_counts:
+            keep = sorted(non_demoted + demoted[:kc])
+            demoted_keep = demoted[:kc]
+            candidate_subsets.append({
+                "keep_indices": torch.tensor(keep, dtype=torch.long),
+                "strategy": "fifo_topk",
+                "source": "fifo_probe",
+                "keep_count": kc,
+                "demoted_keep_indices": torch.tensor(demoted_keep, dtype=torch.long),
+            })
+
+        event = {
+            "event_id": "test-event-001",
+            "event_type": "eviction",
+            "layer_id": 0,
+            "frame_id": 5,
+            "candidate_subsets": candidate_subsets,
+            "voxel_group_id": 0,
+        }
+        return event
+
+    def test_frontend_oracle_collector_preserves_fifo_subset_metadata(self):
+        """measure_counterfactual_event (serial path) must preserve subset metadata."""
+        from unittest.mock import MagicMock, patch
+
+        from ovggt.training.frontend_oracle_collector import measure_counterfactual_event
+
+        event = self._make_event_dict_with_subsets(keep_counts=(0, 4))
+        num_future = 2
+        frames = [{"frame_id": torch.tensor(i)} for i in range(8)]
+        future_frames = frames[6:6 + num_future]
+
+        mock_model = MagicMock()
+
+        class FakeOutputs:
+            def __init__(self, res_list):
+                self.ress = res_list
+
+        def make_fake_outputs():
+            return FakeOutputs([
+                {"camera_pose": torch.zeros(4, 4)} for _ in range(8)
+            ])
+
+        # Patch both the runner and the replay probe so that probe.applied is True
+        with patch("ovggt.training.frontend_oracle_collector._run_frontend_with_probe") as mock_run, \
+             patch("ovggt.training.frontend_oracle_collector.ReplayKeepSetProbe") as MockProbe:
+
+            # Make the mock probe report applied=True immediately
+            fake_probe = MagicMock()
+            fake_probe.applied = True
+            MockProbe.return_value = fake_probe
+
+            mock_run.return_value = make_fake_outputs()
+
+            result = measure_counterfactual_event(
+                model=mock_model,
+                frames=frames,
+                event=event,
+                future_frames=future_frames,
+                subset_replay_batch_size=1,
+            )
+
+        assert result is not None, "measure_counterfactual_event should not return None"
+        subsets = result["subsets"]
+        assert len(subsets) == 2, f"Expected 2 measured subsets, got {len(subsets)}"
+
+        expected_counts = {0, 4}
+        found_counts = set()
+        for subset in subsets:
+            assert "keep_count" in subset, (
+                "Measured subset must contain 'keep_count'"
+            )
+            assert "strategy" in subset, (
+                "Measured subset must contain 'strategy'"
+            )
+            assert "source" in subset, (
+                "Measured subset must contain 'source'"
+            )
+            assert "demoted_keep_indices" in subset, (
+                "Measured subset must contain 'demoted_keep_indices'"
+            )
+
+            kc = int(subset["keep_count"])
+            found_counts.add(kc)
+
+            assert subset["strategy"] == "fifo_topk"
+            assert subset["source"] == "fifo_probe"
+
+            dki = subset["demoted_keep_indices"]
+            assert isinstance(dki, torch.Tensor), (
+                f"demoted_keep_indices should be Tensor, got {type(dki)}"
+            )
+            assert dki.device == torch.device("cpu")
+
+        assert found_counts == expected_counts, (
+            f"Expected keep_counts {expected_counts}, got {found_counts}"
+        )
+
+    def test_frontend_oracle_collector_batched_preserves_fifo_subset_metadata(self):
+        """measure_counterfactual_event (batched path) must preserve subset metadata."""
+        from unittest.mock import MagicMock, patch
+
+        from ovggt.training.frontend_oracle_collector import measure_counterfactual_event
+
+        event = self._make_event_dict_with_subsets(keep_counts=(0, 4))
+        num_future = 2
+        frames = [{"frame_id": torch.tensor(i)} for i in range(8)]
+        future_frames = frames[6:6 + num_future]
+
+        mock_model = MagicMock()
+
+        class FakeOutputs:
+            def __init__(self, res_list):
+                self.ress = res_list
+
+        def make_fake_batched_outputs(batch_size):
+            return FakeOutputs([
+                {"camera_pose": torch.zeros(batch_size, 4, 4)}
+                for _ in range(8)
+            ])
+
+        with patch("ovggt.training.frontend_oracle_collector._run_frontend_with_probe") as mock_run, \
+             patch("ovggt.training.frontend_oracle_collector.MultiReplayKeepSetProbe") as MockMultiProbe:
+
+            # Make the mock multi probe report applied_count == chunk_size
+            fake_multi = MagicMock()
+            fake_multi.applied_count = 2  # matches chunk_size
+            MockMultiProbe.return_value = fake_multi
+
+            mock_run.return_value = make_fake_batched_outputs(2)
+
+            result = measure_counterfactual_event(
+                model=mock_model,
+                frames=frames,
+                event=event,
+                future_frames=future_frames,
+                subset_replay_batch_size=2,
+            )
+
+        assert result is not None
+        subsets = result["subsets"]
+        assert len(subsets) == 2, f"Expected 2 measured subsets, got {len(subsets)}"
+
+        expected_counts = {0, 4}
+        found_counts = set()
+        for subset in subsets:
+            assert "keep_count" in subset, "Measured subset must contain 'keep_count'"
+            assert "strategy" in subset, "Measured subset must contain 'strategy'"
+            assert "source" in subset, "Measured subset must contain 'source'"
+            assert "demoted_keep_indices" in subset, "Measured subset must contain 'demoted_keep_indices'"
+
+            kc = int(subset["keep_count"])
+            found_counts.add(kc)
+            assert subset["strategy"] == "fifo_topk"
+            assert subset["source"] == "fifo_probe"
+
+        assert found_counts == expected_counts, (
+            f"Expected keep_counts {expected_counts}, got {found_counts}"
+        )
+
+    def test_measure_counterfactual_subset_serial_preserves_fifo_subset_metadata(self):
+        """measure_counterfactual_subset_serial must preserve subset metadata."""
+        from unittest.mock import MagicMock, patch
+
+        from ovggt.training.frontend_oracle_collector import measure_counterfactual_subset_serial
+
+        num_tokens = 10
+        num_in_demoted = 5
+        non_demoted = list(range(num_in_demoted, num_tokens))
+        demoted = list(range(num_in_demoted))
+
+        subsets_input = []
+        for kc in (0, 4):
+            keep = sorted(non_demoted + demoted[:kc])
+            demoted_keep = demoted[:kc]
+            subsets_input.append({
+                "keep_indices": torch.tensor(keep, dtype=torch.long),
+                "strategy": "fifo_topk",
+                "source": "fifo_probe",
+                "keep_count": kc,
+                "demoted_keep_indices": torch.tensor(demoted_keep, dtype=torch.long),
+            })
+
+        event = {
+            "event_id": "test-serial-001",
+            "event_type": "eviction",
+            "layer_id": 0,
+            "frame_id": 5,
+        }
+        frames = [{"frame_id": torch.tensor(i)} for i in range(8)]
+        future_frames = frames[6:8]
+        mock_model = MagicMock()
+
+        class FakeOutputs:
+            def __init__(self, res_list):
+                self.ress = res_list
+
+        with patch("ovggt.training.frontend_oracle_collector._run_frontend_with_probe") as mock_run, \
+             patch("ovggt.training.frontend_oracle_collector.ReplayKeepSetProbe") as MockProbe:
+
+            fake_probe = MagicMock()
+            fake_probe.applied = True
+            MockProbe.return_value = fake_probe
+
+            mock_run.return_value = FakeOutputs([
+                {"camera_pose": torch.zeros(4, 4)} for _ in range(8)
+            ])
+
+            result = measure_counterfactual_subset_serial(
+                model=mock_model,
+                frames=frames,
+                event=event,
+                future_frames=future_frames,
+                subsets=subsets_input,
+                start=6,
+                stop=8,
+            )
+
+        assert result is not None, "measure_counterfactual_subset_serial should not return None"
+        assert len(result) == 2, f"Expected 2 measured subsets, got {len(result)}"
+
+        expected_counts = {0, 4}
+        found_counts = set()
+        for subset in result:
+            assert "keep_count" in subset, "Measured subset must contain 'keep_count'"
+            assert "strategy" in subset, "Measured subset must contain 'strategy'"
+            assert "source" in subset, "Measured subset must contain 'source'"
+            assert "demoted_keep_indices" in subset, "Measured subset must contain 'demoted_keep_indices'"
+
+            kc = int(subset["keep_count"])
+            found_counts.add(kc)
+            assert subset["strategy"] == "fifo_topk"
+            assert subset["source"] == "fifo_probe"
+
+            dki = subset["demoted_keep_indices"]
+            assert isinstance(dki, torch.Tensor), (
+                f"demoted_keep_indices should be Tensor, got {type(dki)}"
+            )
+            assert dki.device == torch.device("cpu")
+
+        assert found_counts == expected_counts, (
+            f"Expected keep_counts {expected_counts}, got {found_counts}"
+        )

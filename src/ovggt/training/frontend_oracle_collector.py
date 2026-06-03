@@ -1832,6 +1832,16 @@ def _select_provenance_value(value, batch_index: int):
     return value
 
 
+def _copy_subset_metadata(subset: dict) -> dict:
+    """Copy subset-level metadata keys, detaching tensors and deep-copying other values."""
+    copied = {}
+    for key in ("strategy", "source", "keep_count", "demoted_keep_indices", "keep_index", "evict_indices"):
+        if key in subset:
+            value = subset[key]
+            copied[key] = value.detach().cpu() if isinstance(value, torch.Tensor) else copy.deepcopy(value)
+    return copied
+
+
 @torch.inference_mode()
 def measure_counterfactual_event(
     model,
@@ -1856,7 +1866,7 @@ def measure_counterfactual_event(
     replay_batch_size = max(int(subset_replay_batch_size), 1)
     event_type = str(event.get("event_type", "eviction"))
 
-    def append_measured_subset(keep_indices: torch.Tensor, predictions: Sequence[dict]) -> None:
+    def append_measured_subset(subset: dict, keep_indices: torch.Tensor, predictions: Sequence[dict]) -> None:
         nonlocal target_total_sec, loss_total_sec
         target_started = time.monotonic()
         targets = build_future_targets(
@@ -1871,6 +1881,7 @@ def measure_counterfactual_event(
         loss = weighted_three_task_loss(loss_components)
         loss_total_sec += time.monotonic() - loss_started
         measured_subset = {
+            **_copy_subset_metadata(subset),
             "keep_indices": keep_indices.detach().cpu(),
             "loss": loss,
             "loss_components": loss_components,
@@ -1918,7 +1929,7 @@ def measure_counterfactual_event(
                     )
                 return None
             predictions = list(outputs.ress[start:stop])
-            append_measured_subset(keep_indices, predictions)
+            append_measured_subset(subset, keep_indices, predictions)
     else:
         for chunk_start in range(0, len(subsets), replay_batch_size):
             chunk = subsets[chunk_start:chunk_start + replay_batch_size]
@@ -1990,7 +2001,7 @@ def measure_counterfactual_event(
                             select_prediction_batch(prediction, local_idx)
                             for prediction in outputs.ress[start:stop]
                         ]
-                        append_measured_subset(keep_indices, predictions)
+                        append_measured_subset(subset, keep_indices, predictions)
                 continue
             replay_probe = MultiReplayKeepSetProbe(event, keep_indices_batch)
             replay_frames = repeat_frames_for_batch(frames[:stop], chunk_size)
@@ -2048,7 +2059,7 @@ def measure_counterfactual_event(
                         select_prediction_batch(prediction, local_idx)
                         for prediction in outputs.ress[start:stop]
                     ]
-                    append_measured_subset(keep_indices, predictions)
+                    append_measured_subset(subset, keep_indices, predictions)
 
     output = {
         key: value
@@ -2118,6 +2129,7 @@ def measure_counterfactual_subset_serial(
         )
         loss_components = compute_three_task_loss_components(predictions, targets)
         measured_subset = {
+            **_copy_subset_metadata(subset),
             "keep_indices": keep_indices.detach().cpu(),
             "loss": weighted_three_task_loss(loss_components),
             "loss_components": loss_components,
