@@ -665,12 +665,40 @@ class OVGGT(nn.Module, PyTorchModelHubMixin):
                     if pending is None:
                         continue
                     is_fifo_swap = str(getattr(events[b], "event_type", None)).endswith("FIFO_SWAP")
-                    if is_fifo_swap and self.frontend_cache_config.fifo_keep_topk > 0:
+                    if is_fifo_swap and (
+                        self.frontend_cache_config.fifo_keep_topk > 0
+                        or self.frontend_cache_config.learned_fifo_keep_count
+                    ):
                         demoted_slot = getattr(events[b], "demoted_slot", None)
                         if demoted_slot is not None:
-                            cache_states[b][layer_idx].protect_topk_on_demotion_(
+                            cache_state = cache_states[b][layer_idx]
+                            if self.frontend_cache_config.learned_fifo_keep_count:
+                                if self.aggregator.count_head is None:
+                                    raise ValueError(
+                                        "learned_fifo_keep_count=True requires OVGGT(use_count_head=True)"
+                                    )
+                                slot_ss = cache_state.get_demoted_slot_score_state(
+                                    demoted_slot, local_batch_index=0
+                                )
+                                slot_mf = cache_state.get_demoted_slot_metadata_features(
+                                    demoted_slot, i, local_batch_index=0
+                                )
+                                if slot_ss.numel() == 0:
+                                    keep_count = 0
+                                else:
+                                    logits = self.aggregator.count_head(
+                                        slot_ss.unsqueeze(0),
+                                        slot_mf.unsqueeze(0),
+                                        layer_id=layer_idx,
+                                    )
+                                    pred = self.aggregator.count_head.predict_count(logits)
+                                    keep_count = int(pred.reshape(-1)[0].item())
+                            else:
+                                keep_count = int(self.frontend_cache_config.fifo_keep_topk)
+
+                            cache_state.protect_topk_on_demotion_(
                                 demoted_slot=demoted_slot,
-                                keep_count=self.frontend_cache_config.fifo_keep_topk,
+                                keep_count=keep_count,
                                 token_scorer=(
                                     self.aggregator.token_scorers[layer_idx]
                                     if self.aggregator.token_scorers is not None

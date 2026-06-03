@@ -707,6 +707,82 @@ class LayerCacheState:
         # ========== 阶段4：使用gather_per_batch_处理不同数量的token ==========
         self.gather_per_batch_(kept_per_batch)
 
+    # ------------------------------------------------------------------
+    # Demoted-slot helpers for count head integration
+    # ------------------------------------------------------------------
+
+    def get_demoted_slot_indices(
+        self, demoted_slot: int, local_batch_index: int = 0
+    ) -> Tensor:
+        """Return token indices belonging to *demoted_slot* for one batch element.
+
+        Parameters
+        ----------
+        demoted_slot : int
+            The anchor-slot value identifying the demoted anchor.
+        local_batch_index : int
+            Which batch element to query (default 0, which is the only
+            element when cache_state is already per-sample).
+
+        Returns
+        -------
+        Tensor[K]  (1-D long tensor of token positions)
+        """
+        if self.metadata is None:
+            return torch.empty(0, dtype=torch.long)
+        slot_mask = self.metadata.anchor_slot[local_batch_index] == demoted_slot
+        return torch.nonzero(slot_mask, as_tuple=False).squeeze(-1)
+
+    def get_demoted_slot_score_state(
+        self, demoted_slot: int, local_batch_index: int = 0
+    ) -> Tensor:
+        """Return the score_state rows for tokens in the demoted slot.
+
+        Parameters
+        ----------
+        demoted_slot : int
+        local_batch_index : int
+
+        Returns
+        -------
+        Tensor[K, Ds]  (empty tensor with Ds columns if no demoted tokens)
+        """
+        indices = self.get_demoted_slot_indices(demoted_slot, local_batch_index)
+        if indices.numel() == 0 or self.score_state is None:
+            Ds = self.score_state.shape[-1] if self.score_state is not None else 0
+            return torch.empty(0, Ds, dtype=torch.float)
+        # score_state is [B, N, Ds]; index via [local_batch_index, indices]
+        return self.score_state[local_batch_index, indices]
+
+    def get_demoted_slot_metadata_features(
+        self,
+        demoted_slot: int,
+        current_frame_id: int,
+        local_batch_index: int = 0,
+    ) -> Tensor:
+        """Return scorer metadata-feature rows for tokens in the demoted slot.
+
+        Builds the full metadata feature tensor first, then slices out only
+        the demoted-slot rows for the requested batch element.
+
+        Parameters
+        ----------
+        demoted_slot : int
+        current_frame_id : int
+        local_batch_index : int
+
+        Returns
+        -------
+        Tensor[K, Dm]  (empty tensor with Dm columns if no demoted tokens)
+        """
+        indices = self.get_demoted_slot_indices(demoted_slot, local_batch_index)
+        if indices.numel() == 0:
+            return torch.empty(0, TOKEN_METADATA_FEATURE_DIM, dtype=torch.float)
+        full_features = self.build_scorer_metadata_features(
+            current_frame_id, decision_context=2
+        )
+        return full_features[local_batch_index, indices]
+
     def build_scorer_metadata_features(self, current_frame_id: int, decision_context: int = 3) -> Tensor:
         if self.metadata is None:
             raise ValueError("Cannot build scorer metadata features without TokenMetadata")
