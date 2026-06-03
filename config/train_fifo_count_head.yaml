@@ -1,0 +1,16 @@
+# FifoCountHead training configuration.
+# Trains a classification head to predict the best FIFO flush count.
+
+oracle_shards: []
+output: checkpoints/token_scorer_oracle/fifo_count_head.pt
+count_candidates: [0, 8, 16, 32, 64, 128]
+score_state_dim: 128
+hidden_dim: 128
+num_layers: 24
+batch_size: 64
+epochs: 10
+lr: 1e-4
+label_reduction: min
+val_fraction: 0.1
+split_seed: 0
+device: cuda
