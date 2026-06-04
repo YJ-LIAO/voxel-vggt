@@ -343,12 +343,38 @@ def load_model(
     fifo_count_candidates: tuple = (0, 8, 16, 32, 64, 128),
     token_scorer_checkpoint: str = None,
     count_head_checkpoint: str = None,
+    count_head_arch: str = None,
+    count_head_hidden_dim: int = None,
 ) -> OVGGT:
+    # --- Read checkpoint metadata to auto-detect count head config ---
+    if count_head_checkpoint and use_count_head:
+        ckpt_meta = torch.load(count_head_checkpoint, map_location="cpu", weights_only=False)
+        if isinstance(ckpt_meta, dict):
+            # Auto-detect arch from checkpoint metadata if not explicitly provided
+            if count_head_arch is None and "count_head_arch" in ckpt_meta:
+                count_head_arch = ckpt_meta["count_head_arch"]
+            # Auto-detect hidden_dim from checkpoint metadata
+            if count_head_hidden_dim is None and "count_head_hidden_dim" in ckpt_meta:
+                count_head_hidden_dim = ckpt_meta["count_head_hidden_dim"]
+            # Auto-detect candidates from checkpoint metadata
+            if "count_candidates" in ckpt_meta:
+                count_head_candidates_meta = tuple(ckpt_meta["count_candidates"])
+                # Use checkpoint candidates unless explicitly overridden via CLI
+                if fifo_count_candidates == (0, 8, 16, 32, 64, 128):
+                    fifo_count_candidates = count_head_candidates_meta
+
+    # Defaults if not detected from checkpoint
+    if count_head_arch is None:
+        count_head_arch = "pooled_v1"
+
     model_kwargs = {
         "mode": "frontend_eval" if frontend_enabled else "legacy",
         "use_token_scorer": use_token_scorer,
         "use_count_head": use_count_head,
+        "count_head_arch": count_head_arch,
     }
+    if count_head_hidden_dim is not None and use_count_head:
+        model_kwargs["count_head_hidden_dim"] = count_head_hidden_dim
     if frontend_enabled:
         model_kwargs["frontend_cache_config"] = FrontendCacheConfig(
             enabled=True,

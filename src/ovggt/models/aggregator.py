@@ -195,6 +195,7 @@ class Aggregator(nn.Module):
         metadata_dim: int = 17,
         hidden_dim: int | None = None,
         candidates: Sequence[int] = (0, 8, 16, 32, 64, 128),
+        arch: str = "pooled_v1",
     ) -> None:
         from ovggt.layers.count_head import FifoCountHead
         self.count_head = FifoCountHead(
@@ -203,6 +204,7 @@ class Aggregator(nn.Module):
             hidden_dim=hidden_dim,
             num_layers=self.depth,
             candidates=candidates,
+            arch=arch,
         )
 
     def __build_patch_embed__(

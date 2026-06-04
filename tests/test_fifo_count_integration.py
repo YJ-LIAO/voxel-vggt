@@ -388,3 +388,130 @@ class TestLearnedFifoKeepCountRouting:
 
         mf = cache_state.get_demoted_slot_metadata_features(1, 5, local_batch_index=0)
         assert mf.numel() == 0
+
+
+# ---------------------------------------------------------------------------
+# Task 2: Architecture version checkpoint compatibility tests
+# ---------------------------------------------------------------------------
+
+class TestCountHeadArchCompat:
+    """Tests for Task 2: count_head_arch parameter and checkpoint compat."""
+
+    def test_model_stores_count_head_arch_default(self):
+        """Default count_head_arch is pooled_v1."""
+        model = _make_model(use_count_head=True)
+        assert model.count_head_arch == "pooled_v1"
+
+    def test_model_stores_count_head_arch_v2(self):
+        """count_head_arch=shared_encoder_v2 is stored on the model."""
+        model = _make_model(use_count_head=True, count_head_arch="shared_encoder_v2")
+        assert model.count_head_arch == "shared_encoder_v2"
+
+    def test_v1_checkpoint_loads_into_v1_model(self):
+        """v1 checkpoint loads cleanly into v1 model."""
+        model_src = _make_model(use_count_head=True, count_head_arch="pooled_v1")
+        model_dst = _make_model(use_count_head=True, count_head_arch="pooled_v1")
+
+        with torch.no_grad():
+            for p in model_dst.aggregator.count_head.parameters():
+                p.fill_(0.0)
+
+        state = model_src.state_dict()
+        model_dst.load_state_dict(state, strict=False)
+
+        for (n1, p1), (n2, p2) in zip(
+            model_src.aggregator.count_head.named_parameters(),
+            model_dst.aggregator.count_head.named_parameters(),
+        ):
+            assert torch.equal(p1, p2), f"v1->v1: {n1} mismatch"
+
+    def test_v2_checkpoint_loads_into_v2_model(self):
+        """v2 checkpoint loads cleanly into v2 model."""
+        model_src = _make_model(use_count_head=True, count_head_arch="shared_encoder_v2")
+        model_dst = _make_model(use_count_head=True, count_head_arch="shared_encoder_v2")
+
+        with torch.no_grad():
+            for p in model_dst.aggregator.count_head.parameters():
+                p.fill_(0.0)
+
+        state = model_src.state_dict()
+        model_dst.load_state_dict(state, strict=False)
+
+        for (n1, p1), (n2, p2) in zip(
+            model_src.aggregator.count_head.named_parameters(),
+            model_dst.aggregator.count_head.named_parameters(),
+        ):
+            assert torch.equal(p1, p2), f"v2->v2: {n1} mismatch"
+
+    def test_v1_checkpoint_into_v2_model_errors(self):
+        """Loading v1 checkpoint into v2 model raises RuntimeError (not silent)."""
+        model_v1 = _make_model(use_count_head=True, count_head_arch="pooled_v1")
+        model_v2 = _make_model(use_count_head=True, count_head_arch="shared_encoder_v2")
+
+        state_v1 = model_v1.state_dict()
+
+        with pytest.raises(RuntimeError, match="count_head.*arch"):
+            model_v2.load_state_dict(state_v1, strict=False)
+
+    def test_v2_checkpoint_into_v1_model_errors(self):
+        """Loading v2 checkpoint into v1 model raises RuntimeError (not silent)."""
+        model_v2 = _make_model(use_count_head=True, count_head_arch="shared_encoder_v2")
+        model_v1 = _make_model(use_count_head=True, count_head_arch="pooled_v1")
+
+        state_v2 = model_v2.state_dict()
+
+        with pytest.raises(RuntimeError, match="count_head.*arch"):
+            model_v1.load_state_dict(state_v2, strict=False)
+
+    def test_load_count_head_checkpoint_arch_mismatch_errors(self):
+        """load_count_head_checkpoint raises on arch mismatch."""
+        model_v1 = _make_model(use_count_head=True, count_head_arch="pooled_v1")
+        model_v2 = _make_model(use_count_head=True, count_head_arch="shared_encoder_v2")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ckpt_path = Path(tmpdir) / "ckpt_v1.pth"
+            _save_checkpoint(model_v1.state_dict(), ckpt_path)
+
+            with pytest.raises(RuntimeError, match="count_head.*arch"):
+                model_v2.load_count_head_checkpoint(str(ckpt_path))
+
+    def test_v2_model_count_head_forward_works(self):
+        """v2 model count head forward produces correct shape."""
+        model = _make_model(use_count_head=True, count_head_arch="shared_encoder_v2")
+        count_head = model.aggregator.count_head
+        B, N = 2, 20
+        score_state = torch.randn(B, N, 128)
+        logits = count_head(score_state)
+        assert logits.shape == (B, 6)  # default 6 candidates
+
+    def test_v2_model_count_head_predict_count(self):
+        """v2 model predict_count works."""
+        model = _make_model(use_count_head=True, count_head_arch="shared_encoder_v2")
+        count_head = model.aggregator.count_head
+        logits = torch.zeros(1, 6)
+        logits[0, 4] = 50.0  # index 4 -> candidate 64
+        pred = count_head.predict_count(logits)
+        assert pred.item() == 64
+
+    def test_unknown_count_head_arch_raises(self):
+        """Unknown count_head_arch raises ValueError in OVGGT."""
+        with pytest.raises(ValueError, match="Unknown FifoCountHead arch"):
+            _make_model(use_count_head=True, count_head_arch="bogus_v3")
+
+    def test_token_scorer_hidden_dim_mismatch_detected(self):
+        """Token scorer hidden_dim mismatch between checkpoint and model is detected."""
+        model_a = _make_model(
+            use_token_scorer=True,
+            scorer_bottleneck_dim=16,
+        )
+        model_b = _make_model(
+            use_token_scorer=True,
+            scorer_bottleneck_dim=32,  # different bottleneck dim
+        )
+
+        state_a = model_a.state_dict()
+        # Loading model_a state into model_b should raise RuntimeError due to
+        # the _assert_token_scorer_state_compatible preflight check detecting
+        # the shape mismatch in scorer weights.
+        with pytest.raises(RuntimeError, match="token_scorer hidden_dim mismatch"):
+            model_b.load_state_dict(state_a, strict=False)

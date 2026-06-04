@@ -66,6 +66,7 @@ class OVGGT(nn.Module, PyTorchModelHubMixin):
         scorer_bottleneck_dim: Optional[int] = None,
         use_count_head: bool = False,
         count_head_hidden_dim: Optional[int] = None,
+        count_head_arch: str = "pooled_v1",
     ):
         super().__init__()
 
@@ -85,6 +86,7 @@ class OVGGT(nn.Module, PyTorchModelHubMixin):
         self.intra_frame_keep_ratio = intra_frame_keep_ratio
         self.spatial_alpha = spatial_alpha
         self.mode = mode
+        self.count_head_arch = count_head_arch
         self.frontend_pose_encoding_type = frontend_pose_encoding_type
         self.frontend_cache_config = frontend_cache_config or FrontendCacheConfig()
         if self.mode in {"frontend_train", "frontend_eval"}:
@@ -115,6 +117,7 @@ class OVGGT(nn.Module, PyTorchModelHubMixin):
                 metadata_dim=TOKEN_METADATA_FEATURE_DIM,
                 hidden_dim=count_head_hidden_dim,
                 candidates=self.frontend_cache_config.fifo_count_candidates,
+                arch=count_head_arch,
             )
 
         self.camera_head = CameraHead(
@@ -217,6 +220,93 @@ class OVGGT(nn.Module, PyTorchModelHubMixin):
             raise ValueError(f"No token scorer weights found in {checkpoint_path}")
         return self.load_state_dict(scorer_state, strict=False)
 
+    def _assert_count_head_state_compatible(self, state_dict: dict) -> None:
+        """Preflight check: ensure count_head arch in checkpoint matches model.
+
+        Raises ``RuntimeError`` if the checkpoint's count_head sub-module keys
+        are structurally incompatible with the model's count_head architecture.
+        This prevents silently loading a v1 count_head into a v2 model (or vice
+        versa), which would otherwise either crash or produce wrong results.
+        """
+        count_head_prefixes = ("aggregator.count_head.",)
+        ckpt_ch_keys = [k for k in state_dict if k.startswith(count_head_prefixes)]
+        model_has_count_head = (
+            hasattr(self.aggregator, "count_head")
+            and self.aggregator.count_head is not None
+        )
+
+        if not ckpt_ch_keys or not model_has_count_head:
+            return  # nothing to check
+
+        # Determine the checkpoint's implied arch from its sub-module key names.
+        # v1 direct children: count_head.layer_embed.*, count_head.mlp.*
+        # v2 direct children: count_head._encoder.*, count_head._classifier.*
+        # Note: v2's _encoder internally also has a layer_embed, but it appears
+        # as count_head._encoder.layer_embed.*, not count_head.layer_embed.*.
+        has_v1_keys = any(
+            k.startswith("aggregator.count_head.layer_embed.")
+            or k.startswith("aggregator.count_head.mlp.")
+            for k in ckpt_ch_keys
+        )
+        has_v2_keys = any(
+            k.startswith("aggregator.count_head._encoder.")
+            or k.startswith("aggregator.count_head._classifier.")
+            for k in ckpt_ch_keys
+        )
+
+        model_arch = self.count_head_arch
+
+        if has_v1_keys and model_arch == "shared_encoder_v2":
+            raise RuntimeError(
+                f"count_head arch mismatch: checkpoint contains v1 (pooled_v1) "
+                f"count_head keys but model uses arch={model_arch!r}. "
+                f"Recreate the model with count_head_arch='pooled_v1' or use "
+                f"a matching checkpoint."
+            )
+        if has_v2_keys and model_arch == "pooled_v1":
+            raise RuntimeError(
+                f"count_head arch mismatch: checkpoint contains v2 "
+                f"(shared_encoder_v2) count_head keys but model uses "
+                f"arch={model_arch!r}. "
+                f"Recreate the model with count_head_arch='shared_encoder_v2' "
+                f"or use a matching checkpoint."
+            )
+
+    def _assert_token_scorer_state_compatible(self, state_dict: dict) -> None:
+        """Preflight check: verify token scorer hidden_dim compatibility.
+
+        Checks that token scorer keys present in both the checkpoint and model
+        have matching tensor shapes.  Shape mismatches indicate a
+        ``hidden_dim`` / ``bottleneck_dim`` mismatch between the checkpoint and
+        the model configuration.
+        """
+        scorer_prefixes = ("aggregator.token_scorers.", "aggregator.score_state_projs.")
+        model_has_scorer = (
+            hasattr(self.aggregator, "token_scorers")
+            and self.aggregator.token_scorers is not None
+        )
+        ckpt_scorer_keys = [k for k in state_dict if k.startswith(scorer_prefixes)]
+
+        if not ckpt_scorer_keys or not model_has_scorer:
+            return
+
+        current_state = self.state_dict()
+        mismatches = []
+        for k in ckpt_scorer_keys:
+            if k in current_state:
+                if tuple(state_dict[k].shape) != tuple(current_state[k].shape):
+                    mismatches.append(
+                        f"  {k}: checkpoint shape={tuple(state_dict[k].shape)} "
+                        f"vs model shape={tuple(current_state[k].shape)}"
+                    )
+        if mismatches:
+            raise RuntimeError(
+                "token_scorer hidden_dim mismatch between checkpoint and model:\n"
+                + "\n".join(mismatches)
+                + "\nEnsure scorer_bottleneck_dim / score_state_dim match the "
+                "checkpoint configuration."
+            )
+
     def load_count_head_checkpoint(self, checkpoint_path: str, map_location: str = "cpu"):
         if self.aggregator.count_head is None:
             raise ValueError("load_count_head_checkpoint requires OVGGT(use_count_head=True)")
@@ -224,6 +314,17 @@ class OVGGT(nn.Module, PyTorchModelHubMixin):
         state_dict = checkpoint.get("model", checkpoint) if isinstance(checkpoint, dict) else checkpoint
         if not isinstance(state_dict, dict):
             raise ValueError(f"Expected checkpoint state_dict at {checkpoint_path}")
+
+        # Check for arch metadata in checkpoint
+        if isinstance(checkpoint, dict) and "count_head_arch" in checkpoint:
+            ckpt_arch = checkpoint["count_head_arch"]
+            if ckpt_arch != self.count_head_arch:
+                raise RuntimeError(
+                    f"count_head arch mismatch: checkpoint has "
+                    f"count_head_arch={ckpt_arch!r} but model has "
+                    f"count_head_arch={self.count_head_arch!r}. "
+                    f"Recreate the model with the matching arch."
+                )
 
         count_head_prefixes = ("aggregator.count_head.",)
         count_head_state = {
@@ -233,11 +334,40 @@ class OVGGT(nn.Module, PyTorchModelHubMixin):
         }
         if not count_head_state:
             raise ValueError(f"No count head weights found in {checkpoint_path}")
-        return self.load_state_dict(count_head_state, strict=False)
+
+        # Preflight arch compatibility check
+        self._assert_count_head_state_compatible(count_head_state)
+
+        result = self.load_state_dict(count_head_state, strict=False)
+
+        # Check for total failure: ALL count_head keys are missing/unexpected
+        count_head_model_keys = {
+            k for k in self.state_dict() if k.startswith(count_head_prefixes)
+        }
+        all_missing = all(k in result.missing_keys for k in count_head_model_keys)
+        all_unexpected = all(
+            k in result.unexpected_keys
+            for k in count_head_state
+        )
+        if all_missing and all_unexpected:
+            raise RuntimeError(
+                f"count_head checkpoint loading failed completely: all "
+                f"{len(count_head_model_keys)} model keys are missing and all "
+                f"{len(count_head_state)} checkpoint keys are unexpected. "
+                f"This likely indicates a count_head_arch mismatch "
+                f"(model arch={self.count_head_arch!r})."
+            )
+
+        return result
 
     def load_state_dict(self, state_dict, strict: bool = True):
         upgraded_state_dict = dict(state_dict)
         self._upgrade_camera_head_state_dict(upgraded_state_dict)
+
+        # --- Preflight checks BEFORE key filtering ---
+        self._assert_count_head_state_compatible(upgraded_state_dict)
+        self._assert_token_scorer_state_compatible(upgraded_state_dict)
+
         # TokenScorer compatibility: handle scorer keys in/out of checkpoint
         scorer_prefixes = ("aggregator.token_scorers.", "aggregator.score_state_projs.")
         scorer_keys = [k for k in upgraded_state_dict if k.startswith(scorer_prefixes)]

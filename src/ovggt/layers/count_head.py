@@ -1,8 +1,16 @@
 """Shared classification head for FIFO count prediction.
 
-Given a pooled representation of the current cache state, predicts how many
-tokens should be flushed in the next FIFO round.  Output is a set of logits
-over a fixed candidate set (e.g. 0, 8, 16, 32, 64, 128).
+Supports two architectures:
+
+- ``pooled_v1`` (default): the original implementation that concatenates
+  pooled score_state, pooled metadata, token count, and a layer embedding,
+  then passes through an MLP.
+
+- ``shared_encoder_v2``: uses ``RetentionTokenEncoder`` to produce per-token
+  hidden features, then ``FifoCountClassifier`` to pool and classify.
+
+Both architectures output logits ``[B, num_candidates]`` and share the same
+``predict_count`` helper.
 """
 
 from __future__ import annotations
@@ -24,12 +32,15 @@ class FifoCountHead(nn.Module):
     metadata_dim : int
         Dimensionality of per-token metadata features (``Dm``).
     hidden_dim : int | None
-        Hidden width of the classification MLP.  Defaults to
-        ``score_state_dim``.
+        Hidden width of the classification MLP (v1) or encoder output dim (v2).
+        Defaults to ``score_state_dim`` for v1, or 128 for v2.
     num_layers : int
         Number of transformer layers (used for layer embedding).
     candidates : sequence of int
         Discrete count values to classify among.
+    arch : str
+        Architecture version: ``"pooled_v1"`` (default) or
+        ``"shared_encoder_v2"``.
     """
 
     def __init__(
@@ -39,18 +50,42 @@ class FifoCountHead(nn.Module):
         hidden_dim: int | None = None,
         num_layers: int = 24,
         candidates: Sequence[int] = (0, 8, 16, 32, 64, 128),
+        arch: str = "pooled_v1",
     ) -> None:
         super().__init__()
+        self.arch = arch
         self.score_state_dim = int(score_state_dim)
         self.metadata_dim = int(metadata_dim)
-        if hidden_dim is None:
-            hidden_dim = self.score_state_dim
 
-        self.layer_embed = nn.Embedding(max(int(num_layers), 1), self.score_state_dim)
+        if arch == "pooled_v1":
+            self._build_v1(score_state_dim, metadata_dim, hidden_dim, num_layers, candidates)
+        elif arch == "shared_encoder_v2":
+            self._build_v2(score_state_dim, metadata_dim, hidden_dim, num_layers, candidates)
+        else:
+            raise ValueError(f"Unknown FifoCountHead arch: {arch}")
+
+        self.register_buffer(
+            "candidates",
+            torch.tensor(candidates, dtype=torch.long),
+            persistent=True,
+        )
+
+    def _build_v1(
+        self,
+        score_state_dim: int,
+        metadata_dim: int,
+        hidden_dim: int | None,
+        num_layers: int,
+        candidates: Sequence[int],
+    ) -> None:
+        if hidden_dim is None:
+            hidden_dim = score_state_dim
+
+        self.layer_embed = nn.Embedding(max(int(num_layers), 1), score_state_dim)
 
         # MLP input: pooled_score_state (Ds) + pooled_metadata (Dm)
         #           + token_count (1) + layer_embed (Ds)
-        mlp_in = self.score_state_dim + self.metadata_dim + 1 + self.score_state_dim
+        mlp_in = score_state_dim + metadata_dim + 1 + score_state_dim
         num_candidates = len(candidates)
         self.mlp = nn.Sequential(
             nn.LayerNorm(mlp_in),
@@ -59,10 +94,22 @@ class FifoCountHead(nn.Module):
             nn.Linear(hidden_dim, num_candidates),
         )
 
-        self.register_buffer(
-            "candidates",
-            torch.tensor(candidates, dtype=torch.long),
-            persistent=True,
+    def _build_v2(
+        self,
+        score_state_dim: int,
+        metadata_dim: int,
+        hidden_dim: int | None,
+        num_layers: int,
+        candidates: Sequence[int],
+    ) -> None:
+        from ovggt.layers.retention_policy import RetentionTokenEncoder, FifoCountClassifier
+
+        effective_hidden = hidden_dim if hidden_dim is not None else 128
+        self._encoder = RetentionTokenEncoder(
+            score_state_dim, metadata_dim, effective_hidden, num_layers,
+        )
+        self._classifier = FifoCountClassifier(
+            self._encoder.hidden_dim, candidates,
         )
 
     # ------------------------------------------------------------------
@@ -94,6 +141,18 @@ class FifoCountHead(nn.Module):
         -------
         Tensor [B, num_candidates]
         """
+        if self.arch == "pooled_v1":
+            return self._forward_v1(score_state, metadata_features, layer_id, token_mask)
+        else:
+            return self._forward_v2(score_state, metadata_features, layer_id, token_mask)
+
+    def _forward_v1(
+        self,
+        score_state: Tensor,
+        metadata_features: Tensor | None,
+        layer_id: int | Tensor,
+        token_mask: Tensor | None,
+    ) -> Tensor:
         if score_state.dim() != 3:
             raise ValueError(
                 f"score_state must have shape [B, N, D], got {tuple(score_state.shape)}"
@@ -170,6 +229,16 @@ class FifoCountHead(nn.Module):
         )
 
         return self.mlp(mlp_input)  # [B, num_candidates]
+
+    def _forward_v2(
+        self,
+        score_state: Tensor,
+        metadata_features: Tensor | None,
+        layer_id: int | Tensor,
+        token_mask: Tensor | None,
+    ) -> Tensor:
+        features = self._encoder(score_state, metadata_features, layer_id)
+        return self._classifier(features, token_mask)  # [B, num_candidates]
 
     # ------------------------------------------------------------------
     # Prediction helper
