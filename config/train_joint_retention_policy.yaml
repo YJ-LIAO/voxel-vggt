@@ -1,0 +1,28 @@
+oracle_shards:
+  - /path/to/mount/lyj/voxel-vggt/checkpoints/token_oracle_count/oracle_shard_000.pt
+
+output: /path/to/mount/lyj/voxel-vggt/checkpoints/token_scorer_oracle/joint_retention_policy.pt
+score_state_proj_checkpoint: null
+
+score_state_dim: 128
+metadata_dim: 17
+hidden_dim: 256
+num_layers: 24
+count_candidates: [0, 8, 16, 32, 64, 128]
+count_head_arch: shared_encoder_v2
+
+batch_size: 64
+epochs: 5
+lr: 1e-4
+weight_decay: 0.01
+
+regression_weight: 0.1
+min_loss_gap: 0.01
+count_loss_weight: 0.5
+count_label_reduction: min
+count_repeat_factor: 1
+
+val_fraction: 0.1
+split_key: sequence_id
+split_seed: 0
+device: cuda

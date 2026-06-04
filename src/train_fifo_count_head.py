@@ -217,6 +217,8 @@ def train_fifo_count_head(
             "metadata_dim": TOKEN_METADATA_FEATURE_DIM,
             "num_layers": num_layers,
             "count_candidates": count_candidates,
+            "hidden_dim": hidden_dim,
+            "count_head_arch": "pooled_v1",
         },
         output_path,
     )
