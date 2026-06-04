@@ -315,3 +315,131 @@ class JointRetentionPolicy(nn.Module):
         """Return FIFO count logits ``[B, num_candidates]``."""
         features = self.encoder(score_state, metadata_features, layer_id)
         return self.count_head(features, token_mask=token_mask)
+
+
+# --------------------------------------------------------------------------- #
+# Export helpers for OVGGT runtime checkpoint conversion
+# --------------------------------------------------------------------------- #
+
+def build_token_scorer_state_from_joint(
+    joint: JointRetentionPolicy,
+    expected_hidden_dim: int | None = None,
+) -> dict:
+    """Export token scorer weights from a ``JointRetentionPolicy``.
+
+    Maps the shared encoder + ranking head into the flat key layout expected
+    by ``TokenScorer`` at runtime:
+
+    - ``encoder.layer_embed.weight``  -> ``layer_embed.weight``
+    - ``encoder.norm.weight/bias``    -> ``scorer.0.weight/bias``  (LayerNorm)
+    - ``encoder.proj.weight/bias``    -> ``scorer.1.weight/bias``  (Linear)
+    - ``token_head.out.weight/bias``  -> ``scorer.3.weight/bias``  (Linear, skips GELU at index 2)
+
+    Parameters
+    ----------
+    joint : JointRetentionPolicy
+        Trained joint policy to export.
+    expected_hidden_dim : int | None
+        If provided, validates that the encoder hidden dim matches the
+        runtime expectation.  Raises ``ValueError`` on mismatch.
+
+    Returns
+    -------
+    dict
+        Flat state dict with TokenScorer deploy keys.
+    """
+    actual_hidden = joint.encoder.proj.weight.shape[0]
+    if expected_hidden_dim is not None and actual_hidden != expected_hidden_dim:
+        raise ValueError(
+            f"Joint encoder hidden_dim={actual_hidden} != "
+            f"runtime expected_hidden_dim={expected_hidden_dim}. "
+            f"Export would produce incompatible checkpoint."
+        )
+    return {
+        "layer_embed.weight": joint.encoder.layer_embed.weight.detach().cpu().clone(),
+        "scorer.0.weight": joint.encoder.norm.weight.detach().cpu().clone(),
+        "scorer.0.bias": joint.encoder.norm.bias.detach().cpu().clone(),
+        "scorer.1.weight": joint.encoder.proj.weight.detach().cpu().clone(),
+        "scorer.1.bias": joint.encoder.proj.bias.detach().cpu().clone(),
+        "scorer.3.weight": joint.token_head.out.weight.detach().cpu().clone(),
+        "scorer.3.bias": joint.token_head.out.bias.detach().cpu().clone(),
+    }
+
+
+def build_count_head_state_from_joint(joint: JointRetentionPolicy) -> dict:
+    """Export count head weights from a ``JointRetentionPolicy``.
+
+    Constructs a ``FifoCountHead(arch="shared_encoder_v2")`` and copies the
+    joint encoder + classifier weights into it.  The resulting state dict
+    uses the ``aggregator.count_head.`` prefix layout expected at runtime.
+
+    Parameters
+    ----------
+    joint : JointRetentionPolicy
+        Trained joint policy to export.
+
+    Returns
+    -------
+    dict
+        State dict of the assembled FifoCountHead.
+    """
+    from ovggt.layers.count_head import FifoCountHead
+
+    count_head = FifoCountHead(
+        score_state_dim=joint.encoder.score_state_dim,
+        metadata_dim=joint.encoder.metadata_dim,
+        hidden_dim=joint.encoder.hidden_dim,
+        num_layers=joint.encoder.layer_embed.num_embeddings,
+        candidates=tuple(joint.count_head.candidates.tolist()),
+        arch="shared_encoder_v2",
+    )
+    count_head._encoder.load_state_dict(joint.encoder.state_dict())
+    count_head._classifier.load_state_dict(joint.count_head.state_dict())
+    return count_head.state_dict()
+
+
+def build_ovggt_joint_retention_state_dict(
+    token_scorer_state: dict,
+    count_head_state: dict | None,
+    num_layers: int,
+    score_state_projection_state: dict | None = None,
+) -> dict:
+    """Assemble a full OVGGT deploy state dict from exported sub-components.
+
+    Replicates the shared token scorer weights across all layers and prefixes
+    them for direct ``load_state_dict`` into an ``OVGGT`` model with
+    ``use_token_scorer=True`` and optionally ``use_count_head=True``.
+
+    Parameters
+    ----------
+    token_scorer_state : dict
+        Output of ``build_token_scorer_state_from_joint``.
+    count_head_state : dict | None
+        Output of ``build_count_head_state_from_joint``, or *None* to skip.
+    num_layers : int
+        Number of transformer layers (determines replication count).
+    score_state_projection_state : dict | None
+        Optional pre-built ``aggregator.score_state_projs.*`` entries.
+
+    Returns
+    -------
+    dict
+        State dict with ``aggregator.token_scorers.{layer}.*`` and
+        ``aggregator.count_head.*`` keys.
+    """
+    deploy_state: dict[str, Tensor] = {}
+    for layer_idx in range(int(num_layers)):
+        for key, value in token_scorer_state.items():
+            deploy_state[f"aggregator.token_scorers.{layer_idx}.{key}"] = (
+                value.detach().cpu().clone()
+            )
+    if count_head_state is not None:
+        for key, value in count_head_state.items():
+            deploy_state[f"aggregator.count_head.{key}"] = (
+                value.detach().cpu().clone()
+            )
+    if score_state_projection_state:
+        for key, value in score_state_projection_state.items():
+            if key.startswith("aggregator.score_state_projs."):
+                deploy_state[key] = value.detach().cpu().clone()
+    return deploy_state
