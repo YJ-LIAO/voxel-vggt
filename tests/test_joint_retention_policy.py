@@ -4,6 +4,8 @@ Covers:
 - Step 1.1: shape and input validation tests for RetentionTokenEncoder
 - Step 1.5: gradient flow tests confirming shared encoder receives gradients
   from both token and count heads
+- Step 3.1: event-level split leak tests
+- Step 3.5: fifo_token_pair_mode same_keep_count tests
 """
 
 import os
@@ -23,6 +25,7 @@ from ovggt.layers.retention_policy import (
     RetentionTokenEncoder,
     TokenRankingHead,
 )
+from ovggt.layers.token_scorer import TOKEN_METADATA_FEATURE_DIM
 
 
 # ---------------------------------------------------------------------------
@@ -290,3 +293,268 @@ class TestSharedEncoderGradients:
         assert token_proj_grad.abs().sum() > 0, "token head: proj grad zero"
         assert count_layer_grad.abs().sum() > 0, "count head: layer_embed grad zero"
         assert count_proj_grad.abs().sum() > 0, "count head: proj grad zero"
+
+
+# ===================================================================
+# Step 3.1 — Event-level split leak tests
+# ===================================================================
+
+
+def _make_fake_event(
+    event_id: str,
+    event_type: str = "eviction",
+    sequence_id: str = "seq_a",
+    num_tokens: int = 6,
+    keep_count: int | None = None,
+    demoted_indices: list[int] | None = None,
+) -> dict:
+    """Create a minimal fake event for split / dataset tests."""
+    subsets = [
+        {"keep_indices": torch.tensor([0, 1, 2]), "loss": 0.20 + 0.01 * hash(event_id) % 5},
+        {"keep_indices": torch.tensor([3, 4, 5]), "loss": 0.55 + 0.01 * hash(event_id) % 5},
+    ]
+    if keep_count is not None:
+        subsets[0]["keep_count"] = keep_count
+        subsets[1]["keep_count"] = keep_count
+    event: dict = {
+        "event_id": event_id,
+        "event_type": event_type,
+        "layer_id": 0,
+        "sequence_provenance": {"sequence_id": sequence_id},
+        "score_state": torch.randn(num_tokens, 8),
+        "metadata_features": torch.randn(num_tokens, TOKEN_METADATA_FEATURE_DIM),
+        "subsets": subsets,
+    }
+    if demoted_indices is not None:
+        event["demoted_indices"] = demoted_indices
+    if keep_count is not None:
+        event["keep_count"] = keep_count
+    return event
+
+
+class TestEventLevelSplitNoLeakage:
+    """Step 3.1: event-level split avoids token/count data leakage."""
+
+    @pytest.fixture()
+    def fake_events(self) -> list[dict]:
+        """100 events spanning 3 event types and 10 sequences."""
+        events = []
+        for idx in range(100):
+            event_type = ["eviction", "dedup", "fifo_topk"][idx % 3]
+            seq_id = f"seq_{idx % 10}"
+            demoted = list(range(3)) if event_type == "fifo_topk" else None
+            kc = 3 if event_type == "fifo_topk" else None
+            events.append(
+                _make_fake_event(
+                    event_id=f"event_{idx:04d}",
+                    event_type=event_type,
+                    sequence_id=seq_id,
+                    demoted_indices=demoted,
+                    keep_count=kc,
+                )
+            )
+        return events
+
+    def test_event_id_hash_split_no_event_leakage(self, fake_events):
+        """split_oracle_events with event_id_hash: no event_id in both train and val."""
+        from ovggt.training.token_oracle_dataset import split_oracle_events
+
+        train_events, val_events = split_oracle_events(
+            fake_events, val_fraction=0.2, split_key="event_id_hash", seed=42,
+        )
+        train_ids = {e["event_id"] for e in train_events}
+        val_ids = {e["event_id"] for e in val_events}
+        assert train_ids, "train split should not be empty"
+        assert val_ids, "val split should not be empty"
+        assert train_ids.isdisjoint(val_ids), (
+            f"event_id leakage: {train_ids & val_ids}"
+        )
+
+    def test_sequence_id_split_no_sequence_leakage(self, fake_events):
+        """split_oracle_events with sequence_id: no sequence in both train and val."""
+        from ovggt.training.token_oracle_dataset import split_oracle_events
+
+        train_events, val_events = split_oracle_events(
+            fake_events, val_fraction=0.2, split_key="sequence_id", seed=42,
+        )
+        train_seqs = {e["sequence_provenance"]["sequence_id"] for e in train_events}
+        val_seqs = {e["sequence_provenance"]["sequence_id"] for e in val_events}
+        assert train_seqs, "train split should not be empty"
+        assert val_seqs, "val split should not be empty"
+        assert train_seqs.isdisjoint(val_seqs), (
+            f"sequence_id leakage: {train_seqs & val_seqs}"
+        )
+
+    def test_token_and_count_datasets_share_same_events(self, fake_events):
+        """Token dataset and count dataset built from same split use the same event set."""
+        from ovggt.training.token_oracle_dataset import (
+            CounterfactualOracleDataset,
+            FifoCountDataset,
+            split_oracle_events,
+        )
+
+        train_events, val_events = split_oracle_events(
+            fake_events, val_fraction=0.2, split_key="event_id_hash", seed=0,
+        )
+
+        # Build both datasets from the same train events
+        token_ds = CounterfactualOracleDataset.from_events(train_events)
+        count_ds = FifoCountDataset.from_events(train_events)
+
+        token_event_ids = {s["event_id"] for s in token_ds.samples}
+        count_event_ids = {s["event_id"] for s in count_ds.samples}
+
+        # Count dataset only uses fifo_topk events, but every event_id it uses
+        # must be a subset of the token dataset's event_ids
+        assert count_event_ids.issubset(token_event_ids), (
+            f"count dataset has event_ids not in token dataset: "
+            f"{count_event_ids - token_event_ids}"
+        )
+
+    def test_val_events_not_in_train_events(self, fake_events):
+        """Events in val must not appear in train."""
+        from ovggt.training.token_oracle_dataset import split_oracle_events
+
+        train_events, val_events = split_oracle_events(
+            fake_events, val_fraction=0.15, split_key="sequence_id", seed=0,
+        )
+        train_ids = {e["event_id"] for e in train_events}
+        val_ids = {e["event_id"] for e in val_events}
+        assert train_ids.isdisjoint(val_ids)
+
+        # Also check sequence_id consistency
+        train_seqs = {e["sequence_provenance"]["sequence_id"] for e in train_events}
+        val_seqs = {e["sequence_provenance"]["sequence_id"] for e in val_events}
+        assert train_seqs.isdisjoint(val_seqs)
+
+    def test_sequence_id_split_falls_back_to_event_id(self):
+        """When sequence_provenance is missing, falls back to event_id."""
+        from ovggt.training.token_oracle_dataset import split_oracle_events
+
+        events = []
+        for idx in range(50):
+            e = _make_fake_event(event_id=f"ev_{idx:04d}", sequence_id=f"seq_{idx % 5}")
+            # Remove sequence_provenance from some events to test fallback
+            if idx % 3 == 0:
+                del e["sequence_provenance"]
+            events.append(e)
+
+        train_events, val_events = split_oracle_events(
+            events, val_fraction=0.2, split_key="sequence_id", seed=0,
+        )
+        train_ids = {e["event_id"] for e in train_events}
+        val_ids = {e["event_id"] for e in val_events}
+        assert train_ids.isdisjoint(val_ids)
+
+
+# ===================================================================
+# Step 3.5 — fifo_token_pair_mode="same_keep_count" tests
+# ===================================================================
+
+
+class TestFifoTokenPairModeSameKeepCount:
+    """Step 3.5: same_keep_count mode restricts pairs to same keep_count."""
+
+    def test_same_keep_count_restricts_pairs(self):
+        """With same_keep_count, no pairs span different keep_count values."""
+        from ovggt.training.token_oracle_dataset import CounterfactualOracleDataset
+
+        event = {
+            "event_id": "fifo_ev_1",
+            "event_type": "fifo_topk",
+            "layer_id": 0,
+            "sequence_provenance": {"sequence_id": "seq_a"},
+            "score_state": torch.randn(8, 8),
+            "metadata_features": torch.randn(8, TOKEN_METADATA_FEATURE_DIM),
+            "subsets": [
+                {"keep_indices": [0, 1, 2], "loss": 0.10, "keep_count": 3},
+                {"keep_indices": [3, 4, 5], "loss": 0.30, "keep_count": 3},
+                {"keep_indices": [0, 1, 2, 3], "loss": 0.20, "keep_count": 4},
+                {"keep_indices": [4, 5, 6, 7], "loss": 0.40, "keep_count": 4},
+            ],
+        }
+
+        ds = CounterfactualOracleDataset.from_events(
+            [event], fifo_token_pair_mode="same_keep_count",
+        )
+
+        for sample in ds.samples:
+            better_mask = sample["better_mask"]
+            worse_mask = sample["worse_mask"]
+            better_count = int(better_mask.sum().item())
+            worse_count = int(worse_mask.sum().item())
+            assert better_count == worse_count, (
+                f"same_keep_count violation: better_keep={better_count} "
+                f"worse_keep={worse_count}"
+            )
+
+    def test_any_mode_allows_cross_keep_count_pairs(self):
+        """With any mode, cross-keep_count pairs are allowed."""
+        from ovggt.training.token_oracle_dataset import CounterfactualOracleDataset
+
+        event = {
+            "event_id": "fifo_ev_2",
+            "event_type": "fifo_topk",
+            "layer_id": 0,
+            "sequence_provenance": {"sequence_id": "seq_a"},
+            "score_state": torch.randn(8, 8),
+            "metadata_features": torch.randn(8, TOKEN_METADATA_FEATURE_DIM),
+            "subsets": [
+                {"keep_indices": [0, 1, 2], "loss": 0.10, "keep_count": 3},
+                {"keep_indices": [3, 4, 5], "loss": 0.30, "keep_count": 3},
+                {"keep_indices": [0, 1, 2, 3], "loss": 0.20, "keep_count": 4},
+                {"keep_indices": [4, 5, 6, 7], "loss": 0.40, "keep_count": 4},
+            ],
+        }
+
+        ds_any = CounterfactualOracleDataset.from_events(
+            [event], fifo_token_pair_mode="any",
+        )
+        ds_same = CounterfactualOracleDataset.from_events(
+            [event], fifo_token_pair_mode="same_keep_count",
+        )
+
+        # "any" mode should produce more or equal pairs than "same_keep_count"
+        assert len(ds_any) >= len(ds_same)
+        # And with different keep_counts, "any" should strictly have more
+        assert len(ds_any) > len(ds_same), (
+            f"'any' mode ({len(ds_any)}) should produce more pairs than "
+            f"'same_keep_count' ({len(ds_same)}) with different keep_counts"
+        )
+
+    def test_same_keep_count_does_not_affect_non_fifo_events(self):
+        """same_keep_count mode only applies to fifo_topk events."""
+        from ovggt.training.token_oracle_dataset import CounterfactualOracleDataset
+
+        eviction_event = {
+            "event_id": "eviction_ev",
+            "event_type": "eviction",
+            "layer_id": 0,
+            "sequence_provenance": {"sequence_id": "seq_a"},
+            "score_state": torch.randn(6, 8),
+            "metadata_features": torch.randn(6, TOKEN_METADATA_FEATURE_DIM),
+            "subsets": [
+                {"keep_indices": [0, 1, 2], "loss": 0.10},
+                {"keep_indices": [3, 4, 5], "loss": 0.30},
+            ],
+        }
+
+        ds_any = CounterfactualOracleDataset.from_events(
+            [eviction_event], fifo_token_pair_mode="any",
+        )
+        ds_same = CounterfactualOracleDataset.from_events(
+            [eviction_event], fifo_token_pair_mode="same_keep_count",
+        )
+
+        assert len(ds_any) == len(ds_same), (
+            "same_keep_count should not affect non-fifo_topk events"
+        )
+
+    def test_invalid_fifo_token_pair_mode_raises(self):
+        """Invalid fifo_token_pair_mode should raise ValueError."""
+        from ovggt.training.token_oracle_dataset import CounterfactualOracleDataset
+
+        with pytest.raises(ValueError, match="fifo_token_pair_mode"):
+            CounterfactualOracleDataset.from_events(
+                [], fifo_token_pair_mode="invalid",
+            )

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import warnings
 from collections import defaultdict
 from pathlib import Path
@@ -11,6 +12,71 @@ import torch
 import torch.nn.functional as F
 from torch import Tensor
 from torch.utils.data import Dataset
+
+
+# ---------------------------------------------------------------------------
+# Stable hash helper (shared with train_token_scorer_oracle.py)
+# ---------------------------------------------------------------------------
+
+def _stable_bucket(value: str, seed: int = 0, buckets: int = 10000) -> int:
+    """Deterministic bucket assignment via MD5 hash."""
+    digest = hashlib.md5(f"{seed}:{value}".encode("utf-8")).hexdigest()
+    return int(digest, 16) % buckets
+
+
+# ---------------------------------------------------------------------------
+# Event-level loading and splitting helpers
+# ---------------------------------------------------------------------------
+
+def load_oracle_events(shard_paths: Sequence[str | Path]) -> list[dict]:
+    """Load all events from a sequence of oracle shard files.
+
+    Each shard may be a dict with an ``"events"`` key or a plain list of events.
+    """
+    events: list[dict] = []
+    for shard_path in shard_paths:
+        shard = torch.load(Path(shard_path), map_location="cpu", weights_only=False)
+        events.extend(shard.get("events", shard if isinstance(shard, list) else []))
+    return events
+
+
+def split_oracle_events(
+    events: list[dict],
+    val_fraction: float = 0.1,
+    split_key: str = "sequence_id",
+    seed: int = 0,
+) -> tuple[list[dict], list[dict]]:
+    """Split *events* (not samples) into train and validation sets.
+
+    Splits at the event level so that downstream token-ranking and count
+    datasets built from the same split share exactly the same events with
+    no data leakage.
+
+    Args:
+        events: List of oracle event dicts.
+        val_fraction: Approximate fraction of events assigned to validation.
+        split_key: ``"sequence_id"`` groups by
+            ``event["sequence_provenance"]["sequence_id"]`` (falls back to
+            ``event_id``); ``"event_id_hash"`` groups by ``event_id``.
+        seed: Seed for deterministic hashing.
+
+    Returns:
+        ``(train_events, val_events)`` tuple.
+    """
+    threshold = int(float(val_fraction) * 10000)
+    train: list[dict] = []
+    val: list[dict] = []
+    for event in events:
+        if split_key == "sequence_id":
+            prov = event.get("sequence_provenance") or {}
+            key = str(prov.get("sequence_id") or event.get("event_id") or "")
+        elif split_key == "event_id_hash":
+            key = str(event.get("event_id") or "")
+        else:
+            raise ValueError(f"Unsupported split_key={split_key}")
+        target = val if _stable_bucket(key, seed=seed) < threshold else train
+        target.append(event)
+    return train, val
 
 
 class CounterfactualOracleDataset(Dataset):
@@ -34,6 +100,7 @@ class CounterfactualOracleDataset(Dataset):
         shard_paths: Sequence[str | Path],
         min_loss_gap: float = 0.0,
         event_types: Sequence[str] | None = None,
+        fifo_token_pair_mode: str = "any",
     ) -> None:
         self.min_loss_gap = float(min_loss_gap)
         if event_types is not None:
@@ -43,12 +110,51 @@ class CounterfactualOracleDataset(Dataset):
                 raise ValueError(f"Unsupported event types: {unsupported}")
         else:
             self.event_types = self.SUPPORTED_EVENT_TYPES
-        self.samples = []
+        if fifo_token_pair_mode not in ("any", "same_keep_count"):
+            raise ValueError(
+                f"fifo_token_pair_mode must be 'any' or 'same_keep_count', "
+                f"got '{fifo_token_pair_mode}'"
+            )
+        self.fifo_token_pair_mode = fifo_token_pair_mode
+        self.samples: list[dict] = []
         for shard_path in shard_paths:
             shard = torch.load(Path(shard_path), map_location="cpu", weights_only=False)
             events = shard.get("events", shard if isinstance(shard, list) else [])
             for event in events:
                 self._append_event_pairs(event)
+
+    @classmethod
+    def from_events(
+        cls,
+        events: list[dict],
+        min_loss_gap: float = 0.0,
+        event_types: Sequence[str] | None = None,
+        fifo_token_pair_mode: str = "any",
+    ) -> "CounterfactualOracleDataset":
+        """Build a dataset from a pre-loaded list of events.
+
+        Avoids re-reading from disk.  Useful when events have already been
+        loaded and split via :func:`split_oracle_events`.
+        """
+        dataset = cls.__new__(cls)
+        dataset.min_loss_gap = float(min_loss_gap)
+        if event_types is not None:
+            dataset.event_types = set(event_types)
+            unsupported = dataset.event_types - cls.SUPPORTED_EVENT_TYPES
+            if unsupported:
+                raise ValueError(f"Unsupported event types: {unsupported}")
+        else:
+            dataset.event_types = cls.SUPPORTED_EVENT_TYPES
+        if fifo_token_pair_mode not in ("any", "same_keep_count"):
+            raise ValueError(
+                f"fifo_token_pair_mode must be 'any' or 'same_keep_count', "
+                f"got '{fifo_token_pair_mode}'"
+            )
+        dataset.fifo_token_pair_mode = fifo_token_pair_mode
+        dataset.samples = []
+        for event in events:
+            dataset._append_event_pairs(event)
+        return dataset
 
     def _append_event_pairs(self, event: dict) -> None:
         # v2: Filter by event_type
@@ -72,30 +178,72 @@ class CounterfactualOracleDataset(Dataset):
         event_id = event.get("event_id", "")
         sequence_provenance = event.get("sequence_provenance")
 
-        for better_idx, better_subset in enumerate(subsets):
-            for worse_idx, worse_subset in enumerate(subsets):
-                better_loss = float(better_subset["loss"])
-                worse_loss = float(worse_subset["loss"])
-                target_margin = worse_loss - better_loss
-                if target_margin <= 0.0 or target_margin < self.min_loss_gap:
-                    continue
-                self.samples.append(
-                    {
-                        "event_id": event_id,
-                        "event_type": event_type,
-                        "layer_id": layer_id,
-                        "score_state": score_state,
-                        "metadata_features": metadata_features,
-                        "better_mask": _indices_to_mask(better_subset["keep_indices"], num_tokens),
-                        "worse_mask": _indices_to_mask(worse_subset["keep_indices"], num_tokens),
-                        "better_loss": better_loss,
-                        "worse_loss": worse_loss,
-                        "target_margin": target_margin,
-                        "better_target": (loss_max - better_loss) / denom,
-                        "worse_target": (loss_max - worse_loss) / denom,
-                        "sequence_provenance": sequence_provenance,
-                    }
-                )
+        # When same_keep_count mode is active for fifo_topk, group subsets
+        # by keep_count so that pairs are only formed within the same group.
+        if self.fifo_token_pair_mode == "same_keep_count" and event_type == "fifo_topk":
+            event_keep_count = event.get("keep_count")
+            groups: dict[int, list[tuple[int, dict]]] = defaultdict(list)
+            for idx, subset in enumerate(subsets):
+                kc = subset.get("keep_count", event_keep_count)
+                if kc is not None:
+                    groups[int(kc)].append((idx, subset))
+            # Generate pairs within each keep_count group
+            for _kc, group_members in groups.items():
+                for better_pos, (better_idx, better_subset) in enumerate(group_members):
+                    for worse_pos, (worse_idx, worse_subset) in enumerate(group_members):
+                        if better_pos == worse_pos:
+                            continue
+                        self._maybe_append_pair(
+                            better_subset, worse_subset, event_id, event_type,
+                            layer_id, score_state, metadata_features, num_tokens,
+                            loss_max, denom, sequence_provenance,
+                        )
+        else:
+            # Default "any" mode: all pairwise combinations
+            for better_idx, better_subset in enumerate(subsets):
+                for worse_idx, worse_subset in enumerate(subsets):
+                    self._maybe_append_pair(
+                        better_subset, worse_subset, event_id, event_type,
+                        layer_id, score_state, metadata_features, num_tokens,
+                        loss_max, denom, sequence_provenance,
+                    )
+
+    def _maybe_append_pair(
+        self,
+        better_subset: dict,
+        worse_subset: dict,
+        event_id: str,
+        event_type: str,
+        layer_id: int,
+        score_state: Tensor,
+        metadata_features: Tensor,
+        num_tokens: int,
+        loss_max: float,
+        denom: float,
+        sequence_provenance: dict | None,
+    ) -> None:
+        better_loss = float(better_subset["loss"])
+        worse_loss = float(worse_subset["loss"])
+        target_margin = worse_loss - better_loss
+        if target_margin <= 0.0 or target_margin < self.min_loss_gap:
+            return
+        self.samples.append(
+            {
+                "event_id": event_id,
+                "event_type": event_type,
+                "layer_id": layer_id,
+                "score_state": score_state,
+                "metadata_features": metadata_features,
+                "better_mask": _indices_to_mask(better_subset["keep_indices"], num_tokens),
+                "worse_mask": _indices_to_mask(worse_subset["keep_indices"], num_tokens),
+                "better_loss": better_loss,
+                "worse_loss": worse_loss,
+                "target_margin": target_margin,
+                "better_target": (loss_max - better_loss) / denom,
+                "worse_target": (loss_max - worse_loss) / denom,
+                "sequence_provenance": sequence_provenance,
+            }
+        )
 
     def __len__(self) -> int:
         return len(self.samples)
@@ -176,6 +324,35 @@ class FifoCountDataset(Dataset):
                 f"demoted_indices; falling back to full cache tokens.",
                 stacklevel=2,
             )
+
+    @classmethod
+    def from_events(
+        cls,
+        events: list[dict],
+        count_candidates: Sequence[int] = (0, 8, 16, 32, 64, 128),
+        label_reduction: str = "min",
+    ) -> "FifoCountDataset":
+        """Build a dataset from a pre-loaded list of events.
+
+        Avoids re-reading from disk.  Useful when events have already been
+        loaded and split via :func:`split_oracle_events`.
+        """
+        dataset = cls.__new__(cls)
+        if label_reduction not in ("min", "mean"):
+            raise ValueError(f"label_reduction must be 'min' or 'mean', got '{label_reduction}'")
+        dataset.count_candidates = list(count_candidates)
+        dataset.label_reduction = label_reduction
+        dataset._old_shard_warnings = 0
+        dataset.samples: list[dict] = []
+        for event in events:
+            dataset._append_event(event)
+        if dataset._old_shard_warnings > 0:
+            warnings.warn(
+                f"FifoCountDataset: {dataset._old_shard_warnings} events lacked "
+                f"demoted_indices; falling back to full cache tokens.",
+                stacklevel=2,
+            )
+        return dataset
 
     def _append_event(self, event: dict) -> None:
         event_type = str(event.get("event_type", ""))
