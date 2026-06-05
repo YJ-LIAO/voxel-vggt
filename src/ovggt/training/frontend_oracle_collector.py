@@ -13,7 +13,7 @@ import json
 import os
 import signal
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -88,7 +88,7 @@ class FrontendOracleCollectorConfig:
     max_events: int = 64
     num_samples: int = 8
     oracle_window: int = 4
-    device: str = "cuda" if torch.cuda.is_available() else "cpu"
+    device: str = field(default_factory=lambda: "cuda" if torch.cuda.is_available() else "cpu")
     seed: int = 0
     teacher_checkpoint: str | None = None
     student_checkpoint: str | None = None
@@ -127,6 +127,14 @@ class FrontendOracleCollectorConfig:
     probe_output_json: str | None = None
     event_type_quotas: dict[str, int] | None = None
     quota_fill_remaining: bool = False
+    # --- Keyframe/anchor overrides for oracle collection only ---
+    oracle_anchor_interval: int | None = None
+    oracle_max_anchors: int | None = None
+    # --- Layer and frame coverage controls ---
+    oracle_layer_schedule: str = "default"
+    oracle_layer_buckets: str | Sequence[Sequence[int]] | None = None
+    oracle_layer_schedule_seed: int = 0
+    frame_buckets: str | Sequence[Sequence[int]] | None = None
 
 
 def default_oracle_log(message: str) -> None:
@@ -288,6 +296,10 @@ class CounterfactualEvictionProbe:
         sequence_provenance: dict[int, dict] | None = None,
         layers_per_frame: int = 0,
         num_layers: int | None = None,
+        layer_schedule: str = "default",
+        layer_buckets: Sequence[Sequence[int]] | str | None = None,
+        layer_schedule_seed: int = 0,
+        max_subsets_per_eviction_event: int = 8,
     ) -> None:
         self.num_samples = int(num_samples)
         self.oracle_window = int(oracle_window)
@@ -297,6 +309,10 @@ class CounterfactualEvictionProbe:
         self.sequence_provenance = dict(sequence_provenance or {})
         self.layers_per_frame = int(layers_per_frame)
         self.num_layers = None if num_layers is None else int(num_layers)
+        self.layer_schedule = str(layer_schedule or "default")
+        self.layer_buckets = layer_buckets
+        self.layer_schedule_seed = int(layer_schedule_seed)
+        self.max_subsets_per_eviction_event = int(max_subsets_per_eviction_event)
         self.events: list[dict] = []
 
     def on_eviction_candidate(
@@ -309,11 +325,14 @@ class CounterfactualEvictionProbe:
     ) -> None:
         if self.max_events is not None and len(self.events) >= self.max_events:
             return
-        if not should_record_oracle_layer(
+        if not should_record_oracle_layer_with_schedule(
             layer_id=layer_id,
             frame_id=frame_id,
+            schedule=self.layer_schedule,
             layers_per_frame=self.layers_per_frame,
             num_layers=self.num_layers,
+            layer_buckets=self.layer_buckets,
+            seed=self.layer_schedule_seed,
         ):
             return
         if cache_state.score_state is None or cache_state.metadata is None:
@@ -323,15 +342,21 @@ class CounterfactualEvictionProbe:
         if num_tokens <= budget:
             return
 
+        global_batch_index = int(batch_index)
+        cache_batch_size = int(cache_state.metadata.anchor_slot.shape[0])
+        local_batch_index = 0 if cache_batch_size == 1 else global_batch_index
+        if local_batch_index < 0 or local_batch_index >= cache_batch_size:
+            return
+
         protected_count = min(max(int(cache_state.protected_count), 0), num_tokens)
         protected_indices = torch.arange(protected_count, dtype=torch.long)
-        score_state = _select_cache_batch(cache_state.score_state).detach().cpu().float()
+        score_state = _select_cache_batch(cache_state.score_state, local_batch_index).detach().cpu().float()
         metadata_features = _select_batch(
             cache_state.build_scorer_metadata_features(current_frame_id=int(frame_id)),
-            0,
+            local_batch_index,
         ).detach().cpu().float()
-        base_scores = _select_cache_batch(cache_state.metadata.importance).detach().cpu().float()
-        token_frame_ids = _select_cache_batch(cache_state.metadata.frame_id).detach().cpu().long()
+        base_scores = _select_cache_batch(cache_state.metadata.importance, local_batch_index).detach().cpu().float()
+        token_frame_ids = _select_cache_batch(cache_state.metadata.frame_id, local_batch_index).detach().cpu().long()
         group_ids = self._group_ids_for_cache(cache_state, batch_index=batch_index, frame_id=int(frame_id))
         candidate_subsets = sample_group_retention_subsets(
             num_tokens=num_tokens,
@@ -343,6 +368,8 @@ class CounterfactualEvictionProbe:
             seed=self.seed + len(self.events),
         )
         candidate_subsets = deduplicate_keep_subsets(candidate_subsets)
+        if self.max_subsets_per_eviction_event > 0:
+            candidate_subsets = candidate_subsets[: self.max_subsets_per_eviction_event]
         if len(candidate_subsets) < 2:
             return
 
@@ -375,12 +402,17 @@ class CounterfactualEvictionProbe:
         metadata = cache_state.metadata
         if metadata is None:
             return None
+        global_batch_index = int(batch_index)
+        cache_batch_size = int(metadata.anchor_slot.shape[0])
+        local_batch_index = 0 if cache_batch_size == 1 else global_batch_index
+        if local_batch_index < 0 or local_batch_index >= cache_batch_size:
+            return None
         active_xyz = cache_state._project_slot_local_xyz_to_active(
             metadata.slot_local_xyz,
             metadata.slot_id,
         )
-        xyz = _select_cache_batch(active_xyz)
-        frame_ids = _select_cache_batch(metadata.frame_id).long()
+        xyz = _select_cache_batch(active_xyz, local_batch_index)
+        frame_ids = _select_cache_batch(metadata.frame_id, local_batch_index).long()
         xyz_valid = torch.isfinite(xyz).all(dim=-1)
         voxel = torch.floor(torch.nan_to_num(xyz, nan=0.0) / 0.25).long()
         hashed = (
@@ -415,6 +447,9 @@ class CounterfactualDedupProbe:
         num_layers: int | None = None,
         voxel_size: float = 0.25,
         max_subsets_per_dedup_event: int = 8,
+        layer_schedule: str = "default",
+        layer_buckets: Sequence[Sequence[int]] | str | None = None,
+        layer_schedule_seed: int = 0,
     ) -> None:
         self.num_samples = int(num_samples)
         self.oracle_window = int(oracle_window)
@@ -426,6 +461,9 @@ class CounterfactualDedupProbe:
         self.num_layers = None if num_layers is None else int(num_layers)
         self.voxel_size = float(voxel_size)
         self.max_subsets_per_dedup_event = int(max_subsets_per_dedup_event)
+        self.layer_schedule = str(layer_schedule or "default")
+        self.layer_buckets = layer_buckets
+        self.layer_schedule_seed = int(layer_schedule_seed)
         self.events: list[dict] = []
 
     def on_dedup_candidate(
@@ -442,11 +480,14 @@ class CounterfactualDedupProbe:
         self._last_policy_keep_indices = policy_keep_indices
         if self.max_events is not None and len(self.events) >= self.max_events:
             return
-        if not should_record_oracle_layer(
+        if not should_record_oracle_layer_with_schedule(
             layer_id=layer_id,
             frame_id=frame_id,
+            schedule=self.layer_schedule,
             layers_per_frame=self.layers_per_frame,
             num_layers=self.num_layers,
+            layer_buckets=self.layer_buckets,
+            seed=self.layer_schedule_seed,
         ):
             return
         if cache_state.score_state is None or cache_state.metadata is None:
@@ -595,6 +636,9 @@ class CounterfactualFifoTopKProbe:
         num_layers: int | None = None,
         count_candidates: Sequence[int] | None = None,
         max_subsets_per_fifo_event: int = 8,
+        layer_schedule: str = "default",
+        layer_buckets: Sequence[Sequence[int]] | str | None = None,
+        layer_schedule_seed: int = 0,
     ) -> None:
         self.num_samples = int(num_samples)
         self.oracle_window = int(oracle_window)
@@ -606,6 +650,9 @@ class CounterfactualFifoTopKProbe:
         self.num_layers = None if num_layers is None else int(num_layers)
         self.count_candidates = None if count_candidates is None else tuple(int(x) for x in count_candidates)
         self.max_subsets_per_fifo_event = int(max_subsets_per_fifo_event)
+        self.layer_schedule = str(layer_schedule or "default")
+        self.layer_buckets = layer_buckets
+        self.layer_schedule_seed = int(layer_schedule_seed)
         self.events: list[dict] = []
 
     def on_fifo_topk_candidate(
@@ -629,11 +676,14 @@ class CounterfactualFifoTopKProbe:
         """
         if self.max_events is not None and len(self.events) >= self.max_events:
             return
-        if not should_record_oracle_layer(
+        if not should_record_oracle_layer_with_schedule(
             layer_id=layer_id,
             frame_id=frame_id,
+            schedule=self.layer_schedule,
             layers_per_frame=self.layers_per_frame,
             num_layers=self.num_layers,
+            layer_buckets=self.layer_buckets,
+            seed=self.layer_schedule_seed,
         ):
             return
         if cache_state.score_state is None or cache_state.metadata is None:
@@ -643,6 +693,8 @@ class CounterfactualFifoTopKProbe:
         global_batch_index = int(batch_index)
         cache_batch_size = int(metadata.anchor_slot.shape[0])
         b_idx = 0 if cache_batch_size == 1 else global_batch_index
+        if b_idx < 0 or b_idx >= cache_batch_size:
+            return
 
         # Use pre-computed indices when available; otherwise recompute for
         # backward compatibility with older callers.
@@ -1023,6 +1075,108 @@ def should_record_oracle_layer(
     return int(layer_id) in selected
 
 
+def _parse_int_ranges(value) -> list[tuple[int, int]] | None:
+    """Parse JSON/list range specs like [[0, 5], [6, 11]]."""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        if not value.strip():
+            return None
+        value = json.loads(value)
+    ranges: list[tuple[int, int]] = []
+    for item in value:
+        if len(item) != 2:
+            raise ValueError(f"Expected [lo, hi] range, got {item!r}")
+        lo, hi = int(item[0]), int(item[1])
+        if hi < lo:
+            lo, hi = hi, lo
+        ranges.append((lo, hi))
+    return ranges
+
+
+def should_record_oracle_layer_with_schedule(
+    layer_id: int,
+    frame_id: int,
+    schedule: str = "default",
+    num_layers: int = 24,
+    layers_per_frame: int = 2,
+    layer_buckets: Sequence[Sequence[int]] | str | None = None,
+    seed: int = 0,
+) -> bool:
+    """Determine whether a layer should be recorded for an oracle probe."""
+    schedule = str(schedule or "default")
+    if schedule == "default":
+        return should_record_oracle_layer(
+            layer_id=layer_id,
+            frame_id=frame_id,
+            layers_per_frame=layers_per_frame,
+            num_layers=num_layers,
+        )
+
+    layer_id = int(layer_id)
+    frame_id = int(frame_id)
+    num_layers = int(num_layers or 0)
+    layers_per_frame = int(layers_per_frame)
+
+    if schedule == "rotating_stride":
+        if num_layers <= 0 or layers_per_frame <= 0:
+            return True
+        stride = max(num_layers // layers_per_frame, 1)
+        offset = frame_id % stride
+        selected = {(offset + idx * stride) % num_layers for idx in range(layers_per_frame)}
+        return layer_id in selected
+
+    ranges = _parse_int_ranges(layer_buckets)
+    if schedule == "random_bucket":
+        if num_layers <= 0:
+            return True
+        if ranges is None:
+            ranges = [
+                (start, min(start + 5, num_layers - 1))
+                for start in range(0, num_layers, 6)
+            ]
+        selected: set[int] = set()
+        for bucket_idx, (lo, hi) in enumerate(ranges):
+            lo = max(0, min(int(lo), num_layers - 1))
+            hi = max(0, min(int(hi), num_layers - 1))
+            if hi < lo:
+                continue
+            width = hi - lo + 1
+            choice = lo + ((int(seed) + frame_id * 1009 + bucket_idx * 9176) % width)
+            selected.add(choice)
+        return layer_id in selected
+
+    if schedule == "fixed_buckets":
+        if ranges is None:
+            return True
+        return any(int(lo) <= layer_id <= int(hi) for lo, hi in ranges)
+
+    return True
+
+
+def _frame_bucket_id(frame_id: int, frame_buckets: Sequence[Sequence[int]] | str | None) -> int:
+    ranges = _parse_int_ranges(frame_buckets)
+    if not ranges:
+        return int(frame_id)
+    frame_id = int(frame_id)
+    for idx, (lo, hi) in enumerate(ranges):
+        if int(lo) <= frame_id <= int(hi):
+            return idx
+    return len(ranges)
+
+
+def _oracle_anchor_kwargs(
+    oracle_anchor_interval: int | None = None,
+    oracle_max_anchors: int | None = None,
+) -> dict:
+    kwargs = {}
+    if oracle_anchor_interval is not None:
+        kwargs["oracle_anchor_interval"] = int(oracle_anchor_interval)
+    if oracle_max_anchors is not None:
+        kwargs["oracle_max_anchors"] = int(oracle_max_anchors)
+    return kwargs
+
+
 def cuda_memory_log_suffix() -> str:
     if not torch.cuda.is_available():
         return ""
@@ -1343,6 +1497,7 @@ def _select_oracle_events_quota_stratified(
     layer_bucket_width: int,
     event_type_quotas: dict[str, int],
     quota_fill_remaining: bool = False,
+    frame_buckets: Sequence[Sequence[int]] | str | None = None,
 ) -> list[dict]:
     """Quota-first stratified selection: fill scarce event types before abundant ones."""
     if not candidate_events or max_events <= 0:
@@ -1371,7 +1526,7 @@ def _select_oracle_events_quota_stratified(
             fid = int(event.get("frame_id", 0))
             lid = int(event.get("layer_id", 0))
             bucket = lid // layer_bucket_width
-            key = (fid, bucket)
+            key = (_frame_bucket_id(fid, frame_buckets), bucket)
             groups.setdefault(key, []).append(event)
         group_queues = [list(groups[k]) for k in sorted(groups.keys())]
         type_selected = 0
@@ -1387,7 +1542,7 @@ def _select_oracle_events_quota_stratified(
                 event = queue.pop(0)
                 frame_id = int(event.get("frame_id", 0))
                 if per_frame_counts.get(frame_id, 0) >= max_events_per_frame:
-                    next_round.append(queue)
+                    next_round.append([event] + queue)
                     continue
                 selected.append(event)
                 used_ids.add(id(event))
@@ -1406,7 +1561,7 @@ def _select_oracle_events_quota_stratified(
                 fid = int(event.get("frame_id", 0))
                 lid = int(event.get("layer_id", 0))
                 bucket = lid // layer_bucket_width
-                key = (et, fid, bucket)
+                key = (et, _frame_bucket_id(fid, frame_buckets), bucket)
                 fill_groups.setdefault(key, []).append(event)
             group_queues = [list(fill_groups[k]) for k in sorted(fill_groups.keys())]
             while group_queues and len(selected) < max_events:
@@ -1419,7 +1574,7 @@ def _select_oracle_events_quota_stratified(
                     event = queue.pop(0)
                     frame_id = int(event.get("frame_id", 0))
                     if per_frame_counts.get(frame_id, 0) >= max_events_per_frame:
-                        next_round.append(queue)
+                        next_round.append([event] + queue)
                         continue
                     selected.append(event)
                     per_frame_counts[frame_id] = per_frame_counts.get(frame_id, 0) + 1
@@ -1437,6 +1592,7 @@ def select_oracle_events(
     layer_bucket_width: int = 6,
     event_type_quotas: dict[str, int] | None = None,
     quota_fill_remaining: bool = False,
+    frame_buckets: Sequence[Sequence[int]] | str | None = None,
 ) -> list[dict]:
     if policy == "quota_stratified":
         if event_type_quotas is None:
@@ -1449,6 +1605,7 @@ def select_oracle_events(
                 layer_bucket_width=layer_bucket_width,
                 event_type_quotas=event_type_quotas,
                 quota_fill_remaining=quota_fill_remaining,
+                frame_buckets=frame_buckets,
             )
     if policy == "first_n":
         return candidate_events[:max_events]
@@ -1467,7 +1624,7 @@ def select_oracle_events(
             event = queue.pop(0)
             frame_id = int(event.get("frame_id", 0))
             if per_frame_counts.get(frame_id, 0) >= max_events_per_frame:
-                next_round.append(queue)
+                next_round.append([event] + queue)
                 continue
             selected.append(event)
             per_frame_counts[frame_id] = per_frame_counts.get(frame_id, 0) + 1
@@ -1554,6 +1711,8 @@ def collect_oracle_shard_from_config(collector_cfg: FrontendOracleCollectorConfi
     fifo_count_candidates = parse_fifo_count_candidates_for_oracle(
         collector_cfg.fifo_count_candidates_for_oracle
     )
+    oracle_layer_buckets = _parse_int_ranges(collector_cfg.oracle_layer_buckets)
+    frame_buckets = _parse_int_ranges(collector_cfg.frame_buckets)
     probe_diagnostics_list: list[dict] = []
     events = collect_oracle_events_from_loader(
         model=model,
@@ -1585,6 +1744,7 @@ def collect_oracle_shard_from_config(collector_cfg: FrontendOracleCollectorConfi
         stratified_layer_bucket_width=collector_cfg.stratified_layer_bucket_width,
         store_replay_payload=collector_cfg.store_replay_payload,
         max_subsets_per_dedup_event=collector_cfg.max_subsets_per_dedup_event,
+        max_subsets_per_eviction_event=collector_cfg.max_subsets_per_eviction_event,
         dataloader_timeout=collector_cfg.dataloader_timeout,
         fifo_count_candidates=fifo_count_candidates,
         max_subsets_per_fifo_event=collector_cfg.max_subsets_per_fifo_event,
@@ -1592,6 +1752,12 @@ def collect_oracle_shard_from_config(collector_cfg: FrontendOracleCollectorConfi
         probe_diagnostics_list=probe_diagnostics_list,
         event_type_quotas=collector_cfg.event_type_quotas,
         quota_fill_remaining=collector_cfg.quota_fill_remaining,
+        oracle_anchor_interval=collector_cfg.oracle_anchor_interval,
+        oracle_max_anchors=collector_cfg.oracle_max_anchors,
+        oracle_layer_schedule=collector_cfg.oracle_layer_schedule,
+        oracle_layer_buckets=oracle_layer_buckets,
+        oracle_layer_schedule_seed=collector_cfg.oracle_layer_schedule_seed,
+        frame_buckets=frame_buckets,
     )
     shard = dict(base_shard)
     shard["events"] = events
@@ -1631,6 +1797,7 @@ def collect_oracle_events_from_loader(
     stratified_layer_bucket_width: int = 6,
     store_replay_payload: bool = False,
     max_subsets_per_dedup_event: int = 8,
+    max_subsets_per_eviction_event: int = 8,
     dataloader_timeout: int = 600,
     fifo_count_candidates: Sequence[int] | None = None,
     max_subsets_per_fifo_event: int = 8,
@@ -1638,6 +1805,12 @@ def collect_oracle_events_from_loader(
     probe_diagnostics_list: list[dict] | None = None,
     event_type_quotas: dict[str, int] | None = None,
     quota_fill_remaining: bool = False,
+    oracle_anchor_interval: int | None = None,
+    oracle_max_anchors: int | None = None,
+    oracle_layer_schedule: str = "default",
+    oracle_layer_buckets: Sequence[Sequence[int]] | str | None = None,
+    oracle_layer_schedule_seed: int = 0,
+    frame_buckets: Sequence[Sequence[int]] | str | None = None,
 ) -> list[dict]:
     events: list[dict] = []
     max_batches_int = int(max_batches)
@@ -1729,12 +1902,19 @@ def collect_oracle_events_from_loader(
             stratified_layer_bucket_width=stratified_layer_bucket_width,
             store_replay_payload=store_replay_payload,
             max_subsets_per_dedup_event=max_subsets_per_dedup_event,
+            max_subsets_per_eviction_event=max_subsets_per_eviction_event,
             fifo_count_candidates=fifo_count_candidates,
             max_subsets_per_fifo_event=max_subsets_per_fifo_event,
             probe_only=probe_only,
             probe_diagnostics_sink=probe_diagnostics_list,
             event_type_quotas=event_type_quotas,
             quota_fill_remaining=quota_fill_remaining,
+            oracle_anchor_interval=oracle_anchor_interval,
+            oracle_max_anchors=oracle_max_anchors,
+            oracle_layer_schedule=oracle_layer_schedule,
+            oracle_layer_buckets=oracle_layer_buckets,
+            oracle_layer_schedule_seed=oracle_layer_schedule_seed,
+            frame_buckets=frame_buckets,
         )
         for event in batch_events:
             if not any(event is collected for collected in collected_batch_events):
@@ -1764,7 +1944,7 @@ def _build_probe_diagnostics(
     def _histogram(items: list[dict], key: str, transform=None) -> dict[str, int]:
         h: dict[str, int] = {}
         for item in items:
-            val = transform(item[key]) if transform else item.get(key, "unknown")
+            val = transform(item.get(key, 0)) if transform else item.get(key, "unknown")
             val = str(val)
             h[val] = h.get(val, 0) + 1
         return dict(sorted(h.items()))
@@ -1811,12 +1991,19 @@ def collect_oracle_events_from_sequence(
     stratified_layer_bucket_width: int = 6,
     store_replay_payload: bool = False,
     max_subsets_per_dedup_event: int = 8,
+    max_subsets_per_eviction_event: int = 8,
     fifo_count_candidates: Sequence[int] | None = None,
     max_subsets_per_fifo_event: int = 8,
     probe_only: bool = False,
     probe_diagnostics_sink: list[dict] | None = None,
     event_type_quotas: dict[str, int] | None = None,
     quota_fill_remaining: bool = False,
+    oracle_anchor_interval: int | None = None,
+    oracle_max_anchors: int | None = None,
+    oracle_layer_schedule: str = "default",
+    oracle_layer_buckets: Sequence[Sequence[int]] | str | None = None,
+    oracle_layer_schedule_seed: int = 0,
+    frame_buckets: Sequence[Sequence[int]] | str | None = None,
 ) -> list[dict]:
     if max_events <= 0:
         return []
@@ -1833,6 +2020,10 @@ def collect_oracle_events_from_sequence(
         sequence_provenance=sequence_provenance,
         layers_per_frame=layers_per_frame,
         num_layers=num_layers,
+        layer_schedule=oracle_layer_schedule,
+        layer_buckets=oracle_layer_buckets,
+        layer_schedule_seed=oracle_layer_schedule_seed,
+        max_subsets_per_eviction_event=max_subsets_per_eviction_event,
     )
     dedup_probe = CounterfactualDedupProbe(
         num_samples=num_samples,
@@ -1845,6 +2036,9 @@ def collect_oracle_events_from_sequence(
         num_layers=num_layers,
         voxel_size=0.25,
         max_subsets_per_dedup_event=max_subsets_per_dedup_event,
+        layer_schedule=oracle_layer_schedule,
+        layer_buckets=oracle_layer_buckets,
+        layer_schedule_seed=oracle_layer_schedule_seed,
     )
     fifo_probe = CounterfactualFifoTopKProbe(
         num_samples=num_samples,
@@ -1857,16 +2051,22 @@ def collect_oracle_events_from_sequence(
         num_layers=num_layers,
         count_candidates=fifo_count_candidates,
         max_subsets_per_fifo_event=max_subsets_per_fifo_event,
+        layer_schedule=oracle_layer_schedule,
+        layer_buckets=oracle_layer_buckets,
+        layer_schedule_seed=oracle_layer_schedule_seed,
     )
     probe_started = time.monotonic()
-    _run_frontend_with_probe(model, frames, probe, cache_results=False,
-                              dedup_probe=dedup_probe, fifo_probe=fifo_probe)
+    _run_frontend_with_probe(
+        model, frames, probe, cache_results=False,
+        dedup_probe=dedup_probe, fifo_probe=fifo_probe,
+        **_oracle_anchor_kwargs(oracle_anchor_interval, oracle_max_anchors),
+    )
     probe_elapsed = time.monotonic() - probe_started
     candidate_events = [
         event
         for event in probe.events
         if int(event["frame_id"]) + 1 < len(frames)
-    ][:candidate_cap]
+    ]
     # Combine dedup and FIFO events into candidate_events
     dedup_events = [
         event
@@ -1880,6 +2080,7 @@ def collect_oracle_events_from_sequence(
     ]
     candidate_events.extend(dedup_events)
     candidate_events.extend(fifo_events)
+    candidate_events = candidate_events[:candidate_cap]
     candidate_events = select_oracle_events(
         candidate_events,
         max_events=max_events,
@@ -1888,6 +2089,7 @@ def collect_oracle_events_from_sequence(
         layer_bucket_width=stratified_layer_bucket_width,
         event_type_quotas=event_type_quotas,
         quota_fill_remaining=quota_fill_remaining,
+        frame_buckets=frame_buckets,
     )
     if log_fn is not None:
         log_fn(
@@ -1964,6 +2166,8 @@ def collect_oracle_events_from_sequence(
             log_every_subsets=log_every_subsets,
             subset_replay_batch_size=subset_replay_batch_size,
             store_replay_payload=store_replay_payload,
+            oracle_anchor_interval=oracle_anchor_interval,
+            oracle_max_anchors=oracle_max_anchors,
         )
         if measured_event is not None:
             measured_events.append(measured_event)
@@ -2084,6 +2288,8 @@ def measure_counterfactual_event(
     log_every_subsets: int = 1,
     subset_replay_batch_size: int = 1,
     store_replay_payload: bool = False,
+    oracle_anchor_interval: int | None = None,
+    oracle_max_anchors: int | None = None,
 ) -> dict:
     event_started = time.monotonic()
     measured_subsets = []
@@ -2096,6 +2302,13 @@ def measure_counterfactual_event(
     log_every = max(int(log_every_subsets), 0)
     replay_batch_size = max(int(subset_replay_batch_size), 1)
     event_type = str(event.get("event_type", "eviction"))
+    if event_type != "dedup" and replay_batch_size > 1:
+        if log_fn is not None:
+            log_fn(
+                f"{event.get('event_id', '<unknown>')}: using serial replay for "
+                f"{event_type} event; batched eviction replay is disabled"
+            )
+        replay_batch_size = 1
 
     def append_measured_subset(subset: dict, keep_indices: torch.Tensor, predictions: Sequence[dict]) -> None:
         nonlocal target_total_sec, loss_total_sec
@@ -2135,11 +2348,18 @@ def measure_counterfactual_event(
             if event_type == "dedup":
                 replay_probe = ReplayDedupKeepSetProbe(event, keep_indices)
                 replay_started = time.monotonic()
-                outputs = _run_frontend_with_probe(model, frames[:stop], None, cache_results=True, dedup_replay_probe=replay_probe)
+                outputs = _run_frontend_with_probe(
+                    model, frames[:stop], None, cache_results=True,
+                    dedup_replay_probe=replay_probe,
+                    **_oracle_anchor_kwargs(oracle_anchor_interval, oracle_max_anchors),
+                )
             else:
                 replay_probe = ReplayKeepSetProbe(event, keep_indices)
                 replay_started = time.monotonic()
-                outputs = _run_frontend_with_probe(model, frames[:stop], replay_probe, cache_results=True)
+                outputs = _run_frontend_with_probe(
+                    model, frames[:stop], replay_probe, cache_results=True,
+                    **_oracle_anchor_kwargs(oracle_anchor_interval, oracle_max_anchors),
+                )
             replay_elapsed = time.monotonic() - replay_started
             replay_total_sec += replay_elapsed
             log_replay_timing(
@@ -2183,6 +2403,7 @@ def measure_counterfactual_event(
                 outputs = _run_frontend_with_probe(
                     model, replay_frames, None, cache_results=True,
                     dedup_replay_probe=dedup_replay_probe,
+                    **_oracle_anchor_kwargs(oracle_anchor_interval, oracle_max_anchors),
                 )
                 replay_elapsed = time.monotonic() - replay_started
                 replay_total_sec += replay_elapsed
@@ -2217,6 +2438,8 @@ def measure_counterfactual_event(
                         subset_offset=chunk_start,
                         total_subsets=len(subsets),
                         store_replay_payload=store_replay_payload,
+                        oracle_anchor_interval=oracle_anchor_interval,
+                        oracle_max_anchors=oracle_max_anchors,
                     )
                     if serial_subsets is None:
                         if log_fn is not None:
@@ -2242,6 +2465,7 @@ def measure_counterfactual_event(
                 replay_frames,
                 replay_probe,
                 cache_results=True,
+                **_oracle_anchor_kwargs(oracle_anchor_interval, oracle_max_anchors),
             )
             replay_elapsed = time.monotonic() - replay_started
             replay_total_sec += replay_elapsed
@@ -2275,6 +2499,8 @@ def measure_counterfactual_event(
                     subset_offset=chunk_start,
                     total_subsets=len(subsets),
                     store_replay_payload=store_replay_payload,
+                    oracle_anchor_interval=oracle_anchor_interval,
+                    oracle_max_anchors=oracle_max_anchors,
                 )
                 if serial_subsets is None:
                     if log_fn is not None:
@@ -2326,6 +2552,8 @@ def measure_counterfactual_subset_serial(
     subset_offset: int = 0,
     total_subsets: int | None = None,
     store_replay_payload: bool = False,
+    oracle_anchor_interval: int | None = None,
+    oracle_max_anchors: int | None = None,
 ) -> list[dict] | None:
     measured_subsets = []
     total = len(subsets) if total_subsets is None else int(total_subsets)
@@ -2340,10 +2568,17 @@ def measure_counterfactual_subset_serial(
         keep_indices = torch.as_tensor(subset["keep_indices"], dtype=torch.long)
         if event_type == "dedup":
             replay_probe = ReplayDedupKeepSetProbe(event, keep_indices)
-            outputs = _run_frontend_with_probe(model, frames[:stop], None, cache_results=True, dedup_replay_probe=replay_probe)
+            outputs = _run_frontend_with_probe(
+                model, frames[:stop], None, cache_results=True,
+                dedup_replay_probe=replay_probe,
+                **_oracle_anchor_kwargs(oracle_anchor_interval, oracle_max_anchors),
+            )
         else:
             replay_probe = ReplayKeepSetProbe(event, keep_indices)
-            outputs = _run_frontend_with_probe(model, frames[:stop], replay_probe, cache_results=True)
+            outputs = _run_frontend_with_probe(
+                model, frames[:stop], replay_probe, cache_results=True,
+                **_oracle_anchor_kwargs(oracle_anchor_interval, oracle_max_anchors),
+            )
         if not replay_probe.applied:
             if log_fn is not None:
                 log_fn(
@@ -2554,8 +2789,17 @@ def load_callable(path: str) -> Callable:
     return fn
 
 
-def _run_frontend_with_probe(model, frames: Sequence[dict], probe, cache_results: bool,
-                              dedup_probe=None, fifo_probe=None, dedup_replay_probe=None):
+def _run_frontend_with_probe(
+    model,
+    frames: Sequence[dict],
+    probe,
+    cache_results: bool,
+    dedup_probe=None,
+    fifo_probe=None,
+    dedup_replay_probe=None,
+    oracle_anchor_interval: int | None = None,
+    oracle_max_anchors: int | None = None,
+):
     previous_probe = getattr(model, "_oracle_eviction_probe", None)
     previous_dedup = getattr(model, "_oracle_dedup_probe", None)
     previous_fifo = getattr(model, "_oracle_fifo_probe", None)
@@ -2569,12 +2813,17 @@ def _run_frontend_with_probe(model, frames: Sequence[dict], probe, cache_results
     if dedup_replay_probe is not None:
         model._oracle_dedup_replay_probe = dedup_replay_probe
     try:
-        return model.inference(
-            frames,
-            move_to_cpu=False,
-            cache_results=cache_results,
-            return_views=False,
-        )
+        inference_kwargs = {
+            "move_to_cpu": False,
+            "cache_results": cache_results,
+            "return_views": False,
+        }
+        if oracle_anchor_interval is not None:
+            inference_kwargs["history_anchor_strategy"] = "fixed_interval"
+            inference_kwargs["anchor_interval"] = int(oracle_anchor_interval)
+        if oracle_max_anchors is not None:
+            inference_kwargs["max_anchors"] = int(oracle_max_anchors)
+        return model.inference(frames, **inference_kwargs)
     finally:
         _restore_model_runtime_state(model, runtime_snapshot)
         # restore all probes
