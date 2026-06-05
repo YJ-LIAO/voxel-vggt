@@ -1240,6 +1240,10 @@ def load_frontend_oracle_config(config_path: str | Path, num_views: int | None =
         # Merge: base_cfg provides train_dataset / model defaults;
         # cfg (collector yaml) overrides on top.
         cfg = OmegaConf.merge(base_cfg, cfg)
+        # Remove the collector-only key so it doesn't leak into model config
+        if "frontend_config" in cfg:
+            OmegaConf.set_struct(cfg, False)
+            del cfg["frontend_config"]
     if collector_cfg is not None:
         profile = collector_cfg.get("oracle_profile", "real_policy") if hasattr(collector_cfg, "get") else getattr(collector_cfg, "oracle_profile", "real_policy")
         if profile == "low_budget_eviction":
@@ -1490,6 +1494,65 @@ def _group_candidates_for_stratified_selection(
     return [groups[k] for k in sorted(groups.keys())]
 
 
+def _round_robin_select(
+    group_queues: list[list[dict]],
+    max_events: int,
+    max_events_per_frame: int,
+    per_frame_counts: dict[int, int],
+    budget: int | None = None,
+) -> tuple[list[dict], dict[int, int]]:
+    """Round-robin select events from grouped queues, respecting per-frame caps.
+
+    Uses collections.deque for O(1) popleft instead of list.pop(0).
+    Events blocked by per-frame cap are re-queued for the next round.
+
+    Args:
+        group_queues: Lists of candidate events grouped by (frame, layer_bucket, ...).
+        max_events: Total events to select (global cap).
+        max_events_per_frame: Per-frame cap.
+        per_frame_counts: Mutable dict of frame_id -> count already selected (updated in-place).
+        budget: Optional per-type budget cap. If None, uses max_events as cap.
+
+    Returns:
+        (selected_events, per_frame_counts) -- per_frame_counts is the same dict, updated.
+    """
+    from collections import deque
+
+    if budget is None:
+        budget = max_events
+    selected: list[dict] = []
+    deques = [deque(q) for q in group_queues]
+
+    while deques and len(selected) < budget and len(selected) < max_events:
+        next_round: list[deque] = []
+        prev_count = len(selected)
+        for dq in deques:
+            if not dq:
+                continue
+            if len(selected) >= budget:
+                break
+            if len(selected) >= max_events:
+                break
+            event = dq.popleft()
+            frame_id = int(event.get("frame_id", 0))
+            if per_frame_counts.get(frame_id, 0) >= max_events_per_frame:
+                # Re-queue: put event back at front
+                dq.appendleft(event)
+                if dq:
+                    next_round.append(dq)
+                continue
+            selected.append(event)
+            per_frame_counts[frame_id] = per_frame_counts.get(frame_id, 0) + 1
+            if dq:
+                next_round.append(dq)
+        # No progress means all remaining events are blocked by per-frame caps
+        if len(selected) == prev_count:
+            break
+        deques = next_round
+
+    return selected, per_frame_counts
+
+
 def _select_oracle_events_quota_stratified(
     candidate_events: list[dict],
     max_events: int,
@@ -1519,7 +1582,7 @@ def _select_oracle_events_quota_stratified(
         type_budget = min(type_quota, remaining_total)
         if type_budget <= 0:
             continue
-        groups: dict[tuple, list[dict]] = {}
+        type_groups_dict: dict[tuple, list[dict]] = {}
         for event in type_candidates:
             if id(event) in used_ids:
                 continue
@@ -1527,30 +1590,15 @@ def _select_oracle_events_quota_stratified(
             lid = int(event.get("layer_id", 0))
             bucket = lid // layer_bucket_width
             key = (_frame_bucket_id(fid, frame_buckets), bucket)
-            groups.setdefault(key, []).append(event)
-        group_queues = [list(groups[k]) for k in sorted(groups.keys())]
-        type_selected = 0
-        while group_queues and type_selected < type_budget:
-            next_round: list[list[dict]] = []
-            for queue in group_queues:
-                if not queue:
-                    continue
-                if type_selected >= type_budget:
-                    break
-                if len(selected) >= max_events:
-                    break
-                event = queue.pop(0)
-                frame_id = int(event.get("frame_id", 0))
-                if per_frame_counts.get(frame_id, 0) >= max_events_per_frame:
-                    next_round.append([event] + queue)
-                    continue
-                selected.append(event)
-                used_ids.add(id(event))
-                per_frame_counts[frame_id] = per_frame_counts.get(frame_id, 0) + 1
-                type_selected += 1
-                if queue:
-                    next_round.append(queue)
-            group_queues = next_round
+            type_groups_dict.setdefault(key, []).append(event)
+        type_groups = [list(type_groups_dict[k]) for k in sorted(type_groups_dict.keys())]
+        type_selected_events, per_frame_counts = _round_robin_select(
+            type_groups, max_events, max_events_per_frame, per_frame_counts,
+            budget=type_budget,
+        )
+        for ev in type_selected_events:
+            used_ids.add(id(ev))
+        selected.extend(type_selected_events)
     remaining = max_events - len(selected)
     if quota_fill_remaining and remaining > 0:
         leftovers = [e for e in candidate_events if id(e) not in used_ids]
@@ -1563,24 +1611,11 @@ def _select_oracle_events_quota_stratified(
                 bucket = lid // layer_bucket_width
                 key = (et, _frame_bucket_id(fid, frame_buckets), bucket)
                 fill_groups.setdefault(key, []).append(event)
-            group_queues = [list(fill_groups[k]) for k in sorted(fill_groups.keys())]
-            while group_queues and len(selected) < max_events:
-                next_round: list[list[dict]] = []
-                for queue in group_queues:
-                    if not queue:
-                        continue
-                    if len(selected) >= max_events:
-                        break
-                    event = queue.pop(0)
-                    frame_id = int(event.get("frame_id", 0))
-                    if per_frame_counts.get(frame_id, 0) >= max_events_per_frame:
-                        next_round.append([event] + queue)
-                        continue
-                    selected.append(event)
-                    per_frame_counts[frame_id] = per_frame_counts.get(frame_id, 0) + 1
-                    if queue:
-                        next_round.append(queue)
-                group_queues = next_round
+            fill_group_queues = [list(fill_groups[k]) for k in sorted(fill_groups.keys())]
+            fill_selected, per_frame_counts = _round_robin_select(
+                fill_group_queues, max_events, max_events_per_frame, per_frame_counts,
+            )
+            selected.extend(fill_selected)
     return selected
 
 
@@ -1611,26 +1646,10 @@ def select_oracle_events(
         return candidate_events[:max_events]
 
     groups = _group_candidates_for_stratified_selection(candidate_events, layer_bucket_width)
-    selected = []
     per_frame_counts: dict[int, int] = {}
-    group_queues = [list(g) for g in groups]
-    while group_queues and len(selected) < max_events:
-        next_round = []
-        for queue in group_queues:
-            if not queue:
-                continue
-            if len(selected) >= max_events:
-                break
-            event = queue.pop(0)
-            frame_id = int(event.get("frame_id", 0))
-            if per_frame_counts.get(frame_id, 0) >= max_events_per_frame:
-                next_round.append([event] + queue)
-                continue
-            selected.append(event)
-            per_frame_counts[frame_id] = per_frame_counts.get(frame_id, 0) + 1
-            if queue:
-                next_round.append(queue)
-        group_queues = next_round
+    selected, _ = _round_robin_select(
+        [list(g) for g in groups], max_events, max_events_per_frame, per_frame_counts,
+    )
     return selected
 
 
@@ -1939,6 +1958,7 @@ def _build_probe_diagnostics(
     dedup_events: list[dict],
     fifo_events: list[dict],
     candidate_events: list[dict],
+    filtered_total: int | None = None,
 ) -> dict:
     """Build histogram diagnostics from probe events for probe-only mode."""
     def _histogram(items: list[dict], key: str, transform=None) -> dict[str, int]:
@@ -1963,6 +1983,7 @@ def _build_probe_diagnostics(
         "selected_frame_histogram": _histogram(candidate_events, "frame_id", int),
         "selected_layer_histogram": _histogram(candidate_events, "layer_id", int),
         "raw_total": len(all_raw),
+        "filtered_total": filtered_total if filtered_total is not None else len(candidate_events),
         "selected_total": len(candidate_events),
     }
 
@@ -2081,6 +2102,7 @@ def collect_oracle_events_from_sequence(
     candidate_events.extend(dedup_events)
     candidate_events.extend(fifo_events)
     candidate_events = candidate_events[:candidate_cap]
+    filtered_event_count = len(candidate_events)
     candidate_events = select_oracle_events(
         candidate_events,
         max_events=max_events,
@@ -2111,6 +2133,7 @@ def collect_oracle_events_from_sequence(
             dedup_events=dedup_probe.events,
             fifo_events=fifo_probe.events,
             candidate_events=candidate_events,
+            filtered_total=filtered_event_count,
         )
         if log_fn is not None:
             log_fn(
