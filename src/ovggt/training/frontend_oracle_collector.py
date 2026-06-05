@@ -125,6 +125,8 @@ class FrontendOracleCollectorConfig:
     # --- Probe-only diagnostics mode ---
     probe_only: bool = False
     probe_output_json: str | None = None
+    event_type_quotas: dict[str, int] | None = None
+    quota_fill_remaining: bool = False
 
 
 def default_oracle_log(message: str) -> None:
@@ -349,6 +351,7 @@ class CounterfactualEvictionProbe:
         self.events.append(
             {
                 "event_id": event_id,
+                "event_type": "eviction",
                 "layer_id": int(layer_id),
                 "frame_id": int(frame_id),
                 "batch_index": int(batch_index),
@@ -1333,13 +1336,120 @@ def _group_candidates_for_stratified_selection(
     return [groups[k] for k in sorted(groups.keys())]
 
 
+def _select_oracle_events_quota_stratified(
+    candidate_events: list[dict],
+    max_events: int,
+    max_events_per_frame: int,
+    layer_bucket_width: int,
+    event_type_quotas: dict[str, int],
+    quota_fill_remaining: bool = False,
+) -> list[dict]:
+    """Quota-first stratified selection: fill scarce event types before abundant ones."""
+    if not candidate_events or max_events <= 0:
+        return []
+    by_type: dict[str, list[dict]] = {}
+    for event in candidate_events:
+        et = event.get("event_type", "eviction")
+        by_type.setdefault(et, []).append(event)
+    sorted_types = sorted(by_type.keys(), key=lambda t: len(by_type[t]))
+    selected: list[dict] = []
+    per_frame_counts: dict[int, int] = {}
+    used_ids: set[int] = set()
+    for event_type in sorted_types:
+        type_candidates = by_type[event_type]
+        type_quota = event_type_quotas.get(event_type, 0)
+        if type_quota <= 0:
+            continue
+        remaining_total = max_events - len(selected)
+        type_budget = min(type_quota, remaining_total)
+        if type_budget <= 0:
+            continue
+        groups: dict[tuple, list[dict]] = {}
+        for event in type_candidates:
+            if id(event) in used_ids:
+                continue
+            fid = int(event.get("frame_id", 0))
+            lid = int(event.get("layer_id", 0))
+            bucket = lid // layer_bucket_width
+            key = (fid, bucket)
+            groups.setdefault(key, []).append(event)
+        group_queues = [list(groups[k]) for k in sorted(groups.keys())]
+        type_selected = 0
+        while group_queues and type_selected < type_budget:
+            next_round: list[list[dict]] = []
+            for queue in group_queues:
+                if not queue:
+                    continue
+                if type_selected >= type_budget:
+                    break
+                if len(selected) >= max_events:
+                    break
+                event = queue.pop(0)
+                frame_id = int(event.get("frame_id", 0))
+                if per_frame_counts.get(frame_id, 0) >= max_events_per_frame:
+                    next_round.append(queue)
+                    continue
+                selected.append(event)
+                used_ids.add(id(event))
+                per_frame_counts[frame_id] = per_frame_counts.get(frame_id, 0) + 1
+                type_selected += 1
+                if queue:
+                    next_round.append(queue)
+            group_queues = next_round
+    remaining = max_events - len(selected)
+    if quota_fill_remaining and remaining > 0:
+        leftovers = [e for e in candidate_events if id(e) not in used_ids]
+        if leftovers:
+            fill_groups: dict[tuple, list[dict]] = {}
+            for event in leftovers:
+                et = event.get("event_type", "eviction")
+                fid = int(event.get("frame_id", 0))
+                lid = int(event.get("layer_id", 0))
+                bucket = lid // layer_bucket_width
+                key = (et, fid, bucket)
+                fill_groups.setdefault(key, []).append(event)
+            group_queues = [list(fill_groups[k]) for k in sorted(fill_groups.keys())]
+            while group_queues and len(selected) < max_events:
+                next_round: list[list[dict]] = []
+                for queue in group_queues:
+                    if not queue:
+                        continue
+                    if len(selected) >= max_events:
+                        break
+                    event = queue.pop(0)
+                    frame_id = int(event.get("frame_id", 0))
+                    if per_frame_counts.get(frame_id, 0) >= max_events_per_frame:
+                        next_round.append(queue)
+                        continue
+                    selected.append(event)
+                    per_frame_counts[frame_id] = per_frame_counts.get(frame_id, 0) + 1
+                    if queue:
+                        next_round.append(queue)
+                group_queues = next_round
+    return selected
+
+
 def select_oracle_events(
     candidate_events: list[dict],
     max_events: int,
     max_events_per_frame: int,
     policy: str = "stratified_round_robin",
     layer_bucket_width: int = 6,
+    event_type_quotas: dict[str, int] | None = None,
+    quota_fill_remaining: bool = False,
 ) -> list[dict]:
+    if policy == "quota_stratified":
+        if event_type_quotas is None:
+            policy = "stratified_round_robin"
+        else:
+            return _select_oracle_events_quota_stratified(
+                candidate_events=candidate_events,
+                max_events=max_events,
+                max_events_per_frame=max_events_per_frame,
+                layer_bucket_width=layer_bucket_width,
+                event_type_quotas=event_type_quotas,
+                quota_fill_remaining=quota_fill_remaining,
+            )
     if policy == "first_n":
         return candidate_events[:max_events]
 
@@ -1480,6 +1590,8 @@ def collect_oracle_shard_from_config(collector_cfg: FrontendOracleCollectorConfi
         max_subsets_per_fifo_event=collector_cfg.max_subsets_per_fifo_event,
         probe_only=collector_cfg.probe_only,
         probe_diagnostics_list=probe_diagnostics_list,
+        event_type_quotas=collector_cfg.event_type_quotas,
+        quota_fill_remaining=collector_cfg.quota_fill_remaining,
     )
     shard = dict(base_shard)
     shard["events"] = events
@@ -1524,6 +1636,8 @@ def collect_oracle_events_from_loader(
     max_subsets_per_fifo_event: int = 8,
     probe_only: bool = False,
     probe_diagnostics_list: list[dict] | None = None,
+    event_type_quotas: dict[str, int] | None = None,
+    quota_fill_remaining: bool = False,
 ) -> list[dict]:
     events: list[dict] = []
     max_batches_int = int(max_batches)
@@ -1619,6 +1733,8 @@ def collect_oracle_events_from_loader(
             max_subsets_per_fifo_event=max_subsets_per_fifo_event,
             probe_only=probe_only,
             probe_diagnostics_sink=probe_diagnostics_list,
+            event_type_quotas=event_type_quotas,
+            quota_fill_remaining=quota_fill_remaining,
         )
         for event in batch_events:
             if not any(event is collected for collected in collected_batch_events):
@@ -1699,6 +1815,8 @@ def collect_oracle_events_from_sequence(
     max_subsets_per_fifo_event: int = 8,
     probe_only: bool = False,
     probe_diagnostics_sink: list[dict] | None = None,
+    event_type_quotas: dict[str, int] | None = None,
+    quota_fill_remaining: bool = False,
 ) -> list[dict]:
     if max_events <= 0:
         return []
@@ -1768,6 +1886,8 @@ def collect_oracle_events_from_sequence(
         max_events_per_frame=max_events_per_frame,
         policy=event_selection_policy,
         layer_bucket_width=stratified_layer_bucket_width,
+        event_type_quotas=event_type_quotas,
+        quota_fill_remaining=quota_fill_remaining,
     )
     if log_fn is not None:
         log_fn(

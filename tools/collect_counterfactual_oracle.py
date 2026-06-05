@@ -104,7 +104,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--max-subsets-per-fifo-event", type=int, default=8)
     parser.add_argument("--max-candidate-events-per-sequence", type=int, default=256)
     parser.add_argument("--max-events-per-frame", type=int, default=6)
-    parser.add_argument("--event-selection-policy", type=str, default="stratified_round_robin", choices=["first_n", "stratified_round_robin"])
+    parser.add_argument("--event-selection-policy", type=str, default="stratified_round_robin", choices=["first_n", "stratified_round_robin", "quota_stratified"])
     parser.add_argument("--stratified-layer-bucket-width", type=int, default=6)
     parser.add_argument("--oracle-profile", type=str, default="real_policy", choices=["real_policy", "low_budget_eviction", "fifo_topk"])
     parser.add_argument("--frontend-per-layer-budget-override", type=int, default=None)
@@ -138,6 +138,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=str,
         default=None,
         help="Write probe diagnostics to this JSON file.",
+    )
+    parser.add_argument(
+        "--event-type-quotas", type=str, default=None,
+        help="Per-event-type quota for quota_stratified policy, e.g. 'eviction=8,dedup=4,fifo_topk=4'.",
+    )
+    parser.add_argument(
+        "--quota-fill-remaining", action="store_true",
+        help="Allow filling unused slots after strict event-type quotas.",
     )
     return parser.parse_args(argv)
 
@@ -186,6 +194,8 @@ def main() -> None:
         "teacher_checkpoint": "teacher_checkpoint",
         "probe_only": "probe_only",
         "probe_output_json": "probe_output_json",
+        "event_type_quotas": "event_type_quotas",
+        "quota_fill_remaining": "quota_fill_remaining",
     }
     _explicit = {a for a in sys.argv[1:]}
     for yaml_key, arg_dest in _YAML_TO_ARG.items():
@@ -205,6 +215,11 @@ def main() -> None:
     if not args.output:
         print("error: --output is required (or set 'output' in the config YAML)", file=sys.stderr)
         sys.exit(1)
+    event_type_quotas = None
+    if args.event_type_quotas:
+        event_type_quotas = {
+            k: int(v) for k, v in (pair.split("=") for pair in args.event_type_quotas.split(","))
+        }
     collector_cfg = FrontendOracleCollectorConfig(
         config=args.config,
         output=args.output,
@@ -247,6 +262,8 @@ def main() -> None:
         fifo_count_candidates_for_oracle=args.fifo_count_candidates_for_oracle,
         probe_only=bool(args.probe_only),
         probe_output_json=args.probe_output_json,
+        event_type_quotas=event_type_quotas,
+        quota_fill_remaining=bool(args.quota_fill_remaining),
     )
     shard = collect_oracle_shard_from_config(collector_cfg)
     shard["collector_config"] = asdict(collector_cfg)

@@ -1291,7 +1291,7 @@ class TestTask6Wiring:
 
         select_calls = []
 
-        def fake_select(candidates, max_events, max_events_per_frame, policy, layer_bucket_width):
+        def fake_select(candidates, max_events, max_events_per_frame, policy, layer_bucket_width, **kwargs):
             select_calls.append({
                 "max_events": max_events,
                 "max_events_per_frame": max_events_per_frame,
@@ -1399,7 +1399,7 @@ class TestTask6Wiring:
 
         select_calls = []
 
-        def fake_select(candidates, max_events, max_events_per_frame, policy, layer_bucket_width):
+        def fake_select(candidates, max_events, max_events_per_frame, policy, layer_bucket_width, **kwargs):
             select_calls.append({"policy": policy})
             return []
 
@@ -1628,3 +1628,90 @@ def test_probe_only_shard_returns_diagnostics(tmp_path):
     assert "raw_event_type_counts" in diag
     assert "raw_frame_histogram" in diag
     assert "raw_layer_histogram" in diag
+
+
+def test_eviction_events_have_event_type_field():
+    """CounterfactualEvictionProbe events must include 'event_type': 'eviction'."""
+    from ovggt.training.frontend_oracle_collector import CounterfactualEvictionProbe
+    probe = CounterfactualEvictionProbe(num_samples=4, oracle_window=2, seed=42)
+    cache_state = LayerCacheState(
+        k=torch.randn(1, 2, 6, 4),
+        v=torch.randn(1, 2, 6, 4),
+        score_state=torch.arange(18, dtype=torch.float32).reshape(1, 6, 3),
+        metadata=_metadata(
+            anchor_slots=[0, 1, -1, -1, -1, -1],
+            frame_ids=[0, 0, 1, 1, 2, 2],
+            importance=[0.0, 0.0, 0.5, 0.2, 0.9, 0.1],
+        ),
+        protected_count=2,
+    )
+    probe.on_eviction_candidate(
+        cache_state, layer_id=0, frame_id=1, budget=4, batch_index=0,
+    )
+    assert len(probe.events) >= 1, "Expected at least one eviction event"
+    for event in probe.events:
+        assert event.get("event_type") == "eviction", (
+            f"Eviction event missing event_type='eviction', got: {event.get('event_type')}"
+        )
+
+
+def test_quota_stratified_prefers_scarce_event_types():
+    from ovggt.training.frontend_oracle_collector import select_oracle_events
+    candidates = []
+    for i in range(20):
+        candidates.append({"event_type": "dedup", "frame_id": i % 5, "layer_id": i % 6, "voxel_group_id": i})
+    for i in range(2):
+        candidates.append({"event_type": "eviction", "frame_id": i, "layer_id": 0, "voxel_group_id": 100 + i})
+    selected = select_oracle_events(
+        candidates, max_events=10, max_events_per_frame=6,
+        policy="quota_stratified", layer_bucket_width=6,
+        event_type_quotas={"eviction": 8, "dedup": 4, "fifo_topk": 4},
+    )
+    eviction_count = sum(1 for e in selected if e.get("event_type") == "eviction")
+    dedup_count = sum(1 for e in selected if e.get("event_type") == "dedup")
+    assert eviction_count == 2, f"Expected all 2 eviction events, got {eviction_count}"
+    assert dedup_count <= 4, f"Dedup should be capped by quota, got {dedup_count}"
+
+
+def test_quota_stratified_dedup_cannot_consume_all_slots():
+    from ovggt.training.frontend_oracle_collector import select_oracle_events
+    candidates = [{"event_type": "dedup", "frame_id": i, "layer_id": 0, "voxel_group_id": i} for i in range(100)]
+    candidates += [{"event_type": "eviction", "frame_id": i, "layer_id": 0, "voxel_group_id": 100 + i} for i in range(2)]
+    selected = select_oracle_events(
+        candidates, max_events=16, max_events_per_frame=16,
+        policy="quota_stratified", layer_bucket_width=6,
+        event_type_quotas={"eviction": 8, "dedup": 4},
+    )
+    eviction_count = sum(1 for e in selected if e.get("event_type") == "eviction")
+    assert eviction_count == 2, f"Expected 2 eviction events, got {eviction_count}"
+
+
+def test_quota_stratified_respects_frame_layer_diversity():
+    from ovggt.training.frontend_oracle_collector import select_oracle_events
+    candidates = [
+        {"event_type": "eviction", "frame_id": f, "layer_id": l, "voxel_group_id": f * 100 + l}
+        for f in range(10) for l in range(24)
+    ]
+    selected = select_oracle_events(
+        candidates, max_events=16, max_events_per_frame=6,
+        policy="quota_stratified", layer_bucket_width=6,
+        event_type_quotas={"eviction": 16},
+    )
+    frames = set(e["frame_id"] for e in selected)
+    layers = set(e["layer_id"] // 6 for e in selected)
+    assert len(frames) > 1, "Expected diversity across frames"
+    assert len(layers) > 1, "Expected diversity across layer buckets"
+
+
+def test_quota_stratified_without_quotas_falls_back_to_stratified():
+    from ovggt.training.frontend_oracle_collector import select_oracle_events
+    candidates = [
+        {"event_type": "dedup", "frame_id": 0, "layer_id": i, "voxel_group_id": i}
+        for i in range(20)
+    ]
+    selected = select_oracle_events(
+        candidates, max_events=10, max_events_per_frame=10,
+        policy="quota_stratified", layer_bucket_width=6,
+        event_type_quotas=None,
+    )
+    assert len(selected) == 10
