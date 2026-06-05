@@ -190,7 +190,7 @@ def test_collector_model_config_defaults_enable_score_state_when_yaml_has_no_fro
     cfg = OmegaConf.create(
         {
             "frontend_mode": "frontend_train",
-            "frontend_total_budget": 10410,
+            "frontend_per_layer_budget": 10410,
             "frontend_camera_budget": 128,
             "frontend_pose_encoding_type": "relT_quaR_FoV",
             "anchor_overflow_policy": "global_plus_recent",
@@ -233,7 +233,7 @@ def test_high_budget_teacher_config_disables_dedup(monkeypatch):
             return []
 
     monkeypatch.setattr(collector, "OVGGT", FakeModel)
-    cfg = OmegaConf.create({"n_corres_train": 0, "frontend_total_budget": 16})
+    cfg = OmegaConf.create({"n_corres_train": 0, "frontend_per_layer_budget": 16})
 
     collector.build_frozen_frontend_model_from_config(
         cfg,
@@ -242,7 +242,7 @@ def test_high_budget_teacher_config_disables_dedup(monkeypatch):
         high_budget=True,
     )
 
-    assert captured["total_budget"] >= 10_000_000
+    assert captured["per_layer_budget"] >= 10_000_000
     assert captured["frontend_cache_config"].dedup_enabled is False
     assert captured["frontend_cache_config"].intra_frame_dedup_enabled is False
 
@@ -521,10 +521,10 @@ def test_collect_oracle_builds_model_before_dataloader(monkeypatch):
         def state_dict(self):
             return {}
 
-    def fake_load_cfg(config_path, num_views=None):
+    def fake_load_cfg(config_path, num_views=None, collector_cfg=None):
         return OmegaConf.create(
             {
-                "frontend_total_budget": 16,
+                "frontend_per_layer_budget": 16,
                 "frontend_camera_budget": 4,
                 "frontend_pose_encoding_type": "absT_quaR_FoV",
                 "anchor_overflow_policy": "recent",
@@ -1426,27 +1426,69 @@ class TestStressProfileOverrides:
         f.close()
         return f.name
 
-    def test_low_budget_eviction_overrides_total_budget(self):
+    def test_low_budget_eviction_overrides_per_layer_budget(self):
         from ovggt.training.frontend_oracle_collector import load_frontend_oracle_config
-        path = self._write_yaml({"frontend_total_budget": 200000, "num_views": 4, "frontend_cache": {"fifo_keep_topk": 0}})
-        collector_cfg = OmegaConf.create({"oracle_profile": "low_budget_eviction", "frontend_total_budget_override": 20000, "fifo_keep_topk_override": None})
+        path = self._write_yaml({"frontend_per_layer_budget": 200000, "num_views": 4, "frontend_cache": {"fifo_keep_topk": 0}})
+        collector_cfg = OmegaConf.create({"oracle_profile": "low_budget_eviction", "frontend_per_layer_budget_override": 20000, "fifo_keep_topk_override": None})
         cfg = load_frontend_oracle_config(path, collector_cfg=collector_cfg)
-        assert cfg.frontend_total_budget == 20000
+        assert cfg.frontend_per_layer_budget == 20000
 
     def test_fifo_topk_overrides_fifo_keep_topk(self):
         from ovggt.training.frontend_oracle_collector import load_frontend_oracle_config
-        path = self._write_yaml({"frontend_total_budget": 200000, "num_views": 4, "frontend_cache": {"fifo_keep_topk": 0}})
-        collector_cfg = OmegaConf.create({"oracle_profile": "fifo_topk", "frontend_total_budget_override": None, "fifo_keep_topk_override": 8})
+        path = self._write_yaml({"frontend_per_layer_budget": 200000, "num_views": 4, "frontend_cache": {"fifo_keep_topk": 0}})
+        collector_cfg = OmegaConf.create({"oracle_profile": "fifo_topk", "frontend_per_layer_budget_override": None, "fifo_keep_topk_override": 8})
         cfg = load_frontend_oracle_config(path, collector_cfg=collector_cfg)
         assert cfg.frontend_cache.fifo_keep_topk == 8
 
     def test_real_policy_applies_no_overrides(self):
         from ovggt.training.frontend_oracle_collector import load_frontend_oracle_config
-        path = self._write_yaml({"frontend_total_budget": 200000, "num_views": 4, "frontend_cache": {"fifo_keep_topk": 0}})
-        collector_cfg = OmegaConf.create({"oracle_profile": "real_policy", "frontend_total_budget_override": None, "fifo_keep_topk_override": None})
+        path = self._write_yaml({"frontend_per_layer_budget": 200000, "num_views": 4, "frontend_cache": {"fifo_keep_topk": 0}})
+        collector_cfg = OmegaConf.create({"oracle_profile": "real_policy", "frontend_per_layer_budget_override": None, "fifo_keep_topk_override": None})
         cfg = load_frontend_oracle_config(path, collector_cfg=collector_cfg)
-        assert cfg.frontend_total_budget == 200000
+        assert cfg.frontend_per_layer_budget == 200000
         assert cfg.frontend_cache.fifo_keep_topk == 0
+
+    def test_collect_shard_passes_collector_config_to_frontend_loader(self, tmp_path):
+        import ovggt.training.frontend_oracle_collector as mod
+
+        observed = {}
+
+        class FakeModel:
+            aggregator = SimpleNamespace(depth=24)
+
+            def state_dict(self):
+                return {}
+
+        def fake_load_config(config_path, num_views=None, collector_cfg=None):
+            observed["collector_cfg"] = collector_cfg
+            return SimpleNamespace(
+                n_corres_train=0,
+                frontend_per_layer_budget=8000,
+                frontend_cache={"fifo_keep_topk": 0},
+            )
+
+        def fake_collect(**kwargs):
+            observed["fifo_count_candidates"] = kwargs["fifo_count_candidates"]
+            return []
+
+        cfg = mod.FrontendOracleCollectorConfig(
+            config="dummy.yaml",
+            output=str(tmp_path / "oracle.pt"),
+            oracle_profile="fifo_topk",
+            frontend_per_layer_budget_override=5000,
+            fifo_keep_topk_override=80,
+            fifo_count_candidates_for_oracle=[0, 8, 16],
+        )
+        with patch.object(mod, "load_frontend_oracle_config", side_effect=fake_load_config), \
+             patch.object(mod, "build_frozen_frontend_model_from_config", return_value=FakeModel()), \
+             patch.object(mod, "build_frozen_teacher_from_config", return_value=None), \
+             patch.object(mod, "build_frontend_oracle_dataloader", return_value=[]), \
+             patch.object(mod, "collect_oracle_events_from_loader", side_effect=fake_collect):
+            shard = mod.collect_oracle_shard_from_config(cfg)
+
+        assert observed["collector_cfg"] is cfg
+        assert observed["fifo_count_candidates"] == [0, 8, 16]
+        assert shard["events"] == []
 
 
 from ovggt.training.frontend_oracle_collector import FrontendOracleCollectorConfig
@@ -1465,7 +1507,7 @@ class TestCollectorConfigDefaults:
         assert cfg.event_selection_policy == "stratified_round_robin"
         assert cfg.stratified_layer_bucket_width == 6
         assert cfg.oracle_profile == "real_policy"
-        assert cfg.frontend_total_budget_override is None
+        assert cfg.frontend_per_layer_budget_override is None
         assert cfg.fifo_keep_topk_override is None
         assert cfg.sequence_manifest_path is None
         assert cfg.sequence_partition_policy == "hash_mod"
@@ -1498,3 +1540,91 @@ class TestShardSummaryMetrics:
         assert summary["subsets_per_event"]["max"] == 5
         assert summary["dataset_counts"]["WildRGBD"] == 1
         assert summary["dataset_counts"]["DTU"] == 1
+
+
+def test_probe_only_does_not_replay_and_reports_candidate_histograms():
+    """probe_only=True should skip measure_counterfactual_event and return diagnostics."""
+    import torch
+    from types import SimpleNamespace
+    from unittest.mock import patch
+    from ovggt.training.frontend_oracle_collector import collect_oracle_events_from_sequence
+
+    frames = [{"img": torch.zeros(1, 3, 2, 2)} for _ in range(3)]
+    diagnostics = []
+
+    def fake_run_frontend(model, frames, probe, cache_results, dedup_probe=None, fifo_probe=None, **kwargs):
+        probe.events = [
+            {"event_type": "eviction", "frame_id": 0, "layer_id": 0, "candidate_subsets": []}
+        ]
+        dedup_probe.events = [
+            {"event_type": "dedup", "frame_id": 1, "layer_id": 12, "candidate_subsets": []}
+        ]
+        fifo_probe.events = []
+        return SimpleNamespace(ress=[])
+
+    with patch(
+        "ovggt.training.frontend_oracle_collector._run_frontend_with_probe",
+        side_effect=fake_run_frontend,
+    ), patch(
+        "ovggt.training.frontend_oracle_collector.measure_counterfactual_event",
+        side_effect=AssertionError("measure_counterfactual_event must NOT be called in probe_only mode"),
+    ):
+        result = collect_oracle_events_from_sequence(
+            model=object(),
+            frames=frames,
+            device=torch.device("cpu"),
+            max_events=16,
+            num_samples=4,
+            oracle_window=2,
+            probe_only=True,
+            probe_diagnostics_sink=diagnostics,
+        )
+
+    assert len(result) == 0
+    assert len(diagnostics) == 1
+    assert "raw_event_type_counts" in diagnostics[0]
+    assert "selected_event_type_counts" in diagnostics[0]
+
+
+def test_probe_only_shard_returns_diagnostics(tmp_path):
+    """collect_oracle_shard_from_config with probe_only returns diagnostics in shard metadata."""
+    from types import SimpleNamespace
+    from unittest.mock import patch
+    import ovggt.training.frontend_oracle_collector as collector
+    from ovggt.training.frontend_oracle_collector import (
+        FrontendOracleCollectorConfig,
+        collect_oracle_shard_from_config,
+    )
+
+    def fake_collect_oracle_events_from_loader(**kwargs):
+        kwargs["probe_diagnostics_list"].append(
+            {
+                "raw_event_type_counts": {"dedup": 1},
+                "raw_frame_histogram": {"0": 1},
+                "raw_layer_histogram": {"0": 1},
+            }
+        )
+        return []
+
+    cfg = FrontendOracleCollectorConfig(
+        config="config/collect_counterfactual_oracle.yaml",
+        output=str(tmp_path / "probe_test.pt"),
+        max_batches=1,
+        max_events=16,
+        probe_only=True,
+    )
+
+    with patch.object(collector, "load_frontend_oracle_config", return_value=SimpleNamespace(n_corres_train=0)), \
+         patch.object(collector, "build_frozen_frontend_model_from_config", return_value=SimpleNamespace(aggregator=SimpleNamespace(depth=24), state_dict=lambda: {})), \
+         patch.object(collector, "build_frozen_teacher_from_config", return_value=None), \
+         patch.object(collector, "build_frontend_oracle_dataloader", return_value=[]), \
+         patch.object(collector, "collect_oracle_events_from_loader", side_effect=fake_collect_oracle_events_from_loader):
+        shard = collect_oracle_shard_from_config(cfg)
+
+    assert "probe_diagnostics" in shard
+    assert isinstance(shard["probe_diagnostics"], list)
+    assert len(shard["probe_diagnostics"]) == 1
+    diag = shard["probe_diagnostics"][0]
+    assert "raw_event_type_counts" in diag
+    assert "raw_frame_histogram" in diag
+    assert "raw_layer_histogram" in diag

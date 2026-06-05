@@ -112,7 +112,7 @@ class FrontendOracleCollectorConfig:
     max_fetch_errors: int = 256
     # --- Stress profiles (Decision 5) ---
     oracle_profile: str = "real_policy"
-    frontend_total_budget_override: int | None = None
+    frontend_per_layer_budget_override: int | None = None
     fifo_keep_topk_override: int | None = None
     store_replay_payload: bool = False
     # --- Phase 4 manifest (Decision 9) ---
@@ -121,7 +121,10 @@ class FrontendOracleCollectorConfig:
     num_sequence_shards: int | None = None
     sequence_shard_id: int | None = None
     # --- FIFO top-K count-candidate sampling ---
-    fifo_count_candidates_for_oracle: str | None = None
+    fifo_count_candidates_for_oracle: str | Sequence[int] | None = None
+    # --- Probe-only diagnostics mode ---
+    probe_only: bool = False
+    probe_output_json: str | None = None
 
 
 def default_oracle_log(message: str) -> None:
@@ -450,14 +453,19 @@ class CounterfactualDedupProbe:
             return
 
         metadata = cache_state.metadata
+        global_batch_index = int(batch_index)
+        cache_batch_size = int(metadata.anchor_slot.shape[0])
+        local_batch_index = 0 if cache_batch_size == 1 else global_batch_index
+        if local_batch_index < 0 or local_batch_index >= cache_batch_size:
+            return
+
         projected_xyz = cache_state._project_slot_local_xyz_to_active(
             metadata.slot_local_xyz,
             metadata.slot_id,
         )
-        # Select batch 0 for analysis
-        xyz = _select_cache_batch(projected_xyz)
+        xyz = _select_cache_batch(projected_xyz, local_batch_index)
         xyz_valid = torch.isfinite(xyz).all(dim=-1)
-        patch_mask = _select_cache_batch(metadata.token_kind) == 2  # PATCH kind
+        patch_mask = _select_cache_batch(metadata.token_kind, local_batch_index) == 2  # PATCH kind
 
         if not xyz_valid.any() or not patch_mask.any():
             return
@@ -481,12 +489,12 @@ class CounterfactualDedupProbe:
         if multi_token_hashes.numel() == 0:
             return
 
-        score_state = _select_cache_batch(cache_state.score_state).detach().cpu().float()
+        score_state = _select_cache_batch(cache_state.score_state, local_batch_index).detach().cpu().float()
         metadata_features = _select_batch(
             cache_state.build_scorer_metadata_features(current_frame_id=int(frame_id)),
-            0,
+            local_batch_index,
         ).detach().cpu().float()
-        base_scores = _select_cache_batch(metadata.importance).detach().cpu().float()
+        base_scores = _select_cache_batch(metadata.importance, local_batch_index).detach().cpu().float()
 
         # For each multi-token voxel, create candidate subsets
         for group_hash in multi_token_hashes[:3]:  # Limit to first 3 groups
@@ -534,16 +542,16 @@ class CounterfactualDedupProbe:
                 continue
 
             event_id = (
-                f"{self.event_prefix}:b{batch_index}:f{int(frame_id)}:l{int(layer_id)}"
+                f"{self.event_prefix}:b{global_batch_index}:f{int(frame_id)}:l{int(layer_id)}"
                 f":voxel{int(group_hash.item())}:e{len(self.events)}"
             )
-            sequence_provenance = self.sequence_provenance.get(int(batch_index))
+            sequence_provenance = self.sequence_provenance.get(global_batch_index)
             self.events.append({
                 "event_id": event_id,
                 "event_type": "dedup",
                 "layer_id": int(layer_id),
                 "frame_id": int(frame_id),
-                "batch_index": int(batch_index),
+                "batch_index": global_batch_index,
                 "voxel_group_id": int(group_hash.item()),
                 "score_state": score_state,
                 "metadata_features": metadata_features,
@@ -629,7 +637,9 @@ class CounterfactualFifoTopKProbe:
             return
 
         metadata = cache_state.metadata
-        b_idx = batch_index
+        global_batch_index = int(batch_index)
+        cache_batch_size = int(metadata.anchor_slot.shape[0])
+        b_idx = 0 if cache_batch_size == 1 else global_batch_index
 
         # Use pre-computed indices when available; otherwise recompute for
         # backward compatibility with older callers.
@@ -765,16 +775,16 @@ class CounterfactualFifoTopKProbe:
             return
 
         event_id = (
-            f"{self.event_prefix}:b{batch_index}:f{int(frame_id)}:l{int(layer_id)}"
+            f"{self.event_prefix}:b{global_batch_index}:f{int(frame_id)}:l{int(layer_id)}"
             f":slot{demoted_slot}:e{len(self.events)}"
         )
-        sequence_provenance = self.sequence_provenance.get(int(batch_index))
+        sequence_provenance = self.sequence_provenance.get(global_batch_index)
         event_dict = {
             "event_id": event_id,
             "event_type": "fifo_topk",
             "layer_id": int(layer_id),
             "frame_id": int(frame_id),
-            "batch_index": int(batch_index),
+            "batch_index": global_batch_index,
             "demoted_slot": demoted_slot,
             "keep_count": keep_count,
             "score_state": cache_state.score_state[b_idx].detach().cpu().float(),
@@ -1049,28 +1059,69 @@ def log_replay_timing(
 def load_frontend_oracle_config(config_path: str | Path, num_views: int | None = None, collector_cfg=None):
     """Load frontend config YAML with optional stress-profile overrides.
 
+    If the YAML contains a ``frontend_config`` key (pointing to a training config
+    such as ``train_frontend_finetune.yaml``), that file is loaded first as the
+    base config, and the current YAML's keys are merged on top.  This lets a
+    collector-only YAML (like ``collect_counterfactual_oracle.yaml``) serve as
+    the ``--config`` argument directly.
+
     Overrides are applied BEFORE OmegaConf.resolve() so they participate in interpolation.
     """
     cfg = OmegaConf.load(config_path)
+    # If this is a collector YAML that references a frontend training config,
+    # load the training config as the base and merge collector keys on top.
+    frontend_config_path = getattr(cfg, "frontend_config", None)
+    if frontend_config_path is not None:
+        frontend_config_path = str(frontend_config_path)
+        if not os.path.isabs(frontend_config_path):
+            # Resolve relative to the collector YAML's directory
+            frontend_config_path = os.path.join(
+                os.path.dirname(os.path.abspath(str(config_path))),
+                frontend_config_path,
+            )
+        base_cfg = OmegaConf.load(frontend_config_path)
+        # Merge: base_cfg provides train_dataset / model defaults;
+        # cfg (collector yaml) overrides on top.
+        cfg = OmegaConf.merge(base_cfg, cfg)
     if collector_cfg is not None:
         profile = collector_cfg.get("oracle_profile", "real_policy") if hasattr(collector_cfg, "get") else getattr(collector_cfg, "oracle_profile", "real_policy")
         if profile == "low_budget_eviction":
-            override = collector_cfg.get("frontend_total_budget_override") if hasattr(collector_cfg, "get") else getattr(collector_cfg, "frontend_total_budget_override", None)
+            override = collector_cfg.get("frontend_per_layer_budget_override") if hasattr(collector_cfg, "get") else getattr(collector_cfg, "frontend_per_layer_budget_override", None)
             if override is not None:
-                cfg.frontend_total_budget = int(override)
+                cfg.frontend_per_layer_budget = int(override)
         elif profile == "fifo_topk":
             override = collector_cfg.get("fifo_keep_topk_override") if hasattr(collector_cfg, "get") else getattr(collector_cfg, "fifo_keep_topk_override", None)
             if override is not None:
                 if not hasattr(cfg, "frontend_cache"):
                     cfg.frontend_cache = {}
                 cfg.frontend_cache.fifo_keep_topk = int(override)
-            budget_override = collector_cfg.get("frontend_total_budget_override") if hasattr(collector_cfg, "get") else getattr(collector_cfg, "frontend_total_budget_override", None)
+            budget_override = collector_cfg.get("frontend_per_layer_budget_override") if hasattr(collector_cfg, "get") else getattr(collector_cfg, "frontend_per_layer_budget_override", None)
             if budget_override is not None:
-                cfg.frontend_total_budget = int(budget_override)
+                cfg.frontend_per_layer_budget = int(budget_override)
     if num_views is not None:
         cfg.num_views = int(num_views)
     OmegaConf.resolve(cfg)
     return cfg
+
+
+def parse_fifo_count_candidates_for_oracle(value) -> list[int] | None:
+    """Parse FIFO count candidates from CLI strings or YAML/OmegaConf lists."""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        raw = value.strip()
+        if not raw:
+            return None
+        if raw.startswith("[") and raw.endswith("]"):
+            raw = raw[1:-1]
+        return [int(item.strip()) for item in raw.split(",") if item.strip()]
+    try:
+        items = list(value)
+    except TypeError:
+        return [int(value)]
+    if not items:
+        return None
+    return [int(item) for item in items]
 
 
 def resolve_dataset_expression(cfg, dataset_key: str = "train_dataset") -> str:
@@ -1219,14 +1270,14 @@ def build_frozen_frontend_model_from_config(
     if high_budget:
         frontend_cache_config.dedup_enabled = False
         frontend_cache_config.intra_frame_dedup_enabled = False
-    total_budget = int(getattr(cfg, "frontend_total_budget", 200000))
+    per_layer_budget = int(getattr(cfg, "frontend_per_layer_budget", 8000))
     if high_budget:
-        total_budget = int(max(total_budget, 10_000_000))
+        per_layer_budget = int(max(per_layer_budget, 10_000_000))
     enable_track_head = int(getattr(cfg, "n_corres_train", 0) or 0) > 0
     model = OVGGT(
         mode="frontend_eval",
         frontend_pose_encoding_type=str(getattr(cfg, "frontend_pose_encoding_type", "absT_quaR_FoV")),
-        total_budget=total_budget,
+        per_layer_budget=per_layer_budget,
         camera_budget=int(getattr(cfg, "frontend_camera_budget", 384)),
         anchor_overflow_policy=str(getattr(cfg, "anchor_overflow_policy", "recent")),
         frontend_cache_config=frontend_cache_config,
@@ -1337,7 +1388,11 @@ def collect_oracle_shard_from_config(collector_cfg: FrontendOracleCollectorConfi
         f"store_replay_payload={collector_cfg.store_replay_payload}"
     )
     log_fn("loading config")
-    cfg = load_frontend_oracle_config(collector_cfg.config, num_views=collector_cfg.num_views)
+    cfg = load_frontend_oracle_config(
+        collector_cfg.config,
+        num_views=collector_cfg.num_views,
+        collector_cfg=collector_cfg,
+    )
     log_fn("config loaded")
     log_fn("building frozen student model")
     model = build_frozen_frontend_model_from_config(
@@ -1386,12 +1441,10 @@ def collect_oracle_shard_from_config(collector_cfg: FrontendOracleCollectorConfi
         log_fn=log_fn,
     )
     log_fn("starting oracle event collection")
-    # Parse comma-separated count candidates string to list of ints
-    fifo_count_candidates = None
-    if collector_cfg.fifo_count_candidates_for_oracle is not None:
-        raw = str(collector_cfg.fifo_count_candidates_for_oracle).strip()
-        if raw:
-            fifo_count_candidates = [int(x.strip()) for x in raw.split(",") if x.strip()]
+    fifo_count_candidates = parse_fifo_count_candidates_for_oracle(
+        collector_cfg.fifo_count_candidates_for_oracle
+    )
+    probe_diagnostics_list: list[dict] = []
     events = collect_oracle_events_from_loader(
         model=model,
         data_loader=data_loader,
@@ -1425,11 +1478,15 @@ def collect_oracle_shard_from_config(collector_cfg: FrontendOracleCollectorConfi
         dataloader_timeout=collector_cfg.dataloader_timeout,
         fifo_count_candidates=fifo_count_candidates,
         max_subsets_per_fifo_event=collector_cfg.max_subsets_per_fifo_event,
+        probe_only=collector_cfg.probe_only,
+        probe_diagnostics_list=probe_diagnostics_list,
     )
     shard = dict(base_shard)
     shard["events"] = events
     shard["partial"] = False
     shard["num_events"] = len(events)
+    if collector_cfg.probe_only:
+        shard["probe_diagnostics"] = probe_diagnostics_list
     flusher.maybe_flush(events, batch_idx=None, force=True, reason="final")
     elapsed = time.monotonic() - started
     log_fn(f"collector done: events={len(events)} elapsed_sec={elapsed:.1f}")
@@ -1465,6 +1522,8 @@ def collect_oracle_events_from_loader(
     dataloader_timeout: int = 600,
     fifo_count_candidates: Sequence[int] | None = None,
     max_subsets_per_fifo_event: int = 8,
+    probe_only: bool = False,
+    probe_diagnostics_list: list[dict] | None = None,
 ) -> list[dict]:
     events: list[dict] = []
     max_batches_int = int(max_batches)
@@ -1558,6 +1617,8 @@ def collect_oracle_events_from_loader(
             max_subsets_per_dedup_event=max_subsets_per_dedup_event,
             fifo_count_candidates=fifo_count_candidates,
             max_subsets_per_fifo_event=max_subsets_per_fifo_event,
+            probe_only=probe_only,
+            probe_diagnostics_sink=probe_diagnostics_list,
         )
         for event in batch_events:
             if not any(event is collected for collected in collected_batch_events):
@@ -1575,6 +1636,39 @@ def collect_oracle_events_from_loader(
             break
         batch_idx += 1
     return events
+
+
+def _build_probe_diagnostics(
+    eviction_events: list[dict],
+    dedup_events: list[dict],
+    fifo_events: list[dict],
+    candidate_events: list[dict],
+) -> dict:
+    """Build histogram diagnostics from probe events for probe-only mode."""
+    def _histogram(items: list[dict], key: str, transform=None) -> dict[str, int]:
+        h: dict[str, int] = {}
+        for item in items:
+            val = transform(item[key]) if transform else item.get(key, "unknown")
+            val = str(val)
+            h[val] = h.get(val, 0) + 1
+        return dict(sorted(h.items()))
+
+    all_raw = list(eviction_events) + list(dedup_events) + list(fifo_events)
+    raw_et: dict[str, int] = {}
+    for e in all_raw:
+        et = e.get("event_type", "eviction")
+        raw_et[et] = raw_et.get(et, 0) + 1
+
+    return {
+        "raw_event_type_counts": dict(sorted(raw_et.items())),
+        "raw_frame_histogram": _histogram(all_raw, "frame_id", int),
+        "raw_layer_histogram": _histogram(all_raw, "layer_id", int),
+        "selected_event_type_counts": _histogram(candidate_events, "event_type"),
+        "selected_frame_histogram": _histogram(candidate_events, "frame_id", int),
+        "selected_layer_histogram": _histogram(candidate_events, "layer_id", int),
+        "raw_total": len(all_raw),
+        "selected_total": len(candidate_events),
+    }
 
 
 @torch.inference_mode()
@@ -1603,6 +1697,8 @@ def collect_oracle_events_from_sequence(
     max_subsets_per_dedup_event: int = 8,
     fifo_count_candidates: Sequence[int] | None = None,
     max_subsets_per_fifo_event: int = 8,
+    probe_only: bool = False,
+    probe_diagnostics_sink: list[dict] | None = None,
 ) -> list[dict]:
     if max_events <= 0:
         return []
@@ -1687,6 +1783,21 @@ def collect_oracle_events_from_sequence(
             f"elapsed_sec={probe_elapsed:.3f}"
             f"{cuda_memory_log_suffix()}"
         )
+    if probe_only:
+        diagnostics = _build_probe_diagnostics(
+            eviction_events=probe.events,
+            dedup_events=dedup_probe.events,
+            fifo_events=fifo_probe.events,
+            candidate_events=candidate_events,
+        )
+        if log_fn is not None:
+            log_fn(
+                f"{event_prefix}: probe_only mode - skipping replay. "
+                f"diagnostics: {json.dumps(diagnostics, default=str)}"
+            )
+        if probe_diagnostics_sink is not None:
+            probe_diagnostics_sink.append(diagnostics)
+        return []
     if not candidate_events:
         return []
 

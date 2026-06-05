@@ -30,8 +30,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--output",
-        required=True,
-        help="Output .pt oracle shard.",
+        default=None,
+        help="Output .pt oracle shard. Falls back to 'output' in the config YAML.",
     )
     parser.add_argument("--dataset-key", default="train_dataset")
     parser.add_argument("--batch-size", type=int, default=1)
@@ -107,7 +107,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--event-selection-policy", type=str, default="stratified_round_robin", choices=["first_n", "stratified_round_robin"])
     parser.add_argument("--stratified-layer-bucket-width", type=int, default=6)
     parser.add_argument("--oracle-profile", type=str, default="real_policy", choices=["real_policy", "low_budget_eviction", "fifo_topk"])
-    parser.add_argument("--frontend-total-budget-override", type=int, default=None)
+    parser.add_argument("--frontend-per-layer-budget-override", type=int, default=None)
     parser.add_argument("--fifo-keep-topk-override", type=int, default=None)
     parser.add_argument(
         "--fifo-count-candidates-for-oracle",
@@ -128,56 +128,135 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Use GT targets only; do not run high-budget teacher fallback.",
     )
+    parser.add_argument(
+        "--probe-only",
+        action="store_true",
+        help="Run probe-only diagnostics without replay.",
+    )
+    parser.add_argument(
+        "--probe-output-json",
+        type=str,
+        default=None,
+        help="Write probe diagnostics to this JSON file.",
+    )
     return parser.parse_args(argv)
 
 
 def main() -> None:
     args = parse_args()
+
+    # If the config YAML is a collector-style config (has collection params
+    # like max_batches, max_events, etc.), use those as defaults for any
+    # argparse parameter that the user did NOT explicitly set on the CLI.
+    from omegaconf import OmegaConf as _OC
+    _yaml = _OC.load(args.config)
+    # Map yaml keys → argparse dest names
+    _YAML_TO_ARG = {
+        "output": "output", "dataset_key": "dataset_key",
+        "batch_size": "batch_size", "num_workers": "num_workers",
+        "max_batches": "max_batches", "max_events": "max_events",
+        "num_samples": "num_samples", "oracle_window": "oracle_window",
+        "num_views": "num_views",
+        "subset_replay_batch_size": "subset_replay_batch_size",
+        "layers_per_frame": "layers_per_frame",
+        "max_events_per_sequence": "max_events_per_sequence",
+        "flush_every_events": "flush_every_events",
+        "flush_every_batches": "flush_every_batches",
+        "log_every_subsets": "log_every_subsets",
+        "max_fetch_errors": "max_fetch_errors",
+        "max_subsets_per_dedup_event": "max_subsets_per_dedup_event",
+        "max_subsets_per_eviction_event": "max_subsets_per_eviction_event",
+        "max_subsets_per_fifo_event": "max_subsets_per_fifo_event",
+        "max_candidate_events_per_sequence": "max_candidate_events_per_sequence",
+        "max_events_per_frame": "max_events_per_frame",
+        "event_selection_policy": "event_selection_policy",
+        "stratified_layer_bucket_width": "stratified_layer_bucket_width",
+        "seed": "seed", "device": "device",
+        "oracle_profile": "oracle_profile",
+        "store_replay_payload": "store_replay_payload",
+        "sequence_manifest_path": "sequence_manifest_path",
+        "sequence_partition_policy": "sequence_partition_policy",
+        "num_sequence_shards": "num_sequence_shards",
+        "sequence_shard_id": "sequence_shard_id",
+        "dataloader_timeout": "dataloader_timeout",
+        "frontend_per_layer_budget_override": "frontend_per_layer_budget_override",
+        "fifo_keep_topk_override": "fifo_keep_topk_override",
+        "fifo_count_candidates_for_oracle": "fifo_count_candidates_for_oracle",
+        "student_checkpoint": "student_checkpoint",
+        "teacher_checkpoint": "teacher_checkpoint",
+        "probe_only": "probe_only",
+        "probe_output_json": "probe_output_json",
+    }
+    _explicit = {a for a in sys.argv[1:]}
+    for yaml_key, arg_dest in _YAML_TO_ARG.items():
+        val = getattr(_yaml, yaml_key, None)
+        if val is None:
+            continue
+        # Check if the user set this flag on the CLI (crude but effective)
+        cli_flag = "--" + arg_dest.replace("_", "-")
+        if cli_flag not in _explicit:
+            setattr(args, arg_dest, val)
+    # Boolean flag: only override from yaml if NOT explicitly passed on CLI
+    if "--no-high-budget-teacher" not in _explicit:
+        hb = getattr(_yaml, "high_budget_teacher", None)
+        if hb is not None:
+            args.no_high_budget_teacher = not bool(hb)
+
+    if not args.output:
+        print("error: --output is required (or set 'output' in the config YAML)", file=sys.stderr)
+        sys.exit(1)
     collector_cfg = FrontendOracleCollectorConfig(
         config=args.config,
         output=args.output,
         dataset_key=args.dataset_key,
-        batch_size=args.batch_size,
-        num_workers=args.num_workers,
-        max_batches=args.max_batches,
-        max_events=args.max_events,
-        num_samples=args.num_samples,
-        oracle_window=args.oracle_window,
+        batch_size=int(args.batch_size),
+        num_workers=int(args.num_workers),
+        max_batches=int(args.max_batches),
+        max_events=int(args.max_events),
+        num_samples=int(args.num_samples),
+        oracle_window=int(args.oracle_window),
         device=args.device,
-        seed=args.seed,
+        seed=int(args.seed),
         teacher_checkpoint=args.teacher_checkpoint,
         student_checkpoint=args.student_checkpoint,
         high_budget_teacher=not args.no_high_budget_teacher,
-        flush_every_events=args.flush_every_events,
-        flush_every_batches=args.flush_every_batches,
-        log_every_subsets=args.log_every_subsets,
-        subset_replay_batch_size=args.subset_replay_batch_size,
-        layers_per_frame=args.layers_per_frame,
-        max_events_per_sequence=args.max_events_per_sequence,
-        max_events_per_frame=args.max_events_per_frame,
-        max_candidate_events_per_sequence=args.max_candidate_events_per_sequence,
-        max_subsets_per_dedup_event=args.max_subsets_per_dedup_event,
-        max_subsets_per_eviction_event=args.max_subsets_per_eviction_event,
-        max_subsets_per_fifo_event=args.max_subsets_per_fifo_event,
+        flush_every_events=int(args.flush_every_events),
+        flush_every_batches=int(args.flush_every_batches),
+        log_every_subsets=int(args.log_every_subsets),
+        subset_replay_batch_size=int(args.subset_replay_batch_size),
+        layers_per_frame=int(args.layers_per_frame),
+        max_events_per_sequence=int(args.max_events_per_sequence),
+        max_events_per_frame=int(args.max_events_per_frame),
+        max_candidate_events_per_sequence=int(args.max_candidate_events_per_sequence),
+        max_subsets_per_dedup_event=int(args.max_subsets_per_dedup_event),
+        max_subsets_per_eviction_event=int(args.max_subsets_per_eviction_event),
+        max_subsets_per_fifo_event=int(args.max_subsets_per_fifo_event),
         event_selection_policy=args.event_selection_policy,
-        stratified_layer_bucket_width=args.stratified_layer_bucket_width,
-        num_views=args.num_views,
-        max_fetch_errors=args.max_fetch_errors,
+        stratified_layer_bucket_width=int(args.stratified_layer_bucket_width),
+        num_views=int(args.num_views) if args.num_views is not None else None,
+        max_fetch_errors=int(args.max_fetch_errors),
         oracle_profile=args.oracle_profile,
-        frontend_total_budget_override=args.frontend_total_budget_override,
-        fifo_keep_topk_override=args.fifo_keep_topk_override,
-        store_replay_payload=args.store_replay_payload,
+        frontend_per_layer_budget_override=int(args.frontend_per_layer_budget_override) if args.frontend_per_layer_budget_override is not None else None,
+        fifo_keep_topk_override=int(args.fifo_keep_topk_override) if args.fifo_keep_topk_override is not None else None,
+        store_replay_payload=bool(args.store_replay_payload),
         sequence_manifest_path=args.sequence_manifest_path,
         sequence_partition_policy=args.sequence_partition_policy,
-        num_sequence_shards=args.num_sequence_shards,
-        sequence_shard_id=args.sequence_shard_id,
-        dataloader_timeout=args.dataloader_timeout,
+        num_sequence_shards=int(args.num_sequence_shards) if args.num_sequence_shards is not None else None,
+        sequence_shard_id=int(args.sequence_shard_id) if args.sequence_shard_id is not None else None,
+        dataloader_timeout=int(args.dataloader_timeout),
         fifo_count_candidates_for_oracle=args.fifo_count_candidates_for_oracle,
+        probe_only=bool(args.probe_only),
+        probe_output_json=args.probe_output_json,
     )
     shard = collect_oracle_shard_from_config(collector_cfg)
     shard["collector_config"] = asdict(collector_cfg)
     save_oracle_shard(shard, args.output)
     print(f"Wrote {len(shard['events'])} oracle events to {args.output}")
+    if args.probe_output_json and "probe_diagnostics" in shard:
+        import json
+        with open(args.probe_output_json, "w", encoding="utf-8") as f:
+            json.dump(shard["probe_diagnostics"], f, indent=2, default=str)
+        print(f"Wrote probe diagnostics to {args.probe_output_json}")
 
 
 if __name__ == "__main__":
