@@ -185,8 +185,10 @@ def depthmap_to_camera_coordinates(depthmap, camera_intrinsics, pseudo_focal=Non
     camera_intrinsics = np.float32(camera_intrinsics)
     H, W = depthmap.shape
 
-    assert camera_intrinsics[0, 1] == 0.0
-    assert camera_intrinsics[1, 0] == 0.0
+    assert abs(camera_intrinsics[0, 1]) < 1e-6, f"Non-zero skew cx={camera_intrinsics[0, 1]}"
+    assert abs(camera_intrinsics[1, 0]) < 1e-6, f"Non-zero skew cy={camera_intrinsics[1, 0]}"
+    camera_intrinsics[0, 1] = 0.0
+    camera_intrinsics[1, 0] = 0.0
     if pseudo_focal is None:
         fu = camera_intrinsics[0, 0]
         fv = camera_intrinsics[1, 1]

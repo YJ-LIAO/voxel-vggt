@@ -52,7 +52,7 @@ class ParallelCollectorConfig:
     event_selection_policy: str = "stratified_round_robin"
     stratified_layer_bucket_width: int = 6
     oracle_profile: str = "real_policy"
-    frontend_total_budget_override: int | None = None
+    frontend_per_layer_budget_override: int | None = None
     fifo_keep_topk_override: int | None = None
     sequence_manifest_path: str | None = None
     sequence_partition_policy: str = "hash_mod"
@@ -108,7 +108,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--event-selection-policy", default="stratified_round_robin")
     parser.add_argument("--stratified-layer-bucket-width", type=int, default=6)
     parser.add_argument("--oracle-profile", default="real_policy")
-    parser.add_argument("--frontend-total-budget-override", type=int, default=None)
+    parser.add_argument("--frontend-per-layer-budget-override", type=int, default=None)
     parser.add_argument("--fifo-keep-topk-override", type=int, default=None)
     parser.add_argument(
         "--fifo-count-candidates-for-oracle",
@@ -216,8 +216,8 @@ def build_collection_jobs(cfg: ParallelCollectorConfig) -> list[CollectionJob]:
             "--oracle-profile",
             str(cfg.oracle_profile),
         ])
-        if cfg.frontend_total_budget_override is not None:
-            command.extend(["--frontend-total-budget-override", str(cfg.frontend_total_budget_override)])
+        if cfg.frontend_per_layer_budget_override is not None:
+            command.extend(["--frontend-per-layer-budget-override", str(cfg.frontend_per_layer_budget_override)])
         if cfg.fifo_keep_topk_override is not None:
             command.extend(["--fifo-keep-topk-override", str(cfg.fifo_keep_topk_override)])
         if cfg.fifo_count_candidates_for_oracle is not None:

@@ -770,7 +770,7 @@ def train(args):
     _, data_loader_val = build_validation_loader(args, accelerator)
 
     printer.info("Loading frontend student model")
-    frontend_total_budget = int(getattr(args, "frontend_total_budget", 200000))
+    frontend_per_layer_budget = int(getattr(args, "frontend_per_layer_budget", 8000))
     frontend_camera_budget = int(getattr(args, "frontend_camera_budget", 384))
     anchor_overflow_policy = str(getattr(args, "anchor_overflow_policy", "recent"))
     enable_track_head = int(getattr(args, "n_corres_train", 0) or 0) > 0
@@ -780,7 +780,7 @@ def train(args):
     model = OVGGT(
         mode=args.frontend_mode,
         frontend_pose_encoding_type=args.frontend_pose_encoding_type,
-        total_budget=frontend_total_budget,
+        per_layer_budget=frontend_per_layer_budget,
         camera_budget=frontend_camera_budget,
         anchor_overflow_policy=anchor_overflow_policy,
         frontend_cache_config=frontend_cache_config,
@@ -790,8 +790,8 @@ def train(args):
         use_count_head=bool(getattr(args, "use_count_head", False)),
     )
     printer.info(
-        "Frontend budgets: total_budget=%d, camera_budget=%d, anchor_overflow_policy=%s",
-        frontend_total_budget,
+        "Frontend budgets: per_layer_budget=%d, camera_budget=%d, anchor_overflow_policy=%s",
+        frontend_per_layer_budget,
         frontend_camera_budget,
         anchor_overflow_policy,
     )
@@ -803,14 +803,14 @@ def train(args):
         teacher = None
         printer.info("scorer_only=True: skipping teacher model (only training TokenScorer distill_loss)")
     else:
-        teacher_total_budget = int(getattr(args, "teacher_total_budget", frontend_total_budget))
+        teacher_per_layer_budget = int(getattr(args, "teacher_per_layer_budget", frontend_per_layer_budget))
         printer.info(
-            "Loading teacher model (OVGGT Legacy mode, total_budget=%d)",
-            teacher_total_budget,
+            "Loading teacher model (OVGGT Legacy mode, per_layer_budget=%d)",
+            teacher_per_layer_budget,
         )
         teacher = OVGGT(
             mode="legacy",
-            total_budget=teacher_total_budget,
+            per_layer_budget=teacher_per_layer_budget,
             enable_track_head=enable_track_head,
         )
 

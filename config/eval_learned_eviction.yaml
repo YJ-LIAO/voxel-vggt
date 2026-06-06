@@ -1,0 +1,27 @@
+# Evaluation defaults for commit-time learned eviction.
+
+frontend_mode: frontend_eval
+frontend_per_layer_budget: 8000
+frontend_camera_budget: 384
+frontend_pose_encoding_type: relT_quaR_FoV
+anchor_overflow_policy: global_plus_recent
+use_token_scorer: true
+token_scorer_checkpoint: /path/to/mount/lyj/voxel-vggt/checkpoints/token_scorer_oracle/token_scorer.pt
+
+frontend_cache:
+  enabled: true
+  dedup_enabled: true
+  intra_frame_dedup_enabled: false
+  fifo_keep_topk: 80
+  learned_eviction_enabled: true
+  score_state_dim: 128
+  oracle_window: 4
+  budget_allocation: uniform
+
+metrics:
+  primary:
+    camera_weight: 20.0
+    depth_weight: 20.0
+    point_map_weight: 10.0
+  auxiliary:
+    ate_200_frame: true

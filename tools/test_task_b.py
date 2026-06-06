@@ -39,14 +39,14 @@ for NF in [50,200]:
 
     print('--- {} frames ---'.format(NF))
     # Baseline: no cooldown (cooldown=0)
-    a0 = run(lambda: OVGGT(mode='frontend_eval',total_budget=200000,
+    a0 = run(lambda: OVGGT(mode='frontend_eval',per_layer_budget=8000,
                 frontend_pose_encoding_type=ABS_POSE_ENCODING,
                 frontend_cache_config=FrontendCacheConfig(enabled=True,dedup_enabled=True,dedup_cooldown_frames=0)),
              lambda m: m.inference(inputs,history_anchor_strategy='fixed_interval',anchor_interval=8,max_anchors=3))
     print('  cooldown=0:   ATE={:.4f}'.format(a0))
 
     for cd in [4, 8, 12, 16, 24, 32]:
-        a = run(lambda cd=cd: OVGGT(mode='frontend_eval',total_budget=200000,
+        a = run(lambda cd=cd: OVGGT(mode='frontend_eval',per_layer_budget=8000,
                     frontend_pose_encoding_type=ABS_POSE_ENCODING,
                     frontend_cache_config=FrontendCacheConfig(enabled=True,dedup_enabled=True,dedup_cooldown_frames=cd)),
                  lambda m: m.inference(inputs,history_anchor_strategy='fixed_interval',anchor_interval=8,max_anchors=3))

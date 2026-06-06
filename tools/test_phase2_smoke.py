@@ -13,14 +13,13 @@ cfs=sorted([f for f in os.listdir(scene) if f.endswith('.color.png')])[:10]
 imgs=load_and_preprocess_images([os.path.join(scene,f) for f in cfs]).cuda()
 inputs=[{'img':i.unsqueeze(0)} for i in imgs]
 
-m=OVGGT(mode='frontend_eval',total_budget=200000,
+m=OVGGT(mode='frontend_eval',per_layer_budget=8000,
          frontend_pose_encoding_type=ABS_POSE_ENCODING,
-         frontend_cache_config=FrontendCacheConfig(
-             enabled=True,dedup_enabled=True,
-             intra_frame_dedup_enabled=False,
-             fifo_keep_topk=80,
-             use_learned_scorer=True),
-         use_token_scorer=True)
+          frontend_cache_config=FrontendCacheConfig(
+              enabled=True,dedup_enabled=True,
+              intra_frame_dedup_enabled=False,
+              fifo_keep_topk=80),
+          use_token_scorer=True)
 m.load_state_dict(sd,strict=False); m=m.cuda().eval()
 
 # Verify scorer is wired

@@ -44,7 +44,7 @@ class OVGGT(nn.Module, PyTorchModelHubMixin):
         img_size=518,
         patch_size=14,
         embed_dim=1024,
-        total_budget=200000,
+        per_layer_budget=8000,
         camera_budget=384,
         eviction_strategy="repr_shift_spatial",
         intra_frame_keep_ratio=1.0,
@@ -148,7 +148,7 @@ class OVGGT(nn.Module, PyTorchModelHubMixin):
             else None
         )
 
-        self.total_budget = total_budget
+        self.per_layer_budget = per_layer_budget
         self.eviction_strategy = eviction_strategy
         self.importance_weight = importance_weight
         self.camera_num_iters = camera_num_iters
@@ -624,7 +624,7 @@ class OVGGT(nn.Module, PyTorchModelHubMixin):
             [None] * self.camera_head.trunk_depth
             for _ in range(B)
         ]
-        total_budget = self.total_budget
+        per_layer_budget = self.per_layer_budget
         importance_weight = self.importance_weight
         intra_frame_keep_ratio = self.aggregator.intra_frame_keep_ratio
 
@@ -664,7 +664,7 @@ class OVGGT(nn.Module, PyTorchModelHubMixin):
                     cache_states=cache_states[b],
                     use_cache=True,
                     past_frame_idx=i,
-                    total_budget=total_budget,
+                    per_layer_budget=per_layer_budget,
                     importance_weight=importance_weight,
                     frontend_cache_config=self.frontend_cache_config,
                 )
@@ -977,7 +977,7 @@ class OVGGT(nn.Module, PyTorchModelHubMixin):
     ):
         past_key_values = [None] * self.aggregator.depth
         past_key_values_camera = [None] * self.camera_head.trunk_depth
-        total_budget = self.total_budget
+        per_layer_budget = self.per_layer_budget
         importance_weight = self.importance_weight
 
         img_h, img_w = self._infer_image_hw(frames)
@@ -1019,7 +1019,7 @@ class OVGGT(nn.Module, PyTorchModelHubMixin):
                 past_key_values=past_key_values,
                 use_cache=True,
                 past_frame_idx=i,
-                total_budget=total_budget,
+                per_layer_budget=per_layer_budget,
                 anchor_token_count=anchor_token_count,
                 importance_weight=importance_weight,
             )

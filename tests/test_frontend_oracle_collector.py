@@ -81,6 +81,40 @@ def test_eviction_probe_records_commit_time_candidate_features():
         assert {0, 1}.issubset(set(keep.tolist()))
 
 
+def test_eviction_probe_respects_subset_cap():
+    from ovggt.training.frontend_oracle_collector import CounterfactualEvictionProbe
+
+    state = LayerCacheState(
+        k=torch.randn(1, 2, 8, 4),
+        v=torch.randn(1, 2, 8, 4),
+        score_state=torch.arange(24, dtype=torch.float32).reshape(1, 8, 3),
+        metadata=_metadata(
+            anchor_slots=[0, 1, -1, -1, -1, -1, -1, -1],
+            frame_ids=[0, 0, 1, 1, 2, 2, 3, 3],
+            importance=[0.0, 0.0, 0.5, 0.2, 0.9, 0.1, 0.8, 0.3],
+        ),
+        protected_count=2,
+    )
+    probe = CounterfactualEvictionProbe(
+        num_samples=8,
+        oracle_window=2,
+        seed=7,
+        event_prefix="unit",
+        max_subsets_per_eviction_event=2,
+    )
+
+    probe.on_eviction_candidate(
+        cache_state=state,
+        layer_id=3,
+        frame_id=3,
+        budget=4,
+        batch_index=0,
+    )
+
+    assert len(probe.events) == 1
+    assert len(probe.events[0]["candidate_subsets"]) <= 2
+
+
 def test_eviction_probe_records_sequence_provenance_for_input_sequence():
     from ovggt.training.frontend_oracle_collector import CounterfactualEvictionProbe
 
@@ -629,6 +663,7 @@ def test_measure_counterfactual_event_batches_subset_replays(monkeypatch):
     ]
     event = {
         "event_id": "unit-event",
+        "event_type": "dedup",
         "layer_id": 0,
         "frame_id": 0,
         "batch_index": 0,
@@ -643,11 +678,12 @@ def test_measure_counterfactual_event_batches_subset_replays(monkeypatch):
     class CacheState:
         k = torch.empty(1, 1, 4, 1)
 
-    def fake_run_frontend(model, replay_frames, probe, cache_results, **kwargs):
-        run_calls.append((replay_frames, probe, cache_results))
+    def fake_run_frontend(model, replay_frames, probe, cache_results, dedup_replay_probe=None, **kwargs):
+        run_calls.append((replay_frames, dedup_replay_probe or probe, cache_results))
         assert replay_frames[0]["img"].shape[0] == 2
-        keep0 = probe.on_eviction_candidate(CacheState(), 0, 0, 2, batch_index=0)
-        keep1 = probe.on_eviction_candidate(CacheState(), 0, 0, 2, batch_index=1)
+        active_probe = dedup_replay_probe or probe
+        keep0 = active_probe.on_dedup_candidate(CacheState(), 0, 0, batch_index=0)
+        keep1 = active_probe.on_dedup_candidate(CacheState(), 0, 0, batch_index=1)
         assert torch.equal(keep0.cpu(), torch.tensor([0, 1]))
         assert torch.equal(keep1.cpu(), torch.tensor([0, 2]))
         return SimpleNamespace(
@@ -816,7 +852,7 @@ def test_measure_counterfactual_event_stores_replay_payload_only_when_requested(
     assert torch.equal(payload_event["subsets"][0]["replay"]["predictions"][0]["depth"], torch.zeros(1, 2, 2, 1))
 
 
-def test_measure_counterfactual_event_falls_back_to_serial_when_batched_replay_misses(monkeypatch):
+def test_measure_counterfactual_event_uses_serial_replay_for_eviction_batches(monkeypatch):
     import ovggt.training.frontend_oracle_collector as collector
 
     frames = [
@@ -829,7 +865,8 @@ def test_measure_counterfactual_event_falls_back_to_serial_when_batched_replay_m
         },
     ]
     event = {
-        "event_id": "unit-event",
+        "event_id": "eviction-event",
+        "event_type": "eviction",
         "layer_id": 0,
         "frame_id": 0,
         "batch_index": 0,
@@ -847,9 +884,6 @@ def test_measure_counterfactual_event_falls_back_to_serial_when_batched_replay_m
 
     def fake_run_frontend(model, replay_frames, probe, cache_results, **kwargs):
         calls.append(type(probe).__name__)
-        if type(probe).__name__ == "MultiReplayKeepSetProbe":
-            assert replay_frames[0]["img"].shape[0] == 2
-            return SimpleNamespace(ress=[{}, {"depth": torch.zeros(2, 2, 2, 1)}])
         keep = probe.on_eviction_candidate(CacheState(), 0, 0, 2, batch_index=0)
         assert keep is not None
         offset = 0.0 if torch.equal(keep.cpu(), torch.tensor([0, 1])) else 1.0
@@ -874,8 +908,73 @@ def test_measure_counterfactual_event_falls_back_to_serial_when_batched_replay_m
         log_fn=logs.append,
     )
 
-    assert calls == ["MultiReplayKeepSetProbe", "ReplayKeepSetProbe", "ReplayKeepSetProbe"]
-    assert any("falling back to serial replay" in message for message in logs)
+    assert calls == ["ReplayKeepSetProbe", "ReplayKeepSetProbe"]
+    assert not any("falling back to serial replay" in message for message in logs)
+    assert [subset["keep_indices"].tolist() for subset in measured["subsets"]] == [[0, 1], [0, 2]]
+
+
+def test_measure_counterfactual_event_falls_back_to_serial_when_batched_replay_misses(monkeypatch):
+    import ovggt.training.frontend_oracle_collector as collector
+
+    frames = [
+        {"img": torch.zeros(1, 3, 2, 2)},
+        {
+            "img": torch.zeros(1, 3, 2, 2),
+            "depthmap": torch.zeros(1, 2, 2),
+            "pts3d": torch.zeros(1, 2, 2, 3),
+            "valid_mask": torch.ones(1, 2, 2, dtype=torch.bool),
+        },
+    ]
+    event = {
+        "event_id": "unit-event",
+        "event_type": "dedup",
+        "layer_id": 0,
+        "frame_id": 0,
+        "batch_index": 0,
+        "budget": 2,
+        "candidate_subsets": [
+            {"keep_indices": torch.tensor([0, 1])},
+            {"keep_indices": torch.tensor([0, 2])},
+        ],
+    }
+    logs = []
+    calls = []
+
+    class CacheState:
+        k = torch.empty(1, 1, 4, 1)
+
+    def fake_run_frontend(model, replay_frames, probe, cache_results, dedup_replay_probe=None, **kwargs):
+        active_probe = dedup_replay_probe or probe
+        calls.append(type(active_probe).__name__)
+        if type(active_probe).__name__ == "MultiReplayDedupKeepSetProbe":
+            assert replay_frames[0]["img"].shape[0] == 2
+            return SimpleNamespace(ress=[{}, {"depth": torch.zeros(2, 2, 2, 1)}])
+        keep = active_probe.on_dedup_candidate(CacheState(), 0, 0, batch_index=0)
+        assert keep is not None
+        offset = 0.0 if torch.equal(keep.cpu(), torch.tensor([0, 1])) else 1.0
+        return SimpleNamespace(
+            ress=[
+                {},
+                {
+                    "depth": torch.full((1, 2, 2, 1), offset),
+                    "pts3d_in_other_view": torch.full((1, 2, 2, 3), offset),
+                },
+            ]
+        )
+
+    monkeypatch.setattr(collector, "_run_frontend_with_probe", fake_run_frontend)
+
+    measured = collector.measure_counterfactual_event(
+        model=object(),
+        frames=frames,
+        event=event,
+        future_frames=frames[1:],
+        subset_replay_batch_size=2,
+        log_fn=logs.append,
+    )
+
+    assert calls == ["MultiReplayDedupKeepSetProbe", "ReplayDedupKeepSetProbe", "ReplayDedupKeepSetProbe"]
+    assert any("batched dedup replay keep sets" in message and "falling back to serial replay" in message for message in logs)
     assert [subset["keep_indices"].tolist() for subset in measured["subsets"]] == [[0, 1], [0, 2]]
     assert measured["subsets"][0]["loss"] == 0.0
     assert measured["subsets"][1]["loss"] > 0.0
@@ -895,6 +994,7 @@ def test_measure_counterfactual_event_skips_when_fallback_serial_subset_misses(m
     ]
     event = {
         "event_id": "partially-unstable-event",
+        "event_type": "dedup",
         "layer_id": 0,
         "frame_id": 0,
         "batch_index": 0,
@@ -910,14 +1010,15 @@ def test_measure_counterfactual_event_skips_when_fallback_serial_subset_misses(m
     class CacheState:
         k = torch.empty(1, 1, 4, 1)
 
-    def fake_run_frontend(model, replay_frames, probe, cache_results, **kwargs):
-        calls.append(type(probe).__name__)
-        if type(probe).__name__ == "MultiReplayKeepSetProbe":
-            keep0 = probe.on_eviction_candidate(CacheState(), 0, 0, 2, batch_index=0)
+    def fake_run_frontend(model, replay_frames, probe, cache_results, dedup_replay_probe=None, **kwargs):
+        active_probe = dedup_replay_probe or probe
+        calls.append(type(active_probe).__name__)
+        if type(active_probe).__name__ == "MultiReplayDedupKeepSetProbe":
+            keep0 = active_probe.on_dedup_candidate(CacheState(), 0, 0, batch_index=0)
             assert torch.equal(keep0.cpu(), torch.tensor([0, 1]))
             return SimpleNamespace(ress=[{}, {"depth": torch.zeros(2, 2, 2, 1)}])
         if len(calls) == 2:
-            keep = probe.on_eviction_candidate(CacheState(), 0, 0, 2, batch_index=0)
+            keep = active_probe.on_dedup_candidate(CacheState(), 0, 0, batch_index=0)
             assert torch.equal(keep.cpu(), torch.tensor([0, 1]))
         return SimpleNamespace(
             ress=[
@@ -941,8 +1042,8 @@ def test_measure_counterfactual_event_skips_when_fallback_serial_subset_misses(m
     )
 
     assert measured is None
-    assert calls == ["MultiReplayKeepSetProbe", "ReplayKeepSetProbe", "ReplayKeepSetProbe"]
-    assert any("fallback serial replay did not apply all keep sets" in message for message in logs)
+    assert calls == ["MultiReplayDedupKeepSetProbe", "ReplayDedupKeepSetProbe", "ReplayDedupKeepSetProbe"]
+    assert any("dedup fallback serial replay did not apply all keep sets" in message for message in logs)
 
 
 def test_measure_counterfactual_event_skips_event_when_replay_never_matches(monkeypatch):
@@ -1715,3 +1816,124 @@ def test_quota_stratified_without_quotas_falls_back_to_stratified():
         event_type_quotas=None,
     )
     assert len(selected) == 10
+
+
+def test_collector_respects_oracle_anchor_interval():
+    """Collector passes oracle anchor overrides directly to model.inference."""
+    from ovggt.training.frontend_oracle_collector import collect_oracle_events_from_sequence
+
+    model = SimpleNamespace(inference_calls=[])
+
+    def fake_inference(frames, **kwargs):
+        model.inference_calls.append(kwargs)
+        return SimpleNamespace(ress=[])
+
+    model.inference = fake_inference
+    frames = [{"img": torch.zeros(1, 3, 2, 2)} for _ in range(3)]
+
+    collect_oracle_events_from_sequence(
+        model=model,
+        frames=frames,
+        device=torch.device("cpu"),
+        max_events=16,
+        num_samples=4,
+        oracle_window=2,
+        oracle_anchor_interval=4,
+        oracle_max_anchors=2,
+        probe_only=True,
+        probe_diagnostics_sink=[],
+    )
+
+    assert model.inference_calls, "Expected _run_frontend_with_probe to call model.inference"
+    call_kwargs = model.inference_calls[0]
+    assert call_kwargs["history_anchor_strategy"] == "fixed_interval"
+    assert call_kwargs["anchor_interval"] == 4
+    assert call_kwargs["max_anchors"] == 2
+
+
+def test_random_bucket_layer_schedule_covers_all_buckets():
+    """random_bucket layer schedule should produce candidates across all layer buckets."""
+    from ovggt.training.frontend_oracle_collector import should_record_oracle_layer_with_schedule
+
+    num_layers = 24
+    bucket_width = 6
+    selected_layers: set[int] = set()
+    for frame_id in range(8):
+        for layer_id in range(num_layers):
+            if should_record_oracle_layer_with_schedule(
+                layer_id=layer_id,
+                frame_id=frame_id,
+                schedule="random_bucket",
+                num_layers=num_layers,
+                layer_buckets=[[0, 5], [6, 11], [12, 17], [18, 23]],
+                seed=42,
+            ):
+                selected_layers.add(layer_id)
+
+    buckets_hit = {layer_id // bucket_width for layer_id in selected_layers}
+    assert len(buckets_hit) >= 3, (
+        f"Expected coverage across >=3 layer buckets, got {len(buckets_hit)}: {buckets_hit}"
+    )
+
+
+def test_rotating_stride_layer_schedule():
+    """rotating_stride should cycle through different layer pairs across frames."""
+    from ovggt.training.frontend_oracle_collector import should_record_oracle_layer_with_schedule
+
+    num_layers = 24
+    layers_per_frame = 2
+    frame0_layers: set[int] = set()
+    frame1_layers: set[int] = set()
+
+    for layer_id in range(num_layers):
+        if should_record_oracle_layer_with_schedule(
+            layer_id=layer_id,
+            frame_id=0,
+            schedule="rotating_stride",
+            num_layers=num_layers,
+            layers_per_frame=layers_per_frame,
+            seed=0,
+        ):
+            frame0_layers.add(layer_id)
+        if should_record_oracle_layer_with_schedule(
+            layer_id=layer_id,
+            frame_id=1,
+            schedule="rotating_stride",
+            num_layers=num_layers,
+            layers_per_frame=layers_per_frame,
+            seed=0,
+        ):
+            frame1_layers.add(layer_id)
+
+    assert frame0_layers != frame1_layers, (
+        f"Frame 0 and frame 1 selected same layers: {frame0_layers}"
+    )
+
+
+def test_frame_bucket_selection_prefers_later_frames():
+    """When frame_buckets are set, selection should include mid/late frame candidates."""
+    from ovggt.training.frontend_oracle_collector import select_oracle_events
+
+    candidates = [
+        *({"event_type": "dedup", "frame_id": f, "layer_id": 0, "voxel_group_id": f} for f in range(0, 3)),
+        *({"event_type": "dedup", "frame_id": f, "layer_id": 0, "voxel_group_id": 100 + f} for f in range(0, 3)),
+        *({"event_type": "dedup", "frame_id": f, "layer_id": 0, "voxel_group_id": 200 + f} for f in range(0, 3)),
+        {"event_type": "eviction", "frame_id": 10, "layer_id": 0, "voxel_group_id": 300},
+        {"event_type": "eviction", "frame_id": 15, "layer_id": 0, "voxel_group_id": 301},
+    ]
+
+    selected = select_oracle_events(
+        candidates,
+        max_events=6,
+        max_events_per_frame=6,
+        policy="quota_stratified",
+        layer_bucket_width=6,
+        event_type_quotas={"eviction": 4, "dedup": 2},
+        frame_buckets=[(0, 3), (4, 8), (9, 23)],
+    )
+
+    frames = [e["frame_id"] for e in selected]
+    late_frames = [frame_id for frame_id in frames if frame_id >= 9]
+    assert len(late_frames) > 0, (
+        f"Expected some late-frame events (frame >= 9), got frames: {frames}"
+    )

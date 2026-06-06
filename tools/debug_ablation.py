@@ -41,33 +41,33 @@ for NF in [50,100,200]:
 
     # Legacy
     a0=run_test('Legacy',
-        OVGGT(mode='legacy',total_budget=200000),
+        OVGGT(mode='legacy',per_layer_budget=8000),
         lambda m: m.inference(inputs,history_anchor_strategy='coverage',anchor_interval=250))
 
     # Frontend: int=100, dedup=OFF
     a1=run_test('FE100_noDedup',
-        OVGGT(mode='frontend_eval',total_budget=200000,
+        OVGGT(mode='frontend_eval',per_layer_budget=8000,
               frontend_pose_encoding_type=ABS_POSE_ENCODING,
               frontend_cache_config=FrontendCacheConfig(enabled=True,dedup_enabled=False)),
         lambda m: m.inference(inputs,history_anchor_strategy='fixed_interval',anchor_interval=100,max_anchors=3))
 
     # Frontend: int=100, dedup=ON
     a2=run_test('FE100_dedup',
-        OVGGT(mode='frontend_eval',total_budget=200000,
+        OVGGT(mode='frontend_eval',per_layer_budget=8000,
               frontend_pose_encoding_type=ABS_POSE_ENCODING,
               frontend_cache_config=FrontendCacheConfig(enabled=True,dedup_enabled=True)),
         lambda m: m.inference(inputs,history_anchor_strategy='fixed_interval',anchor_interval=100,max_anchors=3))
 
     # Frontend: int=8, dedup=OFF
     a3=run_test('FE8_noDedup',
-        OVGGT(mode='frontend_eval',total_budget=200000,
+        OVGGT(mode='frontend_eval',per_layer_budget=8000,
               frontend_pose_encoding_type=ABS_POSE_ENCODING,
               frontend_cache_config=FrontendCacheConfig(enabled=True,dedup_enabled=False)),
         lambda m: m.inference(inputs,history_anchor_strategy='fixed_interval',anchor_interval=8,max_anchors=3))
 
     # Frontend: int=8, dedup=ON
     a4=run_test('FE8_dedup',
-        OVGGT(mode='frontend_eval',total_budget=200000,
+        OVGGT(mode='frontend_eval',per_layer_budget=8000,
               frontend_pose_encoding_type=ABS_POSE_ENCODING,
               frontend_cache_config=FrontendCacheConfig(enabled=True,dedup_enabled=True)),
         lambda m: m.inference(inputs,history_anchor_strategy='fixed_interval',anchor_interval=8,max_anchors=3))

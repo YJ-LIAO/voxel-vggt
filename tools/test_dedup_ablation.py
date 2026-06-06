@@ -37,20 +37,20 @@ for NF in [50,100,200]:
         a=ate(gt,getp(o,h,w)); del m; gc.collect(); torch.cuda.empty_cache()
         return a
 
-    a0 = run(lambda: OVGGT(mode='legacy',total_budget=200000),
+    a0 = run(lambda: OVGGT(mode='legacy',per_layer_budget=8000),
              lambda m: m.inference(inputs,history_anchor_strategy='coverage',anchor_interval=250))
 
-    a1 = run(lambda: OVGGT(mode='frontend_eval',total_budget=200000,
+    a1 = run(lambda: OVGGT(mode='frontend_eval',per_layer_budget=8000,
                 frontend_pose_encoding_type=ABS_POSE_ENCODING,
                 frontend_cache_config=FrontendCacheConfig(enabled=True,dedup_enabled=True)),
              lambda m: m.inference(inputs,history_anchor_strategy='fixed_interval',anchor_interval=100,max_anchors=3))
 
-    a2 = run(lambda: OVGGT(mode='frontend_eval',total_budget=200000,
+    a2 = run(lambda: OVGGT(mode='frontend_eval',per_layer_budget=8000,
                 frontend_pose_encoding_type=ABS_POSE_ENCODING,
                 frontend_cache_config=FrontendCacheConfig(enabled=True,dedup_enabled=True)),
              lambda m: m.inference(inputs,history_anchor_strategy='fixed_interval',anchor_interval=8,max_anchors=3))
 
-    a3 = run(lambda: OVGGT(mode='frontend_eval',total_budget=200000,
+    a3 = run(lambda: OVGGT(mode='frontend_eval',per_layer_budget=8000,
                 frontend_pose_encoding_type=ABS_POSE_ENCODING,
                 frontend_cache_config=FrontendCacheConfig(enabled=True,dedup_enabled=False)),
              lambda m: m.inference(inputs,history_anchor_strategy='fixed_interval',anchor_interval=8,max_anchors=3))

@@ -655,12 +655,13 @@ class LayerCacheState:
 
         # After computing keep indices, call dedup probe if present
         if dedup_probe is not None:
+            local_batch_index = 0 if B == 1 else int(batch_index)
             dedup_probe.on_dedup_candidate(
                 cache_state=self,
                 layer_id=layer_id,
                 frame_id=current_frame_id,
                 batch_index=batch_index,
-                scores=scores[batch_index],
+                scores=scores[local_batch_index],
                 policy_keep_indices=policy_keep_indices,
             )
 

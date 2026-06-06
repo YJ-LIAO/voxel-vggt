@@ -35,7 +35,7 @@ def align_err(gt,pred):
 
 # Frontend with keyframe interval=8
 print('Frontend (interval=8)...')
-m=OVGGT(mode='frontend_eval',total_budget=200000,
+m=OVGGT(mode='frontend_eval',per_layer_budget=8000,
         frontend_pose_encoding_type=ABS_POSE_ENCODING,
         frontend_cache_config=FrontendCacheConfig(enabled=True, dedup_enabled=True))
 m.load_state_dict(sd,strict=False); m=m.cuda().eval()
@@ -45,7 +45,7 @@ del m; gc.collect(); torch.cuda.empty_cache()
 
 # Frontend with keyframe interval=100 (essentially no keyframe events in 100 frames)
 print('Frontend (interval=100, no keyframe events)...')
-m=OVGGT(mode='frontend_eval',total_budget=200000,
+m=OVGGT(mode='frontend_eval',per_layer_budget=8000,
         frontend_pose_encoding_type=ABS_POSE_ENCODING,
         frontend_cache_config=FrontendCacheConfig(enabled=True, dedup_enabled=True))
 m.load_state_dict(sd,strict=False); m=m.cuda().eval()
@@ -55,7 +55,7 @@ del m; gc.collect(); torch.cuda.empty_cache()
 
 # Frontend with dedup DISABLED
 print('Frontend (interval=8, dedup=OFF)...')
-m=OVGGT(mode='frontend_eval',total_budget=200000,
+m=OVGGT(mode='frontend_eval',per_layer_budget=8000,
         frontend_pose_encoding_type=ABS_POSE_ENCODING,
         frontend_cache_config=FrontendCacheConfig(enabled=True, dedup_enabled=False))
 m.load_state_dict(sd,strict=False); m=m.cuda().eval()

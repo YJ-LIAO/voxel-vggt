@@ -3,6 +3,10 @@
 > Multi-sequence batched training with independent per-sequence streaming state
 > Date: 2026-05-26
 
+> **Naming migration (2026-06-04):** `frontend_total_budget` → `frontend_per_layer_budget`
+> (now per-layer; was 24-layer sum). Historical numeric values (200000, 10410) are
+> preserved verbatim in calculations below — they refer to the old total-budget semantics.
+
 ---
 
 ## 1. Motivation
@@ -486,7 +490,7 @@ On read, return the cached value without GPU sync. The cached values may be slig
 2. Monitor GPU memory: expected increase is B × (cache state memory per sequence)
    - Cache state memory per sequence: ~24 layers × (K cache + V cache + metadata) ≈ 24 × (~50MB) ≈ 1.2GB
    - B=4 total cache overhead: ~4.8GB (should fit within typical 40GB/80GB GPU)
-3. If OOM, reduce `frontend_total_budget` proportionally or enable gradient checkpointing
+3. If OOM, reduce `frontend_per_layer_budget` proportionally or enable gradient checkpointing
 
 ### Phase 3: Scale to B=8
 1. Test with B=8 on a single GPU
@@ -536,7 +540,7 @@ Existing test that needs update:
 | 1 | Cache state padding causes attention artifacts | Pad with zeros + `-inf` mask; verify attention weights are zero on padded positions |
 | 2 | Per-batch event divergence causes desynchronization | **Phase 1 (fixed_interval only)**: All sequences share identical `frame_idx=i`, so keyframe events are guaranteed identical. Add assertion: `assert all(e.event_type == events[0].event_type for e in events)`. **Phase 2+ (coverage strategies)**: Events may diverge because depth/pose values differ across sequences. Per-batch event list already handles this correctly — no assertion, no fix needed |
 | 2a | `build_frame_token_metadata_base` scalar args diverge with coverage strategy (see §4.8) | **Phase 1**: Not applicable (fixed_interval, all values identical). **Phase 2+**: Expand `frame_id`/`keyframe_id`/`slot_id`/`anchor_slot` to per-batch |
-| 3 | GPU memory exceeds budget at B=4 | Enable `gradient_checkpointing=True` (40-60% memory reduction, 30% compute increase) or reduce `frontend_total_budget` |
+| 3 | GPU memory exceeds budget at B=4 | Enable `gradient_checkpointing=True` (40-60% memory reduction, 30% compute increase) or reduce `frontend_per_layer_budget` |
 | 4 | Sync point cache invalidation bug | Add debug assertions in Phase 1: after each frame, verify cached `_protected_count` matches ground-truth `.item()` value |
 | 5 | DDP communication overhead increases with B | `ddp_static_graph=True` already set; gradient all-reduce communicates parameter gradients (fixed size regardless of B) |
 | 6 | Data loader becomes bottleneck | `num_workers=8` with `persistent_workers=True` should handle B=4; increase to 12 if needed |
@@ -614,11 +618,11 @@ def accumulate_student_frame(frame_idx, frame_gt, student_pred):
 
 ### Review-4（重要）：内存估算仅适用于低 budget 配置
 
-**问题**：§6 Phase 2 估算 "Cache state memory per sequence: ~1.2GB"。此估算基于 `frontend_total_budget=10410`（TokenScorer 配置）。
+**问题**：§6 Phase 2 估算 "Cache state memory per sequence: ~1.2GB"。此估算基于 `frontend_per_layer_budget=10410`（TokenScorer 配置）。
 
 实际计算（budget=10410）：10410 tokens × 16 heads × 64 dim × 2 bytes (bf16) × 2 (K+V) ≈ 42.7MB/layer × 24 layers ≈ 1.02GB。✓
 
-但如果使用默认 `train_frontend_blendedmvs.yaml` 的 `total_budget=200000`：
+但如果使用默认 `train_frontend_blendedmvs.yaml` 的 `total_budget=200000`（旧语义，24层总和）：
 200000 × 16 × 64 × 2 × 2 ≈ 819MB/layer × 24 layers ≈ **19.7GB per sequence**。
 
 B=4 需要 ~79GB，超出 A800 80GB（还要留空间给 activations、optimizer states 等）。

@@ -114,6 +114,36 @@ def test_build_ovggt_count_head_state_dict():
         assert not value.requires_grad
 
 
+def test_train_records_validation_split(tmp_path):
+    """val_fraction should create a held-out split recorded in the checkpoint."""
+    from train_fifo_count_head import train_fifo_count_head
+
+    shard_path = _make_fake_shard(tmp_path / "fake_shard.pt", num_events=30)
+    output_path = tmp_path / "output" / "fifo_count_head.pt"
+
+    train_fifo_count_head(
+        oracle_shards=[str(shard_path)],
+        output=str(output_path),
+        count_candidates=(0, 8, 16, 32, 64, 128),
+        score_state_dim=128,
+        hidden_dim=32,
+        num_layers=24,
+        batch_size=4,
+        epochs=1,
+        lr=1e-3,
+        label_reduction="min",
+        val_fraction=0.5,
+        split_seed=3,
+        device="cpu",
+    )
+
+    checkpoint = torch.load(output_path, map_location="cpu", weights_only=False)
+    assert checkpoint["train_sample_count"] > 0
+    assert checkpoint["val_sample_count"] > 0
+    assert checkpoint["train_sample_count"] + checkpoint["val_sample_count"] == 30
+    assert "validation_metrics" in checkpoint
+
+
 def test_train_multiple_epochs_reduces_loss(tmp_path):
     """Training for multiple epochs should reduce loss on the training data."""
     from train_fifo_count_head import train_fifo_count_head

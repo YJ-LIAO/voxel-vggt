@@ -55,15 +55,15 @@ for scene_name in scenes:
         a=ate(gt,getp(o,h,w)); del m; gc.collect(); torch.cuda.empty_cache()
         return a
 
-    a_leg = run(lambda: OVGGT(mode='legacy',total_budget=200000),
+    a_leg = run(lambda: OVGGT(mode='legacy',per_layer_budget=8000),
                 lambda m: m.inference(inputs,history_anchor_strategy='coverage',anchor_interval=250))
 
-    a_orig = run(lambda: OVGGT(mode='frontend_eval',total_budget=200000,
+    a_orig = run(lambda: OVGGT(mode='frontend_eval',per_layer_budget=8000,
                 frontend_pose_encoding_type=ABS_POSE_ENCODING,
                 frontend_cache_config=FrontendCacheConfig(enabled=True,dedup_enabled=True)),
              lambda m: m.inference(inputs,history_anchor_strategy='fixed_interval',anchor_interval=8,max_anchors=3))
 
-    a_opt = run(lambda: OVGGT(mode='frontend_eval',total_budget=200000,
+    a_opt = run(lambda: OVGGT(mode='frontend_eval',per_layer_budget=8000,
                 frontend_pose_encoding_type=ABS_POSE_ENCODING,
                 frontend_cache_config=FrontendCacheConfig(enabled=True,dedup_enabled=True,
                     intra_frame_dedup_enabled=False,fifo_keep_topk=80)),

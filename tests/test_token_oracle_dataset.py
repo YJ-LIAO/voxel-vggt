@@ -1142,3 +1142,46 @@ def test_from_events_matches_shard_constructor(tmp_path):
     for s, e in zip(count_from_shard.samples, count_from_events.samples):
         assert s["event_id"] == e["event_id"]
         assert s["target"] == e["target"]
+
+
+def test_summarizer_detects_all_dedup_shard():
+    """Summarizer should report 100% dedup and flag diversity failure."""
+    from tools.summarize_oracle_event_diversity import summarize_shard, check_diversity_thresholds
+
+    shard = {
+        "events": [
+            {"event_type": "dedup", "frame_id": 0, "layer_id": 0, "sequence_provenance": {"dataset": "test"}},
+            {"event_type": "dedup", "frame_id": 1, "layer_id": 1, "sequence_provenance": {"dataset": "test"}},
+        ],
+    }
+    summary = summarize_shard(shard)
+    assert summary["event_type_counts"]["dedup"] == 2
+    assert summary["event_type_counts"].get("eviction", 0) == 0
+
+    issues = check_diversity_thresholds(summary, profile="low_budget_eviction")
+    assert any("eviction" in issue for issue in issues), f"Expected eviction diversity issue, got: {issues}"
+
+
+def test_summarizer_parses_gpu3_style_log(tmp_path):
+    """Log summarizer should parse raw probe counts and final shard summary."""
+    from tools.summarize_oracle_event_diversity import summarize_log
+
+    log_path = tmp_path / "oracle_collection_gpu3.log"
+    log_path.write_text(
+        "\n".join(
+            [
+                "[oracle] batch0: probe captured 2 eviction, 20 dedup, 0 fifo candidates, 16 total have future frames",
+                '[oracle] flushed final shard summary={"num_events": 16, '
+                '"event_type_counts": {"dedup": 16}, '
+                '"frame_histogram": {"0": 8, "1": 8}, '
+                '"layer_histogram": {"0": 8, "12": 8}, '
+                '"elapsed_sec": 100.0}',
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    summary = summarize_log(log_path)
+    assert summary["raw_event_type_counts"] == {"eviction": 2, "dedup": 20, "fifo_topk": 0}
+    assert summary["event_type_counts"] == {"dedup": 16}
+    assert summary["total_events"] == 16

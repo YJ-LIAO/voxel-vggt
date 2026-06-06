@@ -197,18 +197,13 @@ class BlendedMVS_Multi(BaseMultiViewDataset):
         cutoff = num_views if not allow_repeat else max(num_views // 5, 3)
         if start_index in self.is_reachable_cache[scene]:
             if not self.is_reachable_cache[scene][start_index]:
-                print(
-                    f"Cannot reach {num_views} unique elements from index {start_index}."
-                )
                 return None
         else:
             self.is_reachable_cache[scene][start_index] = self.is_reachable(
                 adj_list, start_index, cutoff
             )
             if not self.is_reachable_cache[scene][start_index]:
-                print(
-                    f"Cannot reach {num_views} unique elements from index {start_index}."
-                )
+                return None
                 return None
         if not allow_repeat:
             sequence = self.random_sequence_no_revisit_with_backtracking(
@@ -220,7 +215,6 @@ class BlendedMVS_Multi(BaseMultiViewDataset):
             )
         if not sequence:
             self.is_reachable_cache[scene][start_index] = False
-            print("Failed to generate a sequence without revisiting.")
         return sequence
 
     def _get_views(self, idx, resolution, rng: np.random.Generator, num_views):

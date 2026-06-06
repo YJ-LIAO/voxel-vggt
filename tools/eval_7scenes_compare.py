@@ -149,7 +149,7 @@ def run_frontend_inference(checkpoint, inputs, device, budget):
     print("Loading voxel-vggt Frontend model...")
     model = OVGGT(
         mode="frontend_eval",
-        total_budget=budget,
+        per_layer_budget=budget,
         frontend_pose_encoding_type=ABS_POSE_ENCODING,
         frontend_cache_config=FrontendCacheConfig(enabled=True),
     )
@@ -211,7 +211,7 @@ gt_poses = np.array(gt_poses)
 
 # Model
 device = torch.device("cuda:{gpu_id}")
-model = OVGGT(total_budget={budget})
+model = OVGGT(per_layer_budget={budget})
 state_dict = torch.load("{checkpoint}", map_location="cpu", weights_only=False)
 if isinstance(state_dict, dict) and "model" in state_dict:
     state_dict = state_dict["model"]

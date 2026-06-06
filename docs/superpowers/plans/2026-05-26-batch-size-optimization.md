@@ -269,23 +269,32 @@ def _compute_protected_count(self) -> int:
 # BEFORE (line 682):
 counts.append(int(mask.sum().item()))
 
-# AFTER:
-counts.append(mask.sum())
-# Update the equality check downstream:
-if not counts or min(c.numel() for c in counts) == 0 or len(set(c.item() for c in counts)) != 1:
-    return None, 0
-# Note: .item() in set comprehension runs once per batch element (not per-layer), acceptable.
+# AFTER — keep as Python int to avoid tensor comparison issues:
+counts.append(mask.sum().item())
+# Note: .item() here is once per batch element per frame (not per-layer), acceptable frequency.
+# The equality check remains unchanged:
+#   if not counts or min(counts) == 0 or len(set(counts)) != 1:
+#       return None, 0
 ```
 
 - [ ] **Step 5: Update caches at mutation points**
 
-In `_gather_single_batch_` (line 180-198), `gather_per_batch_` (line 200), `append_` (line 342), and `apply_keyframe_event_` (line 370), add after mutation:
+In these methods, find the existing `self.protected_count = self._compute_protected_count()` line and replace with the cache update pattern. **All mutation points must be updated consistently:**
+
+| Method | Line | Change |
+|--------|------|--------|
+| `_gather_single_batch_` | ~198 | Replace `self.protected_count = self._compute_protected_count()` with `self._cached_protected_count = self._compute_protected_count_raw(); self.protected_count = self._cached_protected_count` |
+| `gather_per_batch_` | ~340 | Same pattern |
+| `append_` | ~351 | Same pattern |
+| `apply_keyframe_event_` | ~370 | Same pattern |
 
 ```python
+# At each mutation point, replace:
+#   self.protected_count = self._compute_protected_count()
+# With:
 self._cached_protected_count = self._compute_protected_count_raw()
+self.protected_count = self._cached_protected_count
 ```
-
-> **Order matters**: `_gather_single_batch_` at line 198 internally sets `self.protected_count = self._compute_protected_count()`. After the rename (Step 3), this calls the CACHED getter — which is stale because `_gather_single_batch_` just changed the data. Fix: change line 198 to `self._cached_protected_count = self._compute_protected_count_raw()` and then `self.protected_count = self._cached_protected_count`. This ensures the cache is updated before the value is read.
 
 Note: this still has `.item()` inside `_compute_protected_count_raw`, but only at mutation points (per-frame, not per-query). Frequency drops from ~240/step to ~24/step.
 
@@ -363,6 +372,10 @@ for i, frame in enumerate(frames):
         cache_states[b] = cs_b
 
     self.aggregator.last_scores = saved_last_scores
+
+    # patch_start_idx from aggregator — all batch elements share the same resolution
+    # (ps from any batch element is correct, use the last one)
+    patch_start_idx = ps
 
     # Average distill_loss across B (Review-18)
     # Assumes all B sequences produce non-None distill_loss. If some don't,
@@ -519,19 +532,39 @@ for i, frame in enumerate(frames):
         )
 
     # Per-batch KeyframePacket (export_packets path)
+    # NOTE: frame_metadata_base from the commit loop above is per-batch — 
+    # it holds the correct data for the current b because the commit loop
+    # processes batch elements sequentially. However, only the LAST layer's
+    # metadata survives the inner loop. Reconstruct for packets to be safe.
     if export_packets:
         for b in range(B):
-            if events[b].anchor_slot >= 0 and frame_metadata_base is not None:
+            if events[b].anchor_slot >= 0:
+                slot_id_b = keyframe_managers[b].get_active_keyframe_id()
+                ltw_b = keyframe_managers[b].get_active_local_to_world()
+                pkt_metadata = build_frame_token_metadata_base(
+                    depth=depth[b:b+1],
+                    depth_conf=depth_conf[b:b+1],
+                    pose_enc=camera_pose[b:b+1],
+                    image_size_hw=(img_h, img_w),
+                    patch_size=self.aggregator.patch_size,
+                    patch_start_idx=patch_start_idx,
+                    frame_id=i,
+                    keyframe_id=slot_id_b,
+                    slot_id=slot_id_b,
+                    anchor_slot=events[b].anchor_slot,
+                    total_tokens=frame_pending_updates[b][-1].importance_current.shape[1] if frame_pending_updates[b][-1] is not None else 0,
+                    active_local_to_world=ltw_b,
+                )
                 patch_features = aggregated_tokens_list[-1][b:b+1, :, patch_start_idx:]
                 keyframe_packets.append(
                     KeyframePacket(
                         frame_idx=i,
-                        keyframe_id=keyframe_managers[b].get_active_keyframe_id(),
+                        keyframe_id=slot_id_b,
                         anchor_slot=events[b].anchor_slot,
                         pose_abs=camera_pose[b].detach().cpu(),
-                        local_to_world=keyframe_managers[b].get_active_local_to_world().detach().cpu(),
-                        patch_local_xyz=frame_metadata_base.slot_local_xyz[:, patch_start_idx:].detach().cpu(),
-                        patch_depth_conf=frame_metadata_base.depth_conf[:, patch_start_idx:].detach().cpu(),
+                        local_to_world=ltw_b.detach().cpu(),
+                        patch_local_xyz=pkt_metadata.slot_local_xyz[:, patch_start_idx:].detach().cpu(),
+                        patch_depth_conf=pkt_metadata.depth_conf[:, patch_start_idx:].detach().cpu(),
                         patch_features=patch_features.detach().cpu(),
                     )
                 )
@@ -824,11 +857,11 @@ If B>1 produces incorrect results:
 
 ---
 
-## Plan Review (P1–P17) — All Resolved
+## Plan Review (P1–P17) — All Resolved (Round 2: Approved)
 
-> Review of this implementation plan against the spec (R1–R38) and actual codebase.
-> 17 findings: 1 Critical, 7 Important, 6 Medium, 3 Informational.
-> **All findings have been fixed in the plan above.** This section is kept for audit trail.
+> **Round 1:** 17 findings (P1–P17): 1 Critical, 7 Important, 6 Medium, 3 Informational. All fixed.
+> **Round 2:** Re-review passed with 2 minor issues + 2 advisory. All fixed.
+> **Status:** Approved for implementation.
 
 ### Resolution Summary
 
@@ -851,6 +884,15 @@ If B>1 produces incorrect results:
 | P15 | Informational | Fixed wording: "add dataclass fields with defaults" instead of `__init__` |
 | P16 | Informational | Added integration test note to Step 2 |
 | P17 | Informational | Added distill_loss denominator assumption comment |
+
+### Round 2 Findings (R2-1, R2-2) — Fixed
+
+| Finding | Severity | Resolution |
+|---------|----------|------------|
+| R2-1 | Issue | `patch_start_idx` undefined in Step 4 — added `patch_start_idx = ps` after aggregator loop |
+| R2-2 | Issue | Task 3 Step 4 changed counts to tensors, breaking min/nul check — reverted to `.item()` to keep Python ints |
+| R2-R1 | Advisory | KeyframePacket used stale `frame_metadata_base` for B>1 — now reconstructs per-batch via explicit `build_frame_token_metadata_base` call |
+| R2-R2 | Advisory | Task 3 Step 5 mutation points table now explicitly lists all 4 methods with exact change pattern |
 
 ### P1 (Critical): `get_data_loader` does NOT accept `collate_fn` — Task 1 wiring is broken
 

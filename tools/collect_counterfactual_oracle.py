@@ -21,6 +21,40 @@ from ovggt.training.frontend_oracle_collector import (
 )
 
 
+def parse_event_type_quotas(value) -> dict[str, int] | None:
+    """Parse per-event-type quotas from CLI text or YAML mappings."""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        value = value.strip()
+        if not value:
+            return None
+        quotas: dict[str, int] = {}
+        for pair in value.split(","):
+            if "=" not in pair:
+                raise ValueError(
+                    "event_type_quotas entries must use NAME=COUNT format, "
+                    f"got {pair!r}"
+                )
+            key, raw_count = pair.split("=", 1)
+            key = key.strip()
+            if not key:
+                raise ValueError("event_type_quotas contains an empty event type")
+            quotas[key] = int(raw_count.strip())
+        return quotas
+    if hasattr(value, "items"):
+        return {str(key): int(count) for key, count in value.items()}
+    raise TypeError(
+        "event_type_quotas must be None, a NAME=COUNT string, or a mapping"
+    )
+
+
+def cli_flag_was_explicit(argv: list[str], arg_dest: str) -> bool:
+    """Return whether argparse dest was provided as --flag or --flag=value."""
+    cli_flag = "--" + str(arg_dest).replace("_", "-")
+    return any(arg == cli_flag or arg.startswith(cli_flag + "=") for arg in argv)
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -147,6 +181,43 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--quota-fill-remaining", action="store_true",
         help="Allow filling unused slots after strict event-type quotas.",
     )
+    parser.add_argument(
+        "--oracle-anchor-interval",
+        type=int,
+        default=None,
+        help="Override anchor_interval for oracle collection only.",
+    )
+    parser.add_argument(
+        "--oracle-max-anchors",
+        type=int,
+        default=None,
+        help="Override max_anchors for oracle collection only.",
+    )
+    parser.add_argument(
+        "--oracle-layer-schedule",
+        type=str,
+        default="default",
+        choices=["default", "rotating_stride", "random_bucket", "fixed_buckets"],
+        help="Layer selection schedule for oracle collection.",
+    )
+    parser.add_argument(
+        "--oracle-layer-buckets",
+        type=str,
+        default=None,
+        help="JSON list of layer bucket ranges, e.g. '[[0,5],[6,11],[12,17],[18,23]]'.",
+    )
+    parser.add_argument(
+        "--oracle-layer-schedule-seed",
+        type=int,
+        default=0,
+        help="Seed for deterministic non-default oracle layer schedules.",
+    )
+    parser.add_argument(
+        "--frame-buckets",
+        type=str,
+        default=None,
+        help="JSON list of frame bucket ranges for quota selection, e.g. '[[0,3],[4,8],[9,23]]'.",
+    )
     return parser.parse_args(argv)
 
 
@@ -196,18 +267,23 @@ def main() -> None:
         "probe_output_json": "probe_output_json",
         "event_type_quotas": "event_type_quotas",
         "quota_fill_remaining": "quota_fill_remaining",
+        "oracle_anchor_interval": "oracle_anchor_interval",
+        "oracle_max_anchors": "oracle_max_anchors",
+        "oracle_layer_schedule": "oracle_layer_schedule",
+        "oracle_layer_buckets": "oracle_layer_buckets",
+        "oracle_layer_schedule_seed": "oracle_layer_schedule_seed",
+        "frame_buckets": "frame_buckets",
     }
-    _explicit = {a for a in sys.argv[1:]}
+    _explicit = list(sys.argv[1:])
     for yaml_key, arg_dest in _YAML_TO_ARG.items():
         val = getattr(_yaml, yaml_key, None)
         if val is None:
             continue
         # Check if the user set this flag on the CLI (crude but effective)
-        cli_flag = "--" + arg_dest.replace("_", "-")
-        if cli_flag not in _explicit:
+        if not cli_flag_was_explicit(_explicit, arg_dest):
             setattr(args, arg_dest, val)
     # Boolean flag: only override from yaml if NOT explicitly passed on CLI
-    if "--no-high-budget-teacher" not in _explicit:
+    if not cli_flag_was_explicit(_explicit, "no_high_budget_teacher"):
         hb = getattr(_yaml, "high_budget_teacher", None)
         if hb is not None:
             args.no_high_budget_teacher = not bool(hb)
@@ -215,11 +291,7 @@ def main() -> None:
     if not args.output:
         print("error: --output is required (or set 'output' in the config YAML)", file=sys.stderr)
         sys.exit(1)
-    event_type_quotas = None
-    if args.event_type_quotas:
-        event_type_quotas = {
-            k: int(v) for k, v in (pair.split("=") for pair in args.event_type_quotas.split(","))
-        }
+    event_type_quotas = parse_event_type_quotas(args.event_type_quotas)
     collector_cfg = FrontendOracleCollectorConfig(
         config=args.config,
         output=args.output,
@@ -264,6 +336,12 @@ def main() -> None:
         probe_output_json=args.probe_output_json,
         event_type_quotas=event_type_quotas,
         quota_fill_remaining=bool(args.quota_fill_remaining),
+        oracle_anchor_interval=int(args.oracle_anchor_interval) if args.oracle_anchor_interval is not None else None,
+        oracle_max_anchors=int(args.oracle_max_anchors) if args.oracle_max_anchors is not None else None,
+        oracle_layer_schedule=args.oracle_layer_schedule,
+        oracle_layer_buckets=args.oracle_layer_buckets,
+        oracle_layer_schedule_seed=int(args.oracle_layer_schedule_seed),
+        frame_buckets=args.frame_buckets,
     )
     shard = collect_oracle_shard_from_config(collector_cfg)
     shard["collector_config"] = asdict(collector_cfg)

@@ -51,7 +51,7 @@ def build_frontend_model(ckpt_path, device, budget):
 
     kw = {
         "mode": "frontend_eval",
-        "total_budget": budget,
+        "per_layer_budget": budget,
         "frontend_pose_encoding_type": ABS_POSE_ENCODING,
         "frontend_cache_config": FrontendCacheConfig(
             enabled=True, export_keyframe_packets=False, dedup_enabled=True, voxel_size=0.5
@@ -70,7 +70,7 @@ def build_frontend_model(ckpt_path, device, budget):
 def build_legacy_model(ckpt_path, device, budget):
     from ovggt.models.ovggt import OVGGT
 
-    model = OVGGT(mode="legacy", total_budget=budget)
+    model = OVGGT(mode="legacy", per_layer_budget=budget)
     ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=False)
     sd = ckpt.get("model", ckpt.get("state_dict", ckpt))
     model.load_state_dict(sd, strict=False)

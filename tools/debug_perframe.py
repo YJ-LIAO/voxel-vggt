@@ -34,14 +34,14 @@ def align_err(gt,pred):
     return np.linalg.norm(al-gp,axis=1)
 
 print('Legacy...')
-m=OVGGT(mode='legacy',total_budget=200000)
+m=OVGGT(mode='legacy',per_layer_budget=8000)
 m.load_state_dict(sd,strict=False); m=m.cuda().eval()
 with torch.no_grad(): o=m.inference(inputs,history_anchor_strategy='coverage',anchor_interval=250)
 c2w_l=get_poses(o); del m; gc.collect(); torch.cuda.empty_cache()
 err_l=align_err(gt,c2w_l)
 
 print('Frontend...')
-m=OVGGT(mode='frontend_eval',total_budget=200000,
+m=OVGGT(mode='frontend_eval',per_layer_budget=8000,
         frontend_pose_encoding_type=ABS_POSE_ENCODING,
         frontend_cache_config=FrontendCacheConfig(enabled=True))
 m.load_state_dict(sd,strict=False); m=m.cuda().eval()

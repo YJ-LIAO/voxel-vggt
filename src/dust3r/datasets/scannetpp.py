@@ -36,8 +36,11 @@ class ScanNetpp_Multi(BaseMultiViewDataset):
         self.image_num = 0
         for scene in self.scenes:
             scene_dir = osp.join(self.ROOT, scene)
+            meta_file = "new_scene_metadata.npz" if osp.exists(
+                osp.join(scene_dir, "new_scene_metadata.npz")
+            ) else "scene_metadata.npz"
             with np.load(
-                osp.join(scene_dir, "new_scene_metadata.npz"), allow_pickle=True
+                osp.join(scene_dir, meta_file), allow_pickle=True
             ) as data:
                 imgs = data["images"]
                 self.image_num += len(imgs)

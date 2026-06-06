@@ -8,15 +8,15 @@
 #   1. Stage A scorer checkpoint must exist at the resume path below
 #   2. Teacher checkpoint must exist
 
-teacher: /mnt/lyj/workspace/StreamVGGT/ckpt/model.pt
-pretrained: /mnt/lyj/workspace/StreamVGGT/ckpt/model.pt
-resume: /mnt/lyj/workspace/OVGGT-main/checkpoints/OVGGT_token_scorer_mixed/checkpoint-final.pth
+teacher: /path/to/mount/lyj/voxel-vggt/ckpt/model.pt
+pretrained: /path/to/mount/lyj/voxel-vggt/ckpt/model.pt
+# resume: /mnt/lyj/workspace/OVGGT-main/checkpoints/OVGGT_token_scorer_mixed/checkpoint-final.pth
 benchmark: False
 
 frontend_mode: frontend_train
 frontend_pose_encoding_type: relT_quaR_FoV
-frontend_total_budget: 10410
-frontend_camera_budget: 128
+frontend_per_layer_budget: 8000
+frontend_camera_budget: 384
 anchor_overflow_policy: global_plus_recent
 fixed_length: True
 allow_repeat: False

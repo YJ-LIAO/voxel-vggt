@@ -255,7 +255,7 @@ class Aggregator(nn.Module):
         cache_states=None,
         use_cache=False,
         past_frame_idx=0,
-        total_budget=0,
+        per_layer_budget=0,
         anchor_token_count: int = None,
         importance_weight: float = 0.5,
         frontend_cache_config=None,
@@ -332,7 +332,7 @@ class Aggregator(nn.Module):
         frame_idx = 0
         global_idx = 0
         output_list = []
-        current_budgets = self._calculate_budgets(total_budget, frontend_cache_config)
+        current_budgets = self._calculate_budgets(per_layer_budget, frontend_cache_config)
         scores = []
         pending_updates: List[Optional[PendingLayerUpdate]] = [None] * self.depth
 
@@ -565,28 +565,28 @@ class Aggregator(nn.Module):
             return tokens, global_idx, intermediates, block_kv, scores, new_importance, kept_indices
         return tokens, global_idx, intermediates
         
-    def _calculate_budgets(self, total_budget, frontend_cache_config=None):
+    def _calculate_budgets(self, per_layer_budget, frontend_cache_config=None):
         # Handle None budget (eviction paused for History Anchor window)
-        if total_budget is None:
+        # NOTE: ``per_layer_budget`` is the token budget PER LAYER (not the 24-layer
+        # sum). The dynamic path multiplies by ``self.depth`` so the per-layer
+        # average equals ``per_layer_budget`` even when proportions are non-uniform.
+        if per_layer_budget is None:
             return None
 
         with torch.no_grad():
+            if per_layer_budget < 0:
+                per_layer_budget = 0
             if frontend_cache_config is not None and getattr(frontend_cache_config, "budget_allocation", "dynamic") == "uniform":
-                if total_budget < 0:
-                    total_budget = 0
-                base_budget = int(total_budget) // max(self.depth, 1)
-                budgets = torch.full((self.depth,), base_budget, dtype=torch.int64)
-                remainder = int(total_budget) - base_budget * self.depth
-                if remainder > 0:
-                    budgets[:remainder] += 1
+                budgets = torch.full((self.depth,), int(per_layer_budget), dtype=torch.int64)
                 return budgets
 
             diversity_scores = 1.0 - self.last_scores
             scaled_scores = diversity_scores / 0.5
             proportions = torch.softmax(scaled_scores, dim=0)
-            if total_budget < 0:
-                total_budget = 0
-            budgets = proportions * total_budget
+            # proportions sum to 1.0; multiply by per_layer_budget*depth so the
+            # mean across layers equals per_layer_budget (preserves prior behavior
+            # where the caller used to pass total = per_layer_budget * depth).
+            budgets = proportions * (per_layer_budget * self.depth)
 
         return budgets.int()
 

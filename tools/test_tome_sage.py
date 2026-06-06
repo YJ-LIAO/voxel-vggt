@@ -40,12 +40,12 @@ for NF in [50,200]:
     print('--- {} frames ---'.format(NF))
 
     # 1. Legacy baseline
-    a_leg = run(lambda: OVGGT(mode='legacy',total_budget=200000),
+    a_leg = run(lambda: OVGGT(mode='legacy',per_layer_budget=8000),
                 lambda m: m.inference(inputs,history_anchor_strategy='coverage',anchor_interval=250))
     print('  Legacy:                    ATE={:.4f}'.format(a_leg))
 
     # 2. Current best (noIntra + fifo80)
-    a_best = run(lambda: OVGGT(mode='frontend_eval',total_budget=200000,
+    a_best = run(lambda: OVGGT(mode='frontend_eval',per_layer_budget=8000,
                 frontend_pose_encoding_type=ABS_POSE_ENCODING,
                 frontend_cache_config=FrontendCacheConfig(enabled=True,dedup_enabled=True,
                     intra_frame_dedup_enabled=False,fifo_keep_topk=80)),
@@ -53,7 +53,7 @@ for NF in [50,200]:
     print('  FE8_noIntra+fifo80:        ATE={:.4f}'.format(a_best))
 
     # 3. ToMe only (from Phase 1a result)
-    a_tome = run(lambda: OVGGT(mode='frontend_eval',total_budget=200000,
+    a_tome = run(lambda: OVGGT(mode='frontend_eval',per_layer_budget=8000,
                 frontend_pose_encoding_type=ABS_POSE_ENCODING,
                 frontend_cache_config=FrontendCacheConfig(enabled=True,dedup_enabled=True,
                     tome_merge_enabled=True,tome_similarity_metric='key')),
@@ -61,7 +61,7 @@ for NF in [50,200]:
     print('  FE8_ToMe:                  ATE={:.4f}'.format(a_tome))
 
     # 4. SAGE-KV only (noToMe, noIntra)
-    a_sage = run(lambda: OVGGT(mode='frontend_eval',total_budget=200000,
+    a_sage = run(lambda: OVGGT(mode='frontend_eval',per_layer_budget=8000,
                 frontend_pose_encoding_type=ABS_POSE_ENCODING,
                 frontend_cache_config=FrontendCacheConfig(enabled=True,dedup_enabled=True,
                     intra_frame_dedup_enabled=False,sage_kv_enabled=True)),
@@ -69,7 +69,7 @@ for NF in [50,200]:
     print('  FE8_SAGE-KV:               ATE={:.4f}'.format(a_sage))
 
     # 5. ToMe + SAGE-KV combined
-    a_tome_sage = run(lambda: OVGGT(mode='frontend_eval',total_budget=200000,
+    a_tome_sage = run(lambda: OVGGT(mode='frontend_eval',per_layer_budget=8000,
                 frontend_pose_encoding_type=ABS_POSE_ENCODING,
                 frontend_cache_config=FrontendCacheConfig(enabled=True,dedup_enabled=True,
                     tome_merge_enabled=True,tome_similarity_metric='key',sage_kv_enabled=True)),
@@ -77,7 +77,7 @@ for NF in [50,200]:
     print('  FE8_ToMe+SAGE-KV:          ATE={:.4f}'.format(a_tome_sage))
 
     # 6. ToMe + SAGE-KV + fifo80
-    a_all = run(lambda: OVGGT(mode='frontend_eval',total_budget=200000,
+    a_all = run(lambda: OVGGT(mode='frontend_eval',per_layer_budget=8000,
                 frontend_pose_encoding_type=ABS_POSE_ENCODING,
                 frontend_cache_config=FrontendCacheConfig(enabled=True,dedup_enabled=True,
                     tome_merge_enabled=True,tome_similarity_metric='key',

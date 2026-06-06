@@ -517,6 +517,35 @@ class TestFifoProbeSamplesMultipleKeepCounts:
         assert demoted_indices.device == torch.device("cpu")
         assert demoted_indices.dtype == torch.long
 
+    def test_fifo_probe_uses_local_batch_index_for_singleton_cache(self):
+        """Global batch_index should not index into a per-sample singleton cache."""
+        cache = _make_layer_cache(
+            num_tokens=12,
+            demoted_slot=1,
+            num_in_demoted_slot=4,
+            batch_size=1,
+        )
+        probe = CounterfactualFifoTopKProbe(
+            count_candidates=[0, 2],
+            sequence_provenance={3: {"sequence_id": "global_batch_3"}},
+        )
+
+        probe.on_fifo_topk_candidate(
+            cache_state=cache,
+            demoted_slot=1,
+            keep_count=2,
+            layer_id=0,
+            frame_id=0,
+            batch_index=3,
+            demoted_indices_by_batch={0: torch.tensor([0, 1, 2, 3])},
+        )
+
+        assert len(probe.events) == 1
+        event = probe.events[0]
+        assert event["batch_index"] == 3
+        assert event["sequence_provenance"]["sequence_id"] == "global_batch_3"
+        assert event["demoted_indices"].tolist() == [0, 1, 2, 3]
+
 
 # ---------------------------------------------------------------------------
 # Helper: fake CounterfactualReplayRunner for testing replay output schemas

@@ -141,6 +141,31 @@ def test_parallel_launcher_can_enable_replay_payload(tmp_path):
     assert "--store-replay-payload" in command
 
 
+def test_collect_cli_parses_event_type_quotas_from_yaml_mapping():
+    """Collector CLI should accept event_type_quotas loaded from YAML as a mapping."""
+    from omegaconf import OmegaConf
+    from collect_counterfactual_oracle import parse_event_type_quotas
+
+    quotas = OmegaConf.create({"eviction": 8, "dedup": 4, "fifo_topk": 4})
+
+    assert parse_event_type_quotas(quotas) == {
+        "eviction": 8,
+        "dedup": 4,
+        "fifo_topk": 4,
+    }
+
+
+def test_collect_cli_detects_equals_style_explicit_flags():
+    """YAML defaults must not override CLI args passed as --flag=value."""
+    from collect_counterfactual_oracle import cli_flag_was_explicit
+
+    argv = ["--event-type-quotas=eviction=1,dedup=0", "--max-batches=2"]
+
+    assert cli_flag_was_explicit(argv, "event_type_quotas")
+    assert cli_flag_was_explicit(argv, "max_batches")
+    assert not cli_flag_was_explicit(argv, "num_samples")
+
+
 def test_parallel_launcher_forwards_all_phase1_args(tmp_path):
     """All Phase 1 CLI args must reach each shard command."""
     from collect_counterfactual_oracle_parallel import ParallelCollectorConfig, build_collection_jobs
@@ -165,7 +190,7 @@ def test_parallel_launcher_forwards_all_phase1_args(tmp_path):
         event_selection_policy="greedy_topk",
         stratified_layer_bucket_width=4,
         oracle_profile="fast_profile",
-        frontend_total_budget_override=1024,
+        frontend_per_layer_budget_override=1024,
         fifo_keep_topk_override=32,
         sequence_manifest_path="/tmp/manifest.csv",
         sequence_partition_policy="sequential",
@@ -187,9 +212,73 @@ def test_parallel_launcher_forwards_all_phase1_args(tmp_path):
         assert "--max-subsets-per-fifo-event 7" in cmd, f"missing --max-subsets-per-fifo-event in: {cmd}"
         assert "--stratified-layer-bucket-width 4" in cmd, f"missing --stratified-layer-bucket-width in: {cmd}"
         assert "--oracle-profile fast_profile" in cmd, f"missing --oracle-profile in: {cmd}"
-        assert "--frontend-total-budget-override 1024" in cmd, f"missing --frontend-total-budget-override in: {cmd}"
+        assert "--frontend-per-layer-budget-override 1024" in cmd, f"missing --frontend-per-layer-budget-override in: {cmd}"
         assert "--fifo-keep-topk-override 32" in cmd, f"missing --fifo-keep-topk-override in: {cmd}"
         assert "--sequence-manifest-path /tmp/manifest.csv" in cmd, f"missing --sequence-manifest-path in: {cmd}"
         assert "--sequence-partition-policy sequential" in cmd, f"missing --sequence-partition-policy in: {cmd}"
         assert "--num-sequence-shards 4" in cmd, f"missing --num-sequence-shards in: {cmd}"
         assert "--sequence-shard-id 1" in cmd, f"missing --sequence-shard-id in: {cmd}"
+
+
+def test_mixed_profile_generates_weighted_unique_shards():
+    """Mixed launcher should generate weighted shard jobs with unique outputs."""
+    from run_oracle_mixed_profiles import generate_profile_jobs
+
+    jobs = generate_profile_jobs(
+        base_config="config/train_frontend_finetune.yaml",
+        output_dir="checkpoints/token_oracle_mixed/",
+        num_gpus=4,
+        num_shards=10,
+        events_per_shard=2048,
+        start_shard_id=20,
+        profile_weights={
+            "real_policy_dedup": 0.4,
+            "low_budget_eviction": 0.3,
+            "fifo_topk_forced": 0.3,
+        },
+    )
+    assert len(jobs) == 10
+
+    profile_counts = {}
+    for job in jobs:
+        profile_counts[job["profile"]] = profile_counts.get(job["profile"], 0) + 1
+    assert profile_counts == {
+        "real_policy_dedup": 4,
+        "low_budget_eviction": 3,
+        "fifo_topk_forced": 3,
+    }
+
+    outputs = {job["output"] for job in jobs}
+    assert len(outputs) == len(jobs), "Each job must have a unique output path"
+    assert any("shard_020" in out for out in outputs)
+    assert any("shard_029" in out for out in outputs)
+
+    for job in jobs:
+        assert "--max-events" in job["args"]
+        assert "2048" in job["args"]
+
+
+def test_mixed_profile_can_include_late_frame_scan():
+    """late_frame_scan is optional and included when profile weights request it."""
+    from run_oracle_mixed_profiles import generate_profile_jobs
+
+    jobs = generate_profile_jobs(
+        base_config="config/train_frontend_finetune.yaml",
+        output_dir="checkpoints/token_oracle_mixed/",
+        num_gpus=2,
+        num_shards=4,
+        events_per_shard=128,
+        profile_weights={
+            "real_policy_dedup": 0.25,
+            "low_budget_eviction": 0.25,
+            "fifo_topk_forced": 0.25,
+            "late_frame_scan": 0.25,
+        },
+    )
+    profiles = {job["profile"] for job in jobs}
+    assert profiles == {
+        "real_policy_dedup",
+        "low_budget_eviction",
+        "fifo_topk_forced",
+        "late_frame_scan",
+    }

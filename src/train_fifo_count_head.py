@@ -18,7 +18,12 @@ from torch.utils.data import DataLoader
 
 from ovggt.layers.count_head import FifoCountHead
 from ovggt.layers.token_scorer import TOKEN_METADATA_FEATURE_DIM
-from ovggt.training.token_oracle_dataset import FifoCountDataset, collate_fifo_count_samples
+from ovggt.training.token_oracle_dataset import (
+    FifoCountDataset,
+    collate_fifo_count_samples,
+    load_oracle_events,
+    split_oracle_events,
+)
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -112,19 +117,47 @@ def train_fifo_count_head(
     from tests without going through argparse.
     """
     count_candidates = list(count_candidates)
-    dataset = FifoCountDataset(
-        oracle_shards,
+    all_events = load_oracle_events(oracle_shards)
+    if float(val_fraction) > 0.0:
+        train_events, val_events = split_oracle_events(
+            all_events,
+            val_fraction=val_fraction,
+            split_key="event_id_hash",
+            seed=split_seed,
+        )
+        if not train_events:
+            train_events, val_events = all_events, []
+    else:
+        train_events, val_events = all_events, []
+
+    train_dataset = FifoCountDataset.from_events(
+        train_events,
         count_candidates=count_candidates,
         label_reduction=label_reduction,
     )
-    if len(dataset) == 0:
+    val_dataset = FifoCountDataset.from_events(
+        val_events,
+        count_candidates=count_candidates,
+        label_reduction=label_reduction,
+    ) if val_events else None
+    if len(train_dataset) == 0:
         raise RuntimeError(f"No fifo_topk samples found in oracle shards")
 
     loader = DataLoader(
-        dataset,
+        train_dataset,
         batch_size=batch_size,
         shuffle=True,
         collate_fn=collate_fifo_count_samples,
+    )
+    val_loader = (
+        DataLoader(
+            val_dataset,
+            batch_size=batch_size,
+            shuffle=False,
+            collate_fn=collate_fifo_count_samples,
+        )
+        if val_dataset is not None and len(val_dataset) > 0
+        else None
     )
     torch_device = torch.device(device)
     count_head = FifoCountHead(
@@ -140,6 +173,7 @@ def train_fifo_count_head(
 
     num_candidates = len(count_candidates)
     step = 0
+    validation_metrics = {"count": 0}
     for epoch in range(epochs):
         epoch_loss = 0.0
         epoch_correct = 0
@@ -205,6 +239,20 @@ def train_fifo_count_head(
             f"  label_hist={label_hist} pred_hist={pred_hist}",
             flush=True,
         )
+        if val_loader is not None:
+            validation_metrics = _evaluate_count_head(
+                count_head=count_head,
+                loader=val_loader,
+                loss_fn=loss_fn,
+                device=torch_device,
+            )
+            print(
+                f"validation_summary={epoch} samples={validation_metrics['count']} "
+                f"loss={validation_metrics['loss']:.6f} "
+                f"accuracy={validation_metrics['accuracy']:.4f} "
+                f"mean_abs_count_error={validation_metrics['mean_abs_count_error']:.2f}",
+                flush=True,
+            )
 
     # Save checkpoint
     output_path = Path(output)
@@ -219,10 +267,52 @@ def train_fifo_count_head(
             "count_candidates": count_candidates,
             "hidden_dim": hidden_dim,
             "count_head_arch": "pooled_v1",
+            "train_sample_count": len(train_dataset),
+            "val_sample_count": 0 if val_dataset is None else len(val_dataset),
+            "validation_metrics": validation_metrics,
         },
         output_path,
     )
     print(f"saved_checkpoint={output_path} total_steps={step}", flush=True)
+
+
+@torch.no_grad()
+def _evaluate_count_head(
+    count_head: FifoCountHead,
+    loader: DataLoader,
+    loss_fn,
+    device: torch.device,
+) -> dict:
+    count_head.eval()
+    total_loss = 0.0
+    total_correct = 0
+    total_count = 0
+    total_abs_error = 0.0
+    for batch in loader:
+        batch = _move_batch_to_device(batch, device)
+        logits = count_head(
+            batch["score_state"],
+            batch["metadata_features"],
+            layer_id=batch["layer_id"],
+            token_mask=batch["token_mask"],
+        )
+        target = batch["target"]
+        loss = loss_fn(logits, target)
+        batch_count = int(target.shape[0])
+        preds = logits.argmax(dim=-1)
+        pred_counts = count_head.candidates[preds].float()
+        target_counts = count_head.candidates[target].float()
+        total_loss += float(loss.detach().cpu()) * batch_count
+        total_correct += int((preds == target).sum().detach().cpu().item())
+        total_abs_error += float((pred_counts - target_counts).abs().sum().detach().cpu().item())
+        total_count += batch_count
+    count_head.train()
+    return {
+        "count": total_count,
+        "loss": total_loss / max(total_count, 1),
+        "accuracy": total_correct / max(total_count, 1),
+        "mean_abs_count_error": total_abs_error / max(total_count, 1),
+    }
 
 
 def _move_batch_to_device(batch: dict, device: torch.device) -> dict:

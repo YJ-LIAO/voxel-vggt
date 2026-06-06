@@ -40,26 +40,26 @@ for NF in [50,200]:
     print('--- {} frames ---'.format(NF))
 
     # 1. Legacy baseline
-    a_leg = run(lambda: OVGGT(mode='legacy',total_budget=200000),
+    a_leg = run(lambda: OVGGT(mode='legacy',per_layer_budget=8000),
                 lambda m: m.inference(inputs,history_anchor_strategy='coverage',anchor_interval=250))
     print('  Legacy:              ATE={:.4f}'.format(a_leg))
 
     # 2. Original full dedup
-    a_full = run(lambda: OVGGT(mode='frontend_eval',total_budget=200000,
+    a_full = run(lambda: OVGGT(mode='frontend_eval',per_layer_budget=8000,
                 frontend_pose_encoding_type=ABS_POSE_ENCODING,
                 frontend_cache_config=FrontendCacheConfig(enabled=True,dedup_enabled=True)),
              lambda m: m.inference(inputs,history_anchor_strategy='fixed_interval',anchor_interval=8,max_anchors=3))
     print('  FE8_full_dedup:      ATE={:.4f}'.format(a_full))
 
     # 3. No intra dedup (current best)
-    a_nointra = run(lambda: OVGGT(mode='frontend_eval',total_budget=200000,
+    a_nointra = run(lambda: OVGGT(mode='frontend_eval',per_layer_budget=8000,
                 frontend_pose_encoding_type=ABS_POSE_ENCODING,
                 frontend_cache_config=FrontendCacheConfig(enabled=True,dedup_enabled=True,intra_frame_dedup_enabled=False)),
              lambda m: m.inference(inputs,history_anchor_strategy='fixed_interval',anchor_interval=8,max_anchors=3))
     print('  FE8_noIntra:         ATE={:.4f}'.format(a_nointra))
 
     # 4. ToMe merge (key similarity)
-    a_tome_key = run(lambda: OVGGT(mode='frontend_eval',total_budget=200000,
+    a_tome_key = run(lambda: OVGGT(mode='frontend_eval',per_layer_budget=8000,
                 frontend_pose_encoding_type=ABS_POSE_ENCODING,
                 frontend_cache_config=FrontendCacheConfig(enabled=True,dedup_enabled=True,
                     tome_merge_enabled=True,tome_similarity_metric='key')),
@@ -67,7 +67,7 @@ for NF in [50,200]:
     print('  FE8_ToMe_key:        ATE={:.4f}'.format(a_tome_key))
 
     # 5. ToMe merge + fifo_topk=80
-    a_tome_fifo = run(lambda: OVGGT(mode='frontend_eval',total_budget=200000,
+    a_tome_fifo = run(lambda: OVGGT(mode='frontend_eval',per_layer_budget=8000,
                 frontend_pose_encoding_type=ABS_POSE_ENCODING,
                 frontend_cache_config=FrontendCacheConfig(enabled=True,dedup_enabled=True,
                     tome_merge_enabled=True,tome_similarity_metric='key',fifo_keep_topk=80)),

@@ -40,12 +40,12 @@ for NF in [50,200]:
     print('--- {} frames (200-frame only) ---'.format(NF))
     if NF == 200:
         # Legacy baseline
-        a_leg = run(lambda: OVGGT(mode='legacy',total_budget=200000),
+        a_leg = run(lambda: OVGGT(mode='legacy',per_layer_budget=8000),
                      lambda m: m.inference(inputs,history_anchor_strategy='coverage',anchor_interval=250))
         print('  Legacy:            ATE={:.4f}'.format(a_leg))
 
     for topk in [0, 60, 70, 75, 80, 85]:
-        a = run(lambda topk=topk: OVGGT(mode='frontend_eval',total_budget=200000,
+        a = run(lambda topk=topk: OVGGT(mode='frontend_eval',per_layer_budget=8000,
                     frontend_pose_encoding_type=ABS_POSE_ENCODING,
                     frontend_cache_config=FrontendCacheConfig(enabled=True,dedup_enabled=True,
                         intra_frame_dedup_enabled=False,fifo_keep_topk=topk)),

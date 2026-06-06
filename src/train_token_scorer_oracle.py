@@ -15,6 +15,8 @@ from ovggt.layers.token_scorer import TOKEN_METADATA_FEATURE_DIM, TokenScorer
 from ovggt.training.token_oracle_dataset import (
     CounterfactualOracleDataset,
     collate_oracle_pairs,
+    load_oracle_events,
+    split_oracle_events,
     token_oracle_ranking_loss,
 )
 
@@ -97,29 +99,96 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    dataset = CounterfactualOracleDataset(args.oracle_shards, min_loss_gap=args.min_loss_gap)
-    if len(dataset) == 0:
+    train_token_scorer_oracle(
+        oracle_shards=args.oracle_shards,
+        output=args.output,
+        score_state_dim=args.score_state_dim,
+        hidden_dim=args.hidden_dim,
+        num_layers=args.num_layers,
+        batch_size=args.batch_size,
+        epochs=args.epochs,
+        lr=args.lr,
+        regression_weight=args.regression_weight,
+        min_loss_gap=args.min_loss_gap,
+        score_state_proj_checkpoint=args.score_state_proj_checkpoint,
+        val_fraction=args.val_fraction,
+        split_key=args.split_key,
+        split_seed=args.split_seed,
+        device=args.device,
+    )
+
+
+def train_token_scorer_oracle(
+    oracle_shards: list[str],
+    output: str,
+    score_state_dim: int = 128,
+    hidden_dim: int = 256,
+    num_layers: int = 24,
+    batch_size: int = 64,
+    epochs: int = 1,
+    lr: float = 1e-4,
+    regression_weight: float = 0.1,
+    min_loss_gap: float = 0.01,
+    score_state_proj_checkpoint: str | None = None,
+    val_fraction: float = 0.1,
+    split_key: str = "event_id_hash",
+    split_seed: int = 0,
+    device: str = "cpu",
+) -> None:
+    all_events = load_oracle_events(oracle_shards)
+    if float(val_fraction) > 0.0:
+        train_events, val_events = split_oracle_events(
+            all_events,
+            val_fraction=val_fraction,
+            split_key=split_key,
+            seed=split_seed,
+        )
+        if not train_events:
+            train_events, val_events = all_events, []
+    else:
+        train_events, val_events = all_events, []
+
+    train_dataset = CounterfactualOracleDataset.from_events(
+        train_events, min_loss_gap=min_loss_gap,
+    )
+    val_dataset = (
+        CounterfactualOracleDataset.from_events(val_events, min_loss_gap=min_loss_gap)
+        if val_events
+        else None
+    )
+    if len(train_dataset) == 0:
         raise RuntimeError(
-            f"No pairwise samples found in oracle shards with min_loss_gap={args.min_loss_gap}"
+            f"No pairwise samples found in oracle shards with min_loss_gap={min_loss_gap}"
         )
 
     loader = DataLoader(
-        dataset,
-        batch_size=args.batch_size,
+        train_dataset,
+        batch_size=batch_size,
         shuffle=True,
         collate_fn=collate_oracle_pairs,
     )
-    device = torch.device(args.device)
+    val_loader = (
+        DataLoader(
+            val_dataset,
+            batch_size=batch_size,
+            shuffle=False,
+            collate_fn=collate_oracle_pairs,
+        )
+        if val_dataset is not None and len(val_dataset) > 0
+        else None
+    )
+    device = torch.device(device)
     scorer = TokenScorer(
-        score_state_dim=args.score_state_dim,
+        score_state_dim=score_state_dim,
         metadata_dim=TOKEN_METADATA_FEATURE_DIM,
-        hidden_dim=args.hidden_dim,
-        num_layers=args.num_layers,
+        hidden_dim=hidden_dim,
+        num_layers=num_layers,
     ).to(device)
-    optimizer = torch.optim.AdamW(scorer.parameters(), lr=args.lr)
+    optimizer = torch.optim.AdamW(scorer.parameters(), lr=lr)
 
     step = 0
-    for epoch in range(args.epochs):
+    validation_metrics = {"count": 0}
+    for epoch in range(epochs):
         epoch_metrics = _empty_metric_sums()
         for batch in loader:
             batch = _move_batch_to_device(batch, device)
@@ -127,7 +196,7 @@ def main() -> None:
             loss, details = token_oracle_ranking_loss(
                 logits,
                 batch,
-                regression_weight=args.regression_weight,
+                regression_weight=regression_weight,
             )
             optimizer.zero_grad(set_to_none=True)
             loss.backward()
@@ -145,26 +214,37 @@ def main() -> None:
                 )
             step += 1
         print(format_epoch_summary_line(epoch=epoch, metrics=epoch_metrics), flush=True)
+        if val_loader is not None:
+            validation_metrics = _evaluate_token_scorer(
+                scorer=scorer,
+                loader=val_loader,
+                device=device,
+                regression_weight=regression_weight,
+            )
+            print(format_validation_summary_line(epoch=epoch, metrics=validation_metrics), flush=True)
 
-    output = Path(args.output)
+    output = Path(output)
     output.parent.mkdir(parents=True, exist_ok=True)
-    projection_state = load_score_state_projection_state(args.score_state_proj_checkpoint)
+    projection_state = load_score_state_projection_state(score_state_proj_checkpoint)
     if not projection_state:
-        projection_state = load_score_state_projection_state_from_oracle_shards(args.oracle_shards)
+        projection_state = load_score_state_projection_state_from_oracle_shards(oracle_shards)
     deploy_state = build_ovggt_token_scorer_state_dict(
         scorer_state=scorer.state_dict(),
-        num_layers=args.num_layers,
+        num_layers=num_layers,
         score_state_projection_state=projection_state,
     )
     torch.save(
         {
             "token_scorer": scorer.state_dict(),
             "model": deploy_state,
-            "score_state_dim": args.score_state_dim,
+            "score_state_dim": score_state_dim,
             "metadata_dim": TOKEN_METADATA_FEATURE_DIM,
-            "num_layers": args.num_layers,
-            "score_state_projection_checkpoint": args.score_state_proj_checkpoint,
-            "hidden_dim": args.hidden_dim,
+            "num_layers": num_layers,
+            "score_state_projection_checkpoint": score_state_proj_checkpoint,
+            "hidden_dim": hidden_dim,
+            "train_sample_count": len(train_dataset),
+            "val_sample_count": 0 if val_dataset is None else len(val_dataset),
+            "validation_metrics": validation_metrics,
         },
         output,
     )
@@ -204,6 +284,78 @@ def format_epoch_summary_line(epoch: int, metrics: dict) -> str:
         f"rank_acc={details['rank_acc']:.4f} "
         f"mean_score_diff={details['mean_score_diff']:.6f}"
     )
+
+
+def format_validation_summary_line(epoch: int, metrics: dict) -> str:
+    return (
+        f"validation_summary={epoch} samples={int(metrics['count'])} "
+        f"loss={metrics['loss']:.6f} "
+        f"pairwise={metrics['pairwise']:.6f} "
+        f"regression={metrics['regression']:.6f} "
+        f"rank_acc={metrics['rank_acc']:.4f} "
+        f"mean_score_diff={metrics['mean_score_diff']:.6f}"
+    )
+
+
+@torch.no_grad()
+def _evaluate_token_scorer(
+    scorer: TokenScorer,
+    loader: DataLoader,
+    device: torch.device,
+    regression_weight: float,
+) -> dict:
+    scorer.eval()
+    totals = _empty_metric_sums()
+    sample_count = 0
+    per_sample_rows: list[dict] = []
+    for batch in loader:
+        batch = _move_batch_to_device(batch, device)
+        logits = scorer(batch["score_state"], batch["metadata_features"], batch["layer_id"])
+        loss, details = token_oracle_ranking_loss(
+            logits,
+            batch,
+            regression_weight=regression_weight,
+        )
+        batch_count = len(batch["event_id"])
+        sample_count += batch_count
+        totals["loss"] += float(loss.detach().cpu()) * batch_count
+        for key in ("pairwise", "regression", "rank_acc", "mean_score_diff"):
+            totals[key] += float(details[key]) * batch_count
+        # Collect per-sample rank correctness for per-event-type breakdown
+        event_types = batch.get("event_type", [])
+        token_mask = batch.get("token_mask")
+        if token_mask is not None:
+            token_mask = token_mask.to(device=logits.device)
+        better_mask = batch["better_mask"].to(device=logits.device)
+        worse_mask = batch["worse_mask"].to(device=logits.device)
+        from ovggt.training.token_oracle_dataset import _subset_score
+        better_score = _subset_score(logits, better_mask, token_mask, reduction="mean")
+        worse_score = _subset_score(logits, worse_mask, token_mask, reduction="mean")
+        per_sample_correct = (better_score > worse_score).detach().cpu()
+        for i in range(batch_count):
+            per_sample_rows.append({
+                "event_type": event_types[i] if i < len(event_types) else "unknown",
+                "rank_correct": bool(per_sample_correct[i].item()),
+            })
+    scorer.train()
+    denom = max(sample_count, 1)
+    result = {
+        "count": sample_count,
+        "loss": totals["loss"] / denom,
+        "pairwise": totals["pairwise"] / denom,
+        "regression": totals["regression"] / denom,
+        "rank_acc": totals["rank_acc"] / denom,
+        "mean_score_diff": totals["mean_score_diff"] / denom,
+    }
+    if per_sample_rows:
+        per_type = summarize_metrics_by_event_type(per_sample_rows)
+        result["per_event_type"] = per_type
+        for et, metrics in per_type.items():
+            print(
+                f"  val/{et}/rank_acc: {metrics['rank_acc']:.4f}  val/{et}/count: {metrics['count']}",
+                flush=True,
+            )
+    return result
 
 
 def _empty_metric_sums() -> dict:

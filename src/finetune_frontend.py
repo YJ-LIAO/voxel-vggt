@@ -302,7 +302,7 @@ def train(args):
     _, data_loader_val = build_validation_loader(args, accelerator)
 
     printer.info("Loading frontend student model")
-    frontend_total_budget = int(getattr(args, "frontend_total_budget", 200000))
+    frontend_per_layer_budget = int(getattr(args, "frontend_per_layer_budget", 8000))
     frontend_camera_budget = int(getattr(args, "frontend_camera_budget", 384))
     anchor_overflow_policy = str(getattr(args, "anchor_overflow_policy", "recent"))
     enable_track_head = int(getattr(args, "n_corres_train", 0) or 0) > 0
@@ -311,15 +311,15 @@ def train(args):
     model = OVGGT(
         mode=args.frontend_mode,
         frontend_pose_encoding_type=args.frontend_pose_encoding_type,
-        total_budget=frontend_total_budget,
+        per_layer_budget=frontend_per_layer_budget,
         camera_budget=frontend_camera_budget,
         anchor_overflow_policy=anchor_overflow_policy,
         frontend_head_checkpointing=bool(getattr(args, "frontend_head_checkpointing", False)),
         enable_track_head=enable_track_head,
     )
     printer.info(
-        "Frontend budgets: total_budget=%d, camera_budget=%d, anchor_overflow_policy=%s",
-        frontend_total_budget,
+        "Frontend budgets: per_layer_budget=%d, camera_budget=%d, anchor_overflow_policy=%s",
+        frontend_per_layer_budget,
         frontend_camera_budget,
         anchor_overflow_policy,
     )

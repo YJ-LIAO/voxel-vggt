@@ -1,97 +1,24 @@
-# Stage A: TokenScorer distillation training config
-# Multi-scene mixed dataset for better generalization
-
-teacher: /mnt/lyj/workspace/StreamVGGT/ckpt/model.pt
-pretrained: /mnt/lyj/workspace/StreamVGGT/ckpt/model.pt
-resume: Null
-benchmark: False
-
-frontend_mode: frontend_train
-frontend_pose_encoding_type: relT_quaR_FoV
-frontend_total_budget: 10410
-frontend_camera_budget: 128
-anchor_overflow_policy: global_plus_recent
-fixed_length: True
-allow_repeat: False
-
-num_views: 24
-n_corres_train: 0
-train_criterion: FrontendDistillLoss()
-
-# Shared training settings for all datasets
-train_resolutions: "[(518, 392), (518, 336), (518, 294), (518, 266), (518, 210), (518, 154), (392, 518), (336, 518), (294, 518), (266, 518)]"
-train_transform: SeqColorJitter
-train_aug_crop: 16
-data_root: /path/to/mount/lyj
-
-# --- Dataset definitions ---
-dataset_co3d: Co3d_Multi(allow_repeat=${allow_repeat}, split='train', ROOT='${data_root}/co3d_processed', aug_crop=${train_aug_crop}, resolution=${train_resolutions}, transform=${train_transform}, num_views=${num_views}, n_corres=${n_corres_train})
-dataset_wildrgbd: WildRGBD_Multi(allow_repeat=${allow_repeat}, split='train', ROOT='${data_root}/processed_wildrgbd', aug_crop=${train_aug_crop}, resolution=${train_resolutions}, transform=${train_transform}, num_views=${num_views}, n_corres=${n_corres_train})
-dataset_arkitscenes: ARKitScenes_Multi(allow_repeat=${allow_repeat}, split='train', ROOT='${data_root}/processed_arkitscenes', aug_crop=${train_aug_crop}, resolution=${train_resolutions}, transform=${train_transform}, num_views=${num_views}, n_corres=${n_corres_train})
-dataset_arkitscenes_highres: ARKitScenesHighRes_Multi(allow_repeat=${allow_repeat}, split='train', ROOT='${data_root}/processed_arkitscenes_highres', aug_crop=${train_aug_crop}, resolution=${train_resolutions}, transform=${train_transform}, num_views=${num_views}, n_corres=${n_corres_train})
-dataset_scannetpp: ScanNetpp_Multi(allow_repeat=${allow_repeat}, split='train', ROOT='${data_root}/processed_scannetpp', aug_crop=${train_aug_crop}, resolution=${train_resolutions}, transform=${train_transform}, num_views=${num_views}, n_corres=${n_corres_train})
-dataset_scannet: ScanNet_Multi(allow_repeat=${allow_repeat}, split='train', ROOT='${data_root}/processed_scannet', aug_crop=${train_aug_crop}, resolution=${train_resolutions}, transform=${train_transform}, num_views=${num_views}, n_corres=${n_corres_train})
-dataset_hypersim: HyperSim_Multi(allow_repeat=${allow_repeat}, split='train', ROOT='${data_root}/hypersim_processed', aug_crop=${train_aug_crop}, resolution=${train_resolutions}, transform=${train_transform}, num_views=${num_views}, n_corres=${n_corres_train})
-dataset_blendedmvs: BlendedMVS_Multi(allow_repeat=${allow_repeat}, split='train', ROOT='${data_root}/blendedmvs_processed', aug_crop=${train_aug_crop}, resolution=${train_resolutions}, transform=${train_transform}, num_views=${num_views}, n_corres=${n_corres_train})
-dataset_megadepth: MegaDepth_Multi(allow_repeat=${allow_repeat}, split='train', ROOT='${data_root}/processed_megadepth', aug_crop=${train_aug_crop}, resolution=${train_resolutions}, transform=${train_transform}, num_views=${num_views}, n_corres=${n_corres_train})
-dataset_vkitti2: VirtualKITTI2_Multi(allow_repeat=${allow_repeat}, split=None, ROOT='${data_root}/processed_vkitti/mast3r_data/processed_vkitti', aug_crop=${train_aug_crop}, resolution=${train_resolutions}, transform=${train_transform}, num_views=${num_views}, n_corres=${n_corres_train})
-dataset_omniobject3d: OmniObject3D_Multi(allow_repeat=${allow_repeat}, split=None, ROOT='${data_root}/omniobject3d_processed', aug_crop=${train_aug_crop}, resolution=${train_resolutions}, transform=${train_transform}, num_views=${num_views}, n_corres=${n_corres_train})
-dataset_spring: Spring(allow_repeat=${allow_repeat}, split=None, ROOT='${data_root}/spring_processed', aug_crop=${train_aug_crop}, resolution=${train_resolutions}, transform=${train_transform}, num_views=${num_views}, n_corres=${n_corres_train})
-dataset_mvs_synth: MVS_Synth_Multi(allow_repeat=${allow_repeat}, split='train', ROOT='${data_root}/processed_mvs_synth', aug_crop=${train_aug_crop}, resolution=${train_resolutions}, transform=${train_transform}, num_views=${num_views}, n_corres=${n_corres_train})
-dataset_pointodyssey: PointOdyssey_Multi(allow_repeat=${allow_repeat}, split='train', ROOT='${data_root}/processed_pointodyssey', aug_crop=${train_aug_crop}, resolution=${train_resolutions}, transform=${train_transform}, num_views=${num_views}, n_corres=${n_corres_train})
-
-# --- Mixed training dataset ---
-# Weighted mixing: larger scenes get more samples, smaller scenes get proportional representation
-train_dataset: 4500 @ ${dataset_co3d} + 4500 @ ${dataset_wildrgbd} + 4500 @ ${dataset_arkitscenes} + 2250 @ ${dataset_arkitscenes_highres} + 2250 @ ${dataset_scannetpp} + 4500 @ ${dataset_scannet} + 1200 @ ${dataset_hypersim} + 2250 @ ${dataset_blendedmvs} + 2250 @ ${dataset_megadepth} + 2250 @ ${dataset_vkitti2} + 1800 @ ${dataset_omniobject3d} + 1800 @ ${dataset_spring} + 450 @ ${dataset_mvs_synth} + 2250 @ ${dataset_pointodyssey}
-
-# --- Test dataset ---
-num_test_views: 4
-test_dataset: 1000 @ ARKitScenes_Multi(allow_repeat=False, split='test', ROOT='${data_root}/processed_arkitscenes', resolution=(518, 392), num_views=${num_test_views}, seed=42, n_corres=0)
-
-seed: 0
-batch_size: 4
-accum_iter: 1
-gradient_checkpointing: False
-ddp_static_graph: False
-ddp_find_unused_parameters: True
-frontend_head_checkpointing: True
-teacher_output_to_cpu: True
-teacher_weight_offload: True
-epochs: 10
-start_epoch: 0
-start_step: 0
-weight_decay: 0.05
-lr: 1e-4
-min_lr: 1e-6
-warmup_epochs: 0.5
-amp: 1
-
-# TokenScorer-specific
-use_token_scorer: True
-scorer_only: True
-distill_loss_weight: 1.0
-
-num_workers: 8
-world_size: 4
-local-rank: -1
-dist_url: env://
-rank: 0
-gpu: 0
-distributed: False
-dist_backend: nccl
-
-save_freq: 1
-keep_freq: 1
-save_iter_freq: 0
-keep_iter_freq: 0
-print_freq: 10
-print_img_freq: 50000000
-save_dir: /path/to/mount/lyj/voxel-vggt/checkpoints
-exp_name: OVGGT_token_scorer_mixed
-task: OVGGT_frontend
-logdir: ${save_dir}/${exp_name}/logs
-output_dir: ${save_dir}/${exp_name}/
-hydra:
-  verbose: True
-  run:
-    dir: ${save_dir}/${exp_name}
+# DEPRECATED: legacy heuristic-distillation TokenScorer training is disabled.
+#
+# Use the counterfactual-retention oracle pipeline instead:
+#
+# 1. Generate oracle shards:
+#    /mnt/lyj/miniconda3/envs/streamvggt/bin/python tools/generate_counterfactual_oracle.py \
+#      --mode collect-replay \
+#      --replay-plan /path/to/replay_plan.pt \
+#      --runner-factory your_package.your_runner:build_runner \
+#      --output /path/to/mount/lyj/voxel-vggt/checkpoints/token_oracle/oracle_shard_000.pt
+#
+# 2. Train TokenScorer:
+#    /mnt/lyj/miniconda3/envs/streamvggt/bin/python src/train_token_scorer_oracle.py \
+#      --config config/train_token_scorer_oracle.yaml
+#
+# 3. Evaluate learned eviction:
+#    /mnt/lyj/miniconda3/envs/streamvggt/bin/python tools/evaluate_learned_eviction.py \
+#      --oracle-shards /path/to/mount/lyj/voxel-vggt/checkpoints/token_oracle/oracle_shard_000.pt \
+#      --token-scorer-checkpoint /path/to/mount/lyj/voxel-vggt/checkpoints/token_scorer_oracle/token_scorer.pt
+#
+# The active training config is config/train_token_scorer_oracle.yaml.
+redirect_config: config/train_token_scorer_oracle.yaml
+training_script: src/train_token_scorer_oracle.py
+reason: "TokenScorer must be trained from counterfactual retention oracle shards, not MLP-residual heuristic distillation."

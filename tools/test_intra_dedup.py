@@ -40,21 +40,21 @@ for NF in [50,200]:
     print('--- {} frames ---'.format(NF))
 
     # 1. Full dedup (baseline, intra=ON)
-    a_full = run(lambda: OVGGT(mode='frontend_eval',total_budget=200000,
+    a_full = run(lambda: OVGGT(mode='frontend_eval',per_layer_budget=8000,
                 frontend_pose_encoding_type=ABS_POSE_ENCODING,
                 frontend_cache_config=FrontendCacheConfig(enabled=True,dedup_enabled=True,intra_frame_dedup_enabled=True)),
              lambda m: m.inference(inputs,history_anchor_strategy='fixed_interval',anchor_interval=8,max_anchors=3))
     print('  full_dedup:          ATE={:.4f}'.format(a_full))
 
     # 2. No intra-frame dedup (intra=OFF, cross-frame still ON)
-    a_no_intra = run(lambda: OVGGT(mode='frontend_eval',total_budget=200000,
+    a_no_intra = run(lambda: OVGGT(mode='frontend_eval',per_layer_budget=8000,
                 frontend_pose_encoding_type=ABS_POSE_ENCODING,
                 frontend_cache_config=FrontendCacheConfig(enabled=True,dedup_enabled=True,intra_frame_dedup_enabled=False)),
              lambda m: m.inference(inputs,history_anchor_strategy='fixed_interval',anchor_interval=8,max_anchors=3))
     print('  no_intra_dedup:      ATE={:.4f} (delta={:+.4f})'.format(a_no_intra, a_no_intra - a_full))
 
     # 3. No dedup at all
-    a_no_dedup = run(lambda: OVGGT(mode='frontend_eval',total_budget=200000,
+    a_no_dedup = run(lambda: OVGGT(mode='frontend_eval',per_layer_budget=8000,
                 frontend_pose_encoding_type=ABS_POSE_ENCODING,
                 frontend_cache_config=FrontendCacheConfig(enabled=True,dedup_enabled=False)),
              lambda m: m.inference(inputs,history_anchor_strategy='fixed_interval',anchor_interval=8,max_anchors=3))

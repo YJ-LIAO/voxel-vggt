@@ -11,7 +11,7 @@ device = accel.device
 model = OVGGT(
     mode="frontend_train",
     frontend_pose_encoding_type="relT_quaR_FoV",
-    total_budget=10410,
+    per_layer_budget=434,
     camera_budget=128,
     use_token_scorer=True,
 ).to(device)

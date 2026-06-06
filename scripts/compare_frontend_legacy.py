@@ -22,20 +22,20 @@ from ovggt.models.ovggt import OVGGT
 from dust3r.utils.image import load_images_for_eval
 
 
-def load_model(checkpoint_path: str, mode: str, device: torch.device, total_budget: int = 200000):
+def load_model(checkpoint_path: str, mode: str, device: torch.device, per_layer_budget: int = 8000):
     """加载模型"""
     print(f"Loading model in {mode} mode from {checkpoint_path}")
 
     if mode == "frontend_eval":
         model = OVGGT(
             mode="frontend_eval",
-            total_budget=total_budget,
+            per_layer_budget=per_layer_budget,
             frontend_pose_encoding_type="relT_quaR_FoV",
         )
     else:  # legacy
         model = OVGGT(
             mode="legacy",
-            total_budget=total_budget,
+            per_layer_budget=per_layer_budget,
         )
 
     # Load weights
@@ -185,8 +185,8 @@ def main():
                         help="Number of frames to test")
     parser.add_argument("--img_size", type=int, default=518,
                         help="Image size")
-    parser.add_argument("--total_budget", type=int, default=10410,
-                        help="Total KV cache budget for Frontend mode")
+    parser.add_argument("--per_layer_budget", type=int, default=434,
+                        help="Per-layer KV cache budget for Frontend mode")
     parser.add_argument("--gpu", type=int, default=0,
                         help="GPU ID")
     parser.add_argument("--mode", type=str, default="both", choices=["frontend", "legacy", "both"],
@@ -202,7 +202,7 @@ def main():
     print(f"Legacy checkpoint: {args.legacy_ckpt}")
     print(f"Scene: {args.scene}")
     print(f"Num frames: {args.num_frames}")
-    print(f"Total budget (Frontend): {args.total_budget}")
+    print(f"Per-layer budget (Frontend): {args.per_layer_budget}")
     print(f"Mode: {args.mode}")
     print("=" * 60)
 
@@ -224,7 +224,7 @@ def main():
     # Run Frontend inference
     if args.mode in ["frontend", "both"]:
         print("\n[1] Loading Frontend model...")
-        frontend_model = load_model(args.frontend_ckpt, "frontend_eval", device, args.total_budget)
+        frontend_model = load_model(args.frontend_ckpt, "frontend_eval", device, args.per_layer_budget)
 
         print("\n[2] Running Frontend inference...")
         frontend_output, frontend_time, frontend_memory = run_inference(frontend_model, images, device)
@@ -242,7 +242,7 @@ def main():
     # Run Legacy inference
     if args.mode in ["legacy", "both"]:
         print("\n[3] Loading Legacy model...")
-        legacy_model = load_model(args.legacy_ckpt, "legacy", device, 200000)  # Large budget for legacy
+        legacy_model = load_model(args.legacy_ckpt, "legacy", device, 8000)  # Large budget for legacy
 
         print("\n[4] Running Legacy inference...")
         legacy_output, legacy_time, legacy_memory = run_inference(legacy_model, images, device)

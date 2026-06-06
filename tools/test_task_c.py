@@ -40,7 +40,7 @@ for NF in [50,200]:
     print('--- {} frames ---'.format(NF))
 
     # Baseline: intra=OFF, fifo=0
-    a_base = run(lambda: OVGGT(mode='frontend_eval',total_budget=200000,
+    a_base = run(lambda: OVGGT(mode='frontend_eval',per_layer_budget=8000,
                 frontend_pose_encoding_type=ABS_POSE_ENCODING,
                 frontend_cache_config=FrontendCacheConfig(enabled=True,dedup_enabled=True,
                     intra_frame_dedup_enabled=False,fifo_keep_topk=0)),
@@ -48,7 +48,7 @@ for NF in [50,200]:
     print('  noIntra_fifo=0:   ATE={:.4f}'.format(a_base))
 
     for topk in [25, 50, 100, 200]:
-        a = run(lambda topk=topk: OVGGT(mode='frontend_eval',total_budget=200000,
+        a = run(lambda topk=topk: OVGGT(mode='frontend_eval',per_layer_budget=8000,
                     frontend_pose_encoding_type=ABS_POSE_ENCODING,
                     frontend_cache_config=FrontendCacheConfig(enabled=True,dedup_enabled=True,
                         intra_frame_dedup_enabled=False,fifo_keep_topk=topk)),

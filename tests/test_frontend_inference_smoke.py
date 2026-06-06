@@ -18,7 +18,7 @@ def build_tiny_model(frontend_enabled: bool, mode: str = None):
         "img_size": 28,
         "patch_size": 14,
         "embed_dim": 32,
-        "total_budget": 64,
+        "per_layer_budget": 3,
         "camera_budget": 32,
         "aggregator_kwargs": {
             "patch_embed": "conv",
@@ -88,9 +88,12 @@ class FrontendInferenceSmokeTests(unittest.TestCase):
         self.assertIsNotNone(output.keyframe_schedule)
         self.assertIsNone(output.keyframe_packets)
 
-    def test_frontend_train_forward_rejects_batch_size_two(self):
+    def test_frontend_train_forward_rejects_inconsistent_batch_size(self):
         model = build_tiny_model(frontend_enabled=True, mode="frontend_train")
-        frames = [{"img": torch.rand(2, 3, 28, 28)} for _ in range(3)]
+        frames = [
+            {"img": torch.rand(2, 3, 28, 28)},
+            {"img": torch.rand(1, 3, 28, 28)},
+        ]
         with self.assertRaises(ValueError):
             model.forward(frames)
 

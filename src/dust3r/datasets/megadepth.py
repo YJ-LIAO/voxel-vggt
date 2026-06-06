@@ -45,7 +45,7 @@ class MegaDepth_Multi(BaseMultiViewDataset):
         scenes = (scene,) if isinstance(scene, str) else tuple(scene)
         scene_id = [s.startswith(scenes) for s in self.all_scenes]
         assert any(scene_id), "no scene found"
-        valid = np.in1d(self.sets[:, 0], np.nonzero(scene_id)[0])
+        valid = np.isin(self.sets[:, 0], np.nonzero(scene_id)[0])
         if instances:
             raise NotImplementedError("selecting instances not implemented")
         if opposite:

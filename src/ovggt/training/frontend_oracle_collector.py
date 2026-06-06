@@ -1569,7 +1569,7 @@ def _select_oracle_events_quota_stratified(
     for event in candidate_events:
         et = event.get("event_type", "eviction")
         by_type.setdefault(et, []).append(event)
-    sorted_types = sorted(by_type.keys(), key=lambda t: len(by_type[t]))
+    sorted_types = sorted(by_type.keys(), key=lambda t: len(by_type[t]) / max(event_type_quotas.get(t, 1), 1))
     selected: list[dict] = []
     per_frame_counts: dict[int, int] = {}
     used_ids: set[int] = set()
@@ -1614,6 +1614,7 @@ def _select_oracle_events_quota_stratified(
             fill_group_queues = [list(fill_groups[k]) for k in sorted(fill_groups.keys())]
             fill_selected, per_frame_counts = _round_robin_select(
                 fill_group_queues, max_events, max_events_per_frame, per_frame_counts,
+                budget=remaining,
             )
             selected.extend(fill_selected)
     return selected
@@ -2101,6 +2102,8 @@ def collect_oracle_events_from_sequence(
     ]
     candidate_events.extend(dedup_events)
     candidate_events.extend(fifo_events)
+    # Interleave by frame_id before truncation to avoid type-order bias
+    candidate_events.sort(key=lambda e: (int(e.get("frame_id", 0)), e.get("event_type", "")))
     candidate_events = candidate_events[:candidate_cap]
     filtered_event_count = len(candidate_events)
     candidate_events = select_oracle_events(

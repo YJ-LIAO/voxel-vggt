@@ -25,7 +25,7 @@ def build_tiny_frontend_model():
         img_size=28,
         patch_size=14,
         embed_dim=32,
-        total_budget=64,
+        per_layer_budget=3,
         camera_budget=32,
         aggregator_kwargs={
             "patch_embed": "conv",

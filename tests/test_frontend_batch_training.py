@@ -1,5 +1,6 @@
 import torch
 import numpy as np
+import pytest
 from dust3r.datasets.collate import frontend_collate_fn
 
 def test_collate_mixed_types():
@@ -29,6 +30,7 @@ def test_collate_mixed_types():
 
 
 @torch.no_grad()
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="requires CUDA")
 def test_batch2_forward_no_error():
     """Smoke test: B=2 training forward pass completes without error."""
     from ovggt.models.ovggt import OVGGT
@@ -39,7 +41,7 @@ def test_batch2_forward_no_error():
     H, W = 518, 392
     model = OVGGT(
         mode='frontend_train',
-        total_budget=5000,
+        per_layer_budget=209,
         camera_budget=64,
         use_token_scorer=False,
         frontend_cache_config=FrontendCacheConfig(
@@ -66,6 +68,7 @@ def test_batch2_forward_no_error():
 
 
 @torch.no_grad()
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="requires CUDA")
 def test_batch1_vs_batch2_equivalence():
     """Same 2 sequences: B=1x2steps vs B=2x1step produce similar depth predictions."""
     from ovggt.models.ovggt import OVGGT
@@ -78,7 +81,7 @@ def test_batch1_vs_batch2_equivalence():
     def make_model():
         return OVGGT(
             mode='frontend_train',
-            total_budget=5000,
+            per_layer_budget=209,
             camera_budget=64,
             use_token_scorer=False,
             frontend_cache_config=FrontendCacheConfig(enabled=True, dedup_enabled=False),
@@ -89,8 +92,13 @@ def test_batch1_vs_batch2_equivalence():
     frames_a = [{"img": torch.randn(1, 3, H, W, generator=g0).cuda()} for _ in range(num_frames)]
     frames_b = [{"img": torch.randn(1, 3, H, W, generator=g1).cuda()} for _ in range(num_frames)]
 
-    # B=1: run both sequences separately
+    # B=1 and B=2 must use identical weights; otherwise this compares two
+    # unrelated random initializations instead of batch semantics.
     model1 = make_model()
+    model2 = make_model()
+    model2.load_state_dict(model1.state_dict())
+
+    # B=1: run both sequences separately
     out1a = model1.inference(frames_a, history_anchor_strategy='fixed_interval',
                               anchor_interval=2, max_anchors=2)
     out1b = model1.inference(frames_b, history_anchor_strategy='fixed_interval',
@@ -100,7 +108,6 @@ def test_batch1_vs_batch2_equivalence():
     frames_2 = []
     for fa, fb in zip(frames_a, frames_b):
         frames_2.append({"img": torch.cat([fa["img"], fb["img"]], dim=0)})
-    model2 = make_model()
     out2 = model2.inference(frames_2, history_anchor_strategy='fixed_interval',
                              anchor_interval=2, max_anchors=2)
 
@@ -115,6 +122,7 @@ def test_batch1_vs_batch2_equivalence():
 
 
 @torch.no_grad()
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="requires CUDA")
 def test_cache_isolation():
     """B=2: batch 0 and batch 1 have independent cache states."""
     from ovggt.models.ovggt import OVGGT
@@ -122,7 +130,7 @@ def test_cache_isolation():
 
     B = 2
     model = OVGGT(
-        mode='frontend_train', total_budget=5000, camera_budget=64,
+        mode='frontend_train', per_layer_budget=209, camera_budget=64,
         use_token_scorer=False,
         frontend_cache_config=FrontendCacheConfig(enabled=True, dedup_enabled=False),
     ).cuda().eval()

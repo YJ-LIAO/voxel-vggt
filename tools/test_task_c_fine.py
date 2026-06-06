@@ -39,7 +39,7 @@ for NF in [50,200]:
 
     print('--- {} frames ---'.format(NF))
     for topk in [80, 90, 100, 110, 125]:
-        a = run(lambda topk=topk: OVGGT(mode='frontend_eval',total_budget=200000,
+        a = run(lambda topk=topk: OVGGT(mode='frontend_eval',per_layer_budget=8000,
                     frontend_pose_encoding_type=ABS_POSE_ENCODING,
                     frontend_cache_config=FrontendCacheConfig(enabled=True,dedup_enabled=True,
                         intra_frame_dedup_enabled=False,fifo_keep_topk=topk)),

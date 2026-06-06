@@ -241,21 +241,16 @@ class FrontendDistillLoss(nn.Module):
         )
 
         cam_pr = torch.stack(list(student_camera_pose_rel), dim=1)
-        Lcamera_rel = self.cam_loss(cam_pr, gt_rel_pose_enc)
-        cam_abs_pr = torch.stack(list(student_camera_pose_abs), dim=1)
-        Lcamera_abs = self._masked_camera_loss(cam_abs_pr, gt_abs_pose_enc, fixed_keyframe_mask)
-        non_keyframe_mask = ~fixed_keyframe_mask
-        abs_pose_consistency_target = self._compose_absolute_pose_from_relative_with_fixed_anchors(
-            anchor_abs_pose=gt_abs_pose_enc,
-            pred_rel_pose=cam_pr,
-            keyframe_mask=fixed_keyframe_mask,
-            image_size_hw=image_size_hw,
-        )
-        Lcamera_abs_consistency = self._masked_camera_loss(
-            cam_abs_pr,
-            abs_pose_consistency_target,
-            non_keyframe_mask,
-        )
+        gt_rel_from_first = self._build_gt_relative_from_first_frame(gt_abs_pose_enc, image_size_hw)
+        # Normalize translation by scene scale (GT first-frame translation norm)
+        scene_scale = gt_abs_pose_enc[:, 0, :3].norm(dim=-1, keepdim=True).unsqueeze(-1).clamp(min=1e-3)
+        cam_pr_normed = cam_pr.clone()
+        cam_pr_normed[..., :3] = cam_pr[..., :3] / scene_scale
+        gt_rel_normed = gt_rel_from_first.clone()
+        gt_rel_normed[..., :3] = gt_rel_from_first[..., :3] / scene_scale
+        Lcamera_rel = self.cam_loss(cam_pr_normed, gt_rel_normed)
+        Lcamera_abs = Lcamera_rel.new_zeros(())
+        Lcamera_abs_consistency = Lcamera_rel.new_zeros(())
 
         Ldepth = torch.stack(list(depth_terms)).mean() if depth_terms else Lcamera_rel.new_zeros(())
         Lpmap = torch.stack(list(pmap_terms)).mean() if pmap_terms else Lcamera_rel.new_zeros(())
@@ -281,16 +276,12 @@ class FrontendDistillLoss(nn.Module):
 
         total = (
             20.0 * Lcamera_rel
-            + self.abs_pose_loss_weight * Lcamera_abs
-            + self.abs_pose_consistency_weight * Lcamera_abs_consistency
             + 20.0 * Ldepth
             + 10.0 * Lpmap
             + 0.5 * Ltrack
         )
         details = {
             "Lcamera_rel": float(Lcamera_rel) * 20.0,
-            "Lcamera_abs": float(Lcamera_abs) * self.abs_pose_loss_weight,
-            "Lcamera_abs_consistency": float(Lcamera_abs_consistency) * self.abs_pose_consistency_weight,
             "Ldepth": float(Ldepth) * 20.0,
             "Lpmap": float(Lpmap) * 10.0,
             "Ltrack": float(Ltrack) * 0.5,
@@ -343,6 +334,18 @@ class FrontendDistillLoss(nn.Module):
             intrinsics=gt_intrinsics,
             image_size_hw=image_size_hw,
             pose_encoding_type=ABS_POSE_ENCODING,
+        )
+
+    @staticmethod
+    def _build_gt_relative_from_first_frame(
+        gt_abs_pose_enc: torch.Tensor,
+        image_size_hw,
+    ) -> torch.Tensor:
+        anchor_pose = gt_abs_pose_enc[:, 0:1]
+        return relative_from_absolute_pose_encoding(
+            anchor_pose.expand_as(gt_abs_pose_enc),
+            gt_abs_pose_enc,
+            image_size_hw=image_size_hw,
         )
 
     @staticmethod

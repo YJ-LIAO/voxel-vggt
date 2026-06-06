@@ -22,18 +22,31 @@ max_candidate_events_per_sequence: 256
 max_events_per_sequence: 16
 max_events_per_frame: 6
 layers_per_frame: 2
-event_selection_policy: stratified_round_robin
+event_selection_policy: quota_stratified
+event_type_quotas:
+  eviction: 8
+  dedup: 4
+  fifo_topk: 4
+quota_fill_remaining: false
 stratified_layer_bucket_width: 6
 subset_replay_batch_size: 16
 store_replay_payload: false
 oracle_profile: fifo_topk
 max_fetch_errors: 256
 seed: 0
+probe_only: false
+probe_output_json: null
+oracle_anchor_interval: null
+oracle_max_anchors: null
+oracle_layer_schedule: default
+oracle_layer_buckets: null
+oracle_layer_schedule_seed: 0
+frame_buckets: null
 
 # Fifo topk profile settings (used when oracle_profile=fifo_topk)
 fifo_keep_topk_override: 80
 fifo_count_candidates_for_oracle: [0, 8, 16, 32, 64, 128]
-frontend_total_budget_override: 5000
+frontend_per_layer_budget_override: 2500  # per-layer
 
 student_checkpoint: null
 teacher_checkpoint: null

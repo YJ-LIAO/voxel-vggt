@@ -49,6 +49,8 @@ class Block(nn.Module):
             strategy=eviction_strategy,
             spatial_alpha=spatial_alpha,
         )
+        self.token_scorer = None  # set by Aggregator.init_token_scorers()
+        self.score_state_proj = None  # set by Aggregator.init_token_scorers()
 
         self.norm1 = norm_layer(dim)
 
@@ -195,7 +197,13 @@ class Block(nn.Module):
                 else:
                     new_importance = self.importance_scorer.compute(k=k_current)
 
-                return x_after_mlp, (k_current, v_current), new_importance
+                score_state = (
+                    self.score_state_proj(x_after_mlp)
+                    if self.score_state_proj is not None
+                    else None
+                )
+
+                return x_after_mlp, (k_current, v_current), new_importance, score_state
 
             if use_two_stage:
                 # Two-stage eviction: defer eviction to after MLP
