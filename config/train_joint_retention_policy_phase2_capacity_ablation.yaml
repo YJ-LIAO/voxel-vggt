@@ -1,0 +1,52 @@
+# Capacity ablation: high-confidence config with hidden_dim=512.
+# Thresholds from Task 6 diagnostics: dedup=0.02, eviction=0.01, fifo_topk=0.01, min_count_loss_gap=0.001
+
+oracle_shards:
+  - /path/to/mount/lyj/voxel-vggt/checkpoints/token_oracle_phase2/phase2_diverse_shard_gpu0_s0.pt
+  - /path/to/mount/lyj/voxel-vggt/checkpoints/token_oracle_phase2/phase2_diverse_shard_gpu1_s1.pt
+  - /path/to/mount/lyj/voxel-vggt/checkpoints/token_oracle_phase2/phase2_diverse_shard_gpu2_s2.pt
+  - /path/to/mount/lyj/voxel-vggt/checkpoints/token_oracle_phase2/phase2_diverse_shard_gpu3_s3.pt
+
+output: /path/to/mount/lyj/voxel-vggt/checkpoints/token_scorer_oracle/joint_retention_policy_phase2_highconf_h512.pt
+score_state_proj_checkpoint: null
+
+score_state_dim: 128
+metadata_dim: 17
+hidden_dim: 512
+num_layers: 24
+count_candidates: [0, 8, 16, 32, 64, 128]
+count_head_arch: shared_encoder_v2
+
+batch_size: 64
+epochs: 10
+lr: 1e-4
+weight_decay: 0.01
+
+regression_weight: 0.0
+min_loss_gap: 0.02
+min_loss_gap_by_event_type:
+  dedup: 0.02
+  eviction: 0.01
+  fifo_topk: 0.01
+max_loss_gap: null
+min_count_loss_gap: 0.001
+count_loss_weight: 0.5
+count_label_reduction: min
+count_repeat_factor: 1
+
+fifo_token_pair_mode: same_keep_count
+token_score_mode: delta_mean
+pair_sampling_seed: 0
+max_pairs_per_event: 64
+
+save_best: true
+best_metric: token.eviction_fifo_mean_rank_acc
+early_stop_patience: 2
+early_stop_min_delta: 0.001
+deploy_count_head: auto
+deploy_count_head_min_delta: 0.03
+
+val_fraction: 0.1
+split_key: sequence_id
+split_seed: 0
+device: cuda
