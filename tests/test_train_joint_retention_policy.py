@@ -899,3 +899,138 @@ def test_deploy_gating_auto_no_validation_disables(tmp_path):
     assert len(count_head_deploy_keys) == 0, (
         f"Found count_head deploy keys with no validation + auto: {count_head_deploy_keys}"
     )
+
+
+# --------------------------------------------------------------------------- #
+# Task 7: Overfit sanity tool tests
+# --------------------------------------------------------------------------- #
+
+def _add_tools_to_path():
+    """Add tools/ directory to sys.path for importing the sanity tool."""
+    tools_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "tools"))
+    if tools_dir not in sys.path:
+        sys.path.insert(0, tools_dir)
+
+
+def test_select_high_margin_token_samples_basic():
+    """select_high_margin_token_samples returns highest margins in descending order."""
+    _add_tools_to_path()
+    from overfit_joint_retention_sanity import select_high_margin_token_samples
+
+    samples = [
+        {"target_margin": 0.1, "event_id": "a"},
+        {"target_margin": 0.5, "event_id": "b"},
+        {"target_margin": 0.3, "event_id": "c"},
+        {"target_margin": 0.05, "event_id": "d"},
+        {"target_margin": 0.2, "event_id": "e"},
+    ]
+    result = select_high_margin_token_samples(samples, 3)
+    assert len(result) == 3
+    margins = [s["target_margin"] for s in result]
+    assert margins == sorted(margins, reverse=True), (
+        f"Expected descending margins, got {margins}"
+    )
+    assert margins[0] == 0.5
+    assert margins[1] == 0.3
+    assert margins[2] == 0.2
+
+
+def test_select_high_margin_token_samples_n_exceeds_count():
+    """When n > len(samples), return all samples sorted descending."""
+    _add_tools_to_path()
+    from overfit_joint_retention_sanity import select_high_margin_token_samples
+
+    samples = [
+        {"target_margin": 0.1, "event_id": "a"},
+        {"target_margin": 0.3, "event_id": "b"},
+    ]
+    result = select_high_margin_token_samples(samples, 10)
+    assert len(result) == 2
+    assert result[0]["target_margin"] == 0.3
+    assert result[1]["target_margin"] == 0.1
+
+
+def test_select_high_margin_token_samples_empty():
+    """Empty input returns empty list."""
+    _add_tools_to_path()
+    from overfit_joint_retention_sanity import select_high_margin_token_samples
+
+    assert select_high_margin_token_samples([], 5) == []
+
+
+def test_overfit_sanity_main_passes_with_fake_data(tmp_path):
+    """main() with fake shard data prints all markers and returns 0."""
+    _add_tools_to_path()
+    import subprocess
+
+    shard_path = tmp_path / "fake_shard.pt"
+    _make_fake_shard(shard_path, num_eviction=4, num_fifo=4)
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "tools", "overfit_joint_retention_sanity.py")),
+            "--oracle-shards", str(shard_path),
+            "--token-samples", "16",
+            "--count-samples-per-class", "4",
+            "--min-loss-gap", "0.01",
+            "--device", "cpu",
+            "--max-token-steps", "100",
+            "--max-count-steps", "100",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+
+    combined = result.stdout + result.stderr
+    for marker in ("TOKEN_DATA", "TOKEN_OVERFIT", "TOKEN_DONE",
+                   "COUNT_DATA", "COUNT_OVERFIT", "COUNT_DONE",
+                   "SANITY_RESULT"):
+        assert marker in combined, (
+            f"Missing marker '{marker}' in output:\n{combined}"
+        )
+
+    assert result.returncode == 0, (
+        f"Expected exit code 0, got {result.returncode}\nstdout: {result.stdout}\nstderr: {result.stderr}"
+    )
+
+    # Verify SANITY_RESULT line contains booleans
+    for line in combined.splitlines():
+        if "SANITY_RESULT" in line:
+            assert "token_pass=" in line, f"Missing token_pass= in SANITY_RESULT line: {line}"
+            assert "count_pass=" in line, f"Missing count_pass= in SANITY_RESULT line: {line}"
+            break
+
+
+def test_overfit_sanity_main_fails_exit_code_2(tmp_path):
+    """main() with impossible thresholds returns exit code 2."""
+    _add_tools_to_path()
+    import subprocess
+
+    shard_path = tmp_path / "fake_shard.pt"
+    _make_fake_shard(shard_path, num_eviction=4, num_fifo=4)
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "tools", "overfit_joint_retention_sanity.py")),
+            "--oracle-shards", str(shard_path),
+            "--token-samples", "16",
+            "--count-samples-per-class", "4",
+            "--min-loss-gap", "0.01",
+            "--device", "cpu",
+            "--max-token-steps", "1",
+            "--max-count-steps", "1",
+            "--token-pass-threshold", "0.9999",
+            "--count-pass-threshold", "0.9999",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+
+    assert result.returncode == 2, (
+        f"Expected exit code 2 for impossible thresholds, got {result.returncode}\n"
+        f"stdout: {result.stdout}\nstderr: {result.stderr}"
+    )
