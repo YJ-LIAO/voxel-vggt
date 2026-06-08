@@ -101,8 +101,11 @@ class CounterfactualOracleDataset(Dataset):
         min_loss_gap: float = 0.0,
         event_types: Sequence[str] | None = None,
         fifo_token_pair_mode: str = "any",
+        max_pairs_per_event: int | None = 64,
+        pair_sampling_seed: int = 0,
     ) -> None:
         self.min_loss_gap = float(min_loss_gap)
+        self.pair_sampling_seed = int(pair_sampling_seed)
         if event_types is not None:
             self.event_types = set(event_types)
             unsupported = self.event_types - self.SUPPORTED_EVENT_TYPES
@@ -116,6 +119,7 @@ class CounterfactualOracleDataset(Dataset):
                 f"got '{fifo_token_pair_mode}'"
             )
         self.fifo_token_pair_mode = fifo_token_pair_mode
+        self.max_pairs_per_event = max_pairs_per_event
         self.samples: list[dict] = []
         for shard_path in shard_paths:
             shard = torch.load(Path(shard_path), map_location="cpu", weights_only=False)
@@ -130,6 +134,8 @@ class CounterfactualOracleDataset(Dataset):
         min_loss_gap: float = 0.0,
         event_types: Sequence[str] | None = None,
         fifo_token_pair_mode: str = "any",
+        max_pairs_per_event: int | None = 64,
+        pair_sampling_seed: int = 0,
     ) -> "CounterfactualOracleDataset":
         """Build a dataset from a pre-loaded list of events.
 
@@ -138,6 +144,7 @@ class CounterfactualOracleDataset(Dataset):
         """
         dataset = cls.__new__(cls)
         dataset.min_loss_gap = float(min_loss_gap)
+        dataset.pair_sampling_seed = int(pair_sampling_seed)
         if event_types is not None:
             dataset.event_types = set(event_types)
             unsupported = dataset.event_types - cls.SUPPORTED_EVENT_TYPES
@@ -151,12 +158,15 @@ class CounterfactualOracleDataset(Dataset):
                 f"got '{fifo_token_pair_mode}'"
             )
         dataset.fifo_token_pair_mode = fifo_token_pair_mode
+        dataset.max_pairs_per_event = max_pairs_per_event
         dataset.samples = []
         for event in events:
             dataset._append_event_pairs(event)
         return dataset
 
     def _append_event_pairs(self, event: dict) -> None:
+        import random as _random
+
         # v2: Filter by event_type
         event_type = str(event.get("event_type", "eviction"))
         if event_type not in self.event_types:
@@ -169,6 +179,12 @@ class CounterfactualOracleDataset(Dataset):
         losses = torch.tensor([float(subset["loss"]) for subset in subsets], dtype=torch.float32)
         loss_min = float(losses.min().item())
         loss_max = float(losses.max().item())
+
+        # C1 fix: skip events where loss range is below min_loss_gap.
+        # All subsets are effectively tied — regression targets would be noise.
+        if loss_max - loss_min < self.min_loss_gap:
+            return
+
         denom = max(loss_max - loss_min, 1e-8)
 
         score_state = _ensure_token_matrix(event["score_state"]).float()
@@ -177,11 +193,15 @@ class CounterfactualOracleDataset(Dataset):
         layer_id = int(event.get("layer_id", 0))
         event_id = event.get("event_id", "")
         sequence_provenance = event.get("sequence_provenance")
+        event_keep_count = event.get("keep_count")
+
+        # Collect candidate pair descriptors (subset references), then
+        # build valid samples, then cap deterministically.
+        candidate_pairs: list[tuple[dict, dict]] = []
 
         # When same_keep_count mode is active for fifo_topk, group subsets
         # by keep_count so that pairs are only formed within the same group.
         if self.fifo_token_pair_mode == "same_keep_count" and event_type == "fifo_topk":
-            event_keep_count = event.get("keep_count")
             groups: dict[int, list[tuple[int, dict]]] = defaultdict(list)
             for idx, subset in enumerate(subsets):
                 kc = subset.get("keep_count", event_keep_count)
@@ -189,26 +209,40 @@ class CounterfactualOracleDataset(Dataset):
                     groups[int(kc)].append((idx, subset))
             # Generate pairs within each keep_count group
             for _kc, group_members in groups.items():
-                for better_pos, (better_idx, better_subset) in enumerate(group_members):
-                    for worse_pos, (worse_idx, worse_subset) in enumerate(group_members):
-                        if better_pos == worse_pos:
+                for i, (_, better_subset) in enumerate(group_members):
+                    for j, (_, worse_subset) in enumerate(group_members):
+                        if i == j:
                             continue
-                        self._maybe_append_pair(
-                            better_subset, worse_subset, event_id, event_type,
-                            layer_id, score_state, metadata_features, num_tokens,
-                            loss_max, denom, sequence_provenance,
-                        )
+                        candidate_pairs.append((better_subset, worse_subset))
         else:
             # Default "any" mode: all pairwise combinations
-            for better_idx, better_subset in enumerate(subsets):
-                for worse_idx, worse_subset in enumerate(subsets):
-                    self._maybe_append_pair(
-                        better_subset, worse_subset, event_id, event_type,
-                        layer_id, score_state, metadata_features, num_tokens,
-                        loss_max, denom, sequence_provenance,
-                    )
+            for better_subset in subsets:
+                for worse_subset in subsets:
+                    candidate_pairs.append((better_subset, worse_subset))
 
-    def _maybe_append_pair(
+        # Phase 1: filter to valid pairs (margin > 0 and >= min_loss_gap)
+        valid_samples: list[dict] = []
+        for better_subset, worse_subset in candidate_pairs:
+            sample = self._build_pair_sample(
+                better_subset, worse_subset, event_id, event_type,
+                layer_id, score_state, metadata_features, num_tokens,
+                loss_max, denom, sequence_provenance, event_keep_count,
+            )
+            if sample is not None:
+                valid_samples.append(sample)
+
+        # Phase 2: deterministic capping using local RNG seeded from
+        # pair_sampling_seed and event_id.
+        if self.max_pairs_per_event is not None and len(valid_samples) > self.max_pairs_per_event:
+            seed_key = f"{self.pair_sampling_seed}:{event_id}"
+            seed = int(hashlib.md5(seed_key.encode("utf-8")).hexdigest(), 16) % (2**32)
+            rng = _random.Random(seed)
+            kept_indices = sorted(rng.sample(range(len(valid_samples)), self.max_pairs_per_event))
+            valid_samples = [valid_samples[i] for i in kept_indices]
+
+        self.samples.extend(valid_samples)
+
+    def _build_pair_sample(
         self,
         better_subset: dict,
         worse_subset: dict,
@@ -221,35 +255,134 @@ class CounterfactualOracleDataset(Dataset):
         loss_max: float,
         denom: float,
         sequence_provenance: dict | None,
-    ) -> None:
+        event_keep_count: int | None,
+    ) -> dict | None:
+        """Build a sample dict for a pair, or return None if invalid."""
         better_loss = float(better_subset["loss"])
         worse_loss = float(worse_subset["loss"])
         target_margin = worse_loss - better_loss
         if target_margin <= 0.0 or target_margin < self.min_loss_gap:
-            return
-        self.samples.append(
-            {
-                "event_id": event_id,
-                "event_type": event_type,
-                "layer_id": layer_id,
-                "score_state": score_state,
-                "metadata_features": metadata_features,
-                "better_mask": _indices_to_mask(better_subset["keep_indices"], num_tokens),
-                "worse_mask": _indices_to_mask(worse_subset["keep_indices"], num_tokens),
-                "better_loss": better_loss,
-                "worse_loss": worse_loss,
-                "target_margin": target_margin,
-                "better_target": (loss_max - better_loss) / denom,
-                "worse_target": (loss_max - worse_loss) / denom,
-                "sequence_provenance": sequence_provenance,
-            }
-        )
+            return None
+
+        # FIFO keep_count metadata: store for fifo_topk events, None otherwise
+        if event_type == "fifo_topk":
+            better_keep_count = better_subset.get("keep_count", event_keep_count)
+            worse_keep_count = worse_subset.get("keep_count", event_keep_count)
+        else:
+            better_keep_count = None
+            worse_keep_count = None
+
+        return {
+            "event_id": event_id,
+            "event_type": event_type,
+            "layer_id": layer_id,
+            "score_state": score_state,
+            "metadata_features": metadata_features,
+            "better_mask": _indices_to_mask(better_subset["keep_indices"], num_tokens),
+            "worse_mask": _indices_to_mask(worse_subset["keep_indices"], num_tokens),
+            "better_loss": better_loss,
+            "worse_loss": worse_loss,
+            "target_margin": target_margin,
+            "better_target": (loss_max - better_loss) / denom,
+            "worse_target": (loss_max - worse_loss) / denom,
+            "sequence_provenance": sequence_provenance,
+            "better_keep_count": better_keep_count,
+            "worse_keep_count": worse_keep_count,
+        }
 
     def __len__(self) -> int:
         return len(self.samples)
 
     def __getitem__(self, index: int) -> dict:
         return self.samples[index]
+
+
+def summarize_oracle_pair_samples(samples: Sequence[dict]) -> dict:
+    """Compute summary statistics from a sequence of oracle pair samples.
+
+    Pure helper usable by both trainers and diagnostic scripts.
+    Required fields: count, by_event_type, unique_event_count, fifo_count,
+    fifo_cross_keep_count, fifo_cross_keep_frac, target_margin percentiles,
+    by_event_type_margin_p50, by_event_type_unique_event_count.
+    """
+    import numpy as np
+
+    count = len(samples)
+    if count == 0:
+        return {
+            "count": 0,
+            "by_event_type": {},
+            "unique_event_count": 0,
+            "fifo_count": 0,
+            "fifo_cross_keep_count": 0,
+            "fifo_cross_keep_frac": 0.0,
+            "target_margin_p10": 0.0,
+            "target_margin_p25": 0.0,
+            "target_margin_p50": 0.0,
+            "target_margin_p75": 0.0,
+            "target_margin_p90": 0.0,
+            "by_event_type_margin_p50": {},
+            "by_event_type_unique_event_count": {},
+        }
+
+    # by_event_type counts
+    by_event_type: dict[str, int] = {}
+    # margins grouped by event_type
+    margins_by_type: dict[str, list[float]] = {}
+    # event_ids grouped by event_type
+    event_ids_by_type: dict[str, set[str]] = {}
+    all_event_ids: set[str] = set()
+
+    fifo_count = 0
+    fifo_cross_keep_count = 0
+    all_margins: list[float] = []
+
+    for sample in samples:
+        et = str(sample.get("event_type", "eviction"))
+        by_event_type[et] = by_event_type.get(et, 0) + 1
+        margins_by_type.setdefault(et, []).append(float(sample["target_margin"]))
+        event_id = str(sample.get("event_id", ""))
+        event_ids_by_type.setdefault(et, set()).add(event_id)
+        all_event_ids.add(event_id)
+        all_margins.append(float(sample["target_margin"]))
+
+        if et == "fifo_topk":
+            fifo_count += 1
+            bkc = sample.get("better_keep_count")
+            wkc = sample.get("worse_keep_count")
+            if bkc is not None and wkc is not None and bkc != wkc:
+                fifo_cross_keep_count += 1
+
+    margins_arr = np.array(all_margins, dtype=np.float64)
+
+    def _percentile(arr: np.ndarray, q: float) -> float:
+        if len(arr) == 0:
+            return 0.0
+        return float(np.percentile(arr, q))
+
+    by_event_type_margin_p50: dict[str, float] = {}
+    by_event_type_unique_event_count: dict[str, int] = {}
+    for et in by_event_type:
+        by_event_type_margin_p50[et] = _percentile(np.array(margins_by_type[et], dtype=np.float64), 50)
+        by_event_type_unique_event_count[et] = len(event_ids_by_type.get(et, set()))
+
+    fifo_cross_keep_frac = fifo_cross_keep_count / fifo_count if fifo_count > 0 else 0.0
+
+    return {
+        "count": count,
+        "by_event_type": by_event_type,
+        "unique_event_count": len(all_event_ids),
+        "fifo_count": fifo_count,
+        "fifo_cross_keep_count": fifo_cross_keep_count,
+        "fifo_cross_keep_frac": fifo_cross_keep_frac,
+        "target_margin_p10": _percentile(margins_arr, 10),
+        "target_margin_p25": _percentile(margins_arr, 25),
+        "target_margin_p50": _percentile(margins_arr, 50),
+        "target_margin_p75": _percentile(margins_arr, 75),
+        "target_margin_p90": _percentile(margins_arr, 90),
+        "by_event_type_margin_p50": by_event_type_margin_p50,
+        "by_event_type_unique_event_count": by_event_type_unique_event_count,
+    }
 
 
 def collate_oracle_pairs(samples: List[dict]) -> dict:
@@ -526,7 +659,12 @@ def _indices_to_mask(indices: Tensor | Iterable[int], num_tokens: int) -> Tensor
     index_tensor = torch.as_tensor(indices, dtype=torch.long)
     mask = torch.zeros(num_tokens, dtype=torch.bool)
     if index_tensor.numel() > 0:
-        mask[index_tensor.clamp(0, num_tokens - 1)] = True
+        if index_tensor.max() >= num_tokens or index_tensor.min() < 0:
+            raise ValueError(
+                f"keep_indices out of range [0, {num_tokens - 1}]: "
+                f"min={int(index_tensor.min().item())} max={int(index_tensor.max().item())}"
+            )
+        mask[index_tensor] = True
     return mask
 
 

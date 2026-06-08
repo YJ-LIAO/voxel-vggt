@@ -336,6 +336,7 @@ def test_oracle_training_log_line_excludes_provenance_fields():
         epoch=0,
         metrics={
             "count": 2,
+            "batches": 2,
             "loss": 0.4,
             "pairwise": 0.3,
             "regression": 0.1,
@@ -346,7 +347,7 @@ def test_oracle_training_log_line_excludes_provenance_fields():
     assert "provenance" not in summary
     assert "sequence" not in summary
     assert summary == (
-        "epoch_summary=0 batches=2 loss=0.200000 pairwise=0.150000 "
+        "epoch_summary=0 batches=2 samples=2 loss=0.200000 pairwise=0.150000 "
         "regression=0.050000 rank_acc=0.7500 mean_score_diff=1.500000"
     )
 
@@ -1185,3 +1186,128 @@ def test_summarizer_parses_gpu3_style_log(tmp_path):
     assert summary["raw_event_type_counts"] == {"eviction": 2, "dedup": 20, "fifo_topk": 0}
     assert summary["event_type_counts"] == {"dedup": 16}
     assert summary["total_events"] == 16
+
+
+# ===================================================================
+# Deterministic pair sampling (Task 1: pair_sampling_seed)
+# ===================================================================
+
+
+def _make_many_pair_event(event_id="evt_many", num_subsets=10, num_tokens=8):
+    """Build a synthetic event with many subsets so capping is exercised."""
+    from ovggt.layers.token_scorer import TOKEN_METADATA_FEATURE_DIM
+
+    subsets = []
+    for i in range(num_subsets):
+        # Create distinct keep_indices subsets with spread losses
+        start = i % num_tokens
+        indices = [(start + j) % num_tokens for j in range(3)]
+        subsets.append(
+            {
+                "keep_indices": torch.tensor(indices),
+                "loss": float(i) * 0.1,  # losses: 0.0, 0.1, 0.2, ..., 0.9
+            }
+        )
+    return {
+        "event_id": event_id,
+        "event_type": "eviction",
+        "layer_id": 0,
+        "score_state": torch.randn(num_tokens, 8),
+        "metadata_features": torch.randn(num_tokens, TOKEN_METADATA_FEATURE_DIM),
+        "sequence_provenance": {"sequence_id": "test_seq"},
+        "subsets": subsets,
+    }
+
+
+def test_same_seed_produces_identical_capped_samples():
+    """Two builds with the same pair_sampling_seed must produce identical samples."""
+    from ovggt.training.token_oracle_dataset import CounterfactualOracleDataset
+
+    event = _make_many_pair_event()
+
+    ds_a = CounterfactualOracleDataset.from_events(
+        [event], max_pairs_per_event=4, pair_sampling_seed=42
+    )
+    ds_b = CounterfactualOracleDataset.from_events(
+        [event], max_pairs_per_event=4, pair_sampling_seed=42
+    )
+
+    assert len(ds_a) == len(ds_b)
+    for sa, sb in zip(ds_a.samples, ds_b.samples):
+        assert sa["event_id"] == sb["event_id"]
+        assert torch.equal(sa["better_mask"], sb["better_mask"])
+        assert torch.equal(sa["worse_mask"], sb["worse_mask"])
+        assert abs(sa["target_margin"] - sb["target_margin"]) < 1e-6
+
+
+def test_different_seeds_produce_different_capped_samples():
+    """Two builds with different pair_sampling_seed may produce different capped samples."""
+    from ovggt.training.token_oracle_dataset import CounterfactualOracleDataset
+
+    event = _make_many_pair_event()
+
+    ds_42 = CounterfactualOracleDataset.from_events(
+        [event], max_pairs_per_event=4, pair_sampling_seed=42
+    )
+    ds_99 = CounterfactualOracleDataset.from_events(
+        [event], max_pairs_per_event=4, pair_sampling_seed=99
+    )
+
+    # Both should produce exactly max_pairs_per_event (after filtering invalid pairs)
+    assert len(ds_42) == len(ds_99)
+
+    # At least one sample should differ (different masks or margins)
+    any_different = False
+    for sa, sb in zip(ds_42.samples, ds_99.samples):
+        if not torch.equal(sa["better_mask"], sb["better_mask"]) or not torch.equal(
+            sa["worse_mask"], sb["worse_mask"]
+        ):
+            any_different = True
+            break
+    assert any_different, "Different seeds produced identical capped samples"
+
+
+def test_capping_happens_after_invalid_tied_filtering():
+    """Capping must apply only to valid pairs (target_margin > 0 and >= min_loss_gap)."""
+    from ovggt.training.token_oracle_dataset import CounterfactualOracleDataset
+
+    # Build event where several subsets have tied or near-tied losses
+    from ovggt.layers.token_scorer import TOKEN_METADATA_FEATURE_DIM
+
+    num_tokens = 6
+    subsets = [
+        {"keep_indices": torch.tensor([0, 1]), "loss": 0.10},
+        {"keep_indices": torch.tensor([2, 3]), "loss": 0.10},  # tied with 0.10
+        {"keep_indices": torch.tensor([4, 5]), "loss": 0.11},  # only 0.01 above min
+        {"keep_indices": torch.tensor([0, 2]), "loss": 0.20},
+        {"keep_indices": torch.tensor([1, 3]), "loss": 0.30},
+        {"keep_indices": torch.tensor([3, 4]), "loss": 0.40},
+    ]
+    event = {
+        "event_id": "filter_test",
+        "event_type": "eviction",
+        "layer_id": 0,
+        "score_state": torch.randn(num_tokens, 8),
+        "metadata_features": torch.randn(num_tokens, TOKEN_METADATA_FEATURE_DIM),
+        "sequence_provenance": {"sequence_id": "test_seq"},
+        "subsets": subsets,
+    }
+
+    # With min_loss_gap=0.02, only pairs with margin >= 0.02 survive.
+    # Without filtering-first, the cap would randomly drop some invalid pairs
+    # along with valid ones, changing the final valid count unpredictably.
+    ds_a = CounterfactualOracleDataset.from_events(
+        [event], min_loss_gap=0.02, max_pairs_per_event=3, pair_sampling_seed=7
+    )
+    ds_b = CounterfactualOracleDataset.from_events(
+        [event], min_loss_gap=0.02, max_pairs_per_event=3, pair_sampling_seed=7
+    )
+
+    # Deterministic: same seed same result
+    assert len(ds_a) == len(ds_b)
+    for sa, sb in zip(ds_a.samples, ds_b.samples):
+        assert abs(sa["target_margin"] - sb["target_margin"]) < 1e-6
+
+    # All margins must be >= min_loss_gap
+    for sample in ds_a.samples:
+        assert sample["target_margin"] >= 0.02
