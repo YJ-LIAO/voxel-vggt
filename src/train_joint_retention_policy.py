@@ -250,17 +250,21 @@ def _select_best_metric(
     elif metric_name == "token.eviction_rank_acc":
         per_et = token_metrics.get("per_event_type", {})
         eviction = per_et.get("eviction", {})
-        val = eviction.get("rank_acc")
+        # Support both nested dict {"rank_acc": 0.5} and flat float 0.5
+        val = eviction.get("rank_acc") if isinstance(eviction, dict) else eviction
     elif metric_name == "token.fifo_topk_rank_acc":
         per_et = token_metrics.get("per_event_type", {})
         fifo = per_et.get("fifo_topk", {})
-        val = fifo.get("rank_acc")
+        val = fifo.get("rank_acc") if isinstance(fifo, dict) else fifo
     elif metric_name == "token.eviction_fifo_mean_rank_acc":
         per_et = token_metrics.get("per_event_type", {})
         vals = []
         for key in ("eviction", "fifo_topk"):
-            if key in per_et and "rank_acc" in per_et[key]:
-                vals.append(float(per_et[key]["rank_acc"]))
+            if key in per_et:
+                entry = per_et[key]
+                v = entry.get("rank_acc") if isinstance(entry, dict) else entry
+                if v is not None:
+                    vals.append(float(v))
         val = sum(vals) / len(vals) if vals else None
     elif metric_name == "count.accuracy":
         val = count_metrics.get("accuracy")
@@ -548,10 +552,16 @@ def _evaluate_count_head(
         tkc = int(sample.get("target_keep_count", 0))
         target_counts[tkc] = target_counts.get(tkc, 0) + 1
     if target_counts:
-        majority_class = max(target_counts, key=target_counts.get)
-        majority_total = target_counts[majority_class]
+        majority_keep_count = max(target_counts, key=target_counts.get)
+        majority_total = target_counts[majority_keep_count]
+        # Convert keep_count value to candidate index for tensor indexing
+        candidates_list = candidates_tensor.tolist()
+        majority_class_idx = next(
+            (i for i, c in enumerate(candidates_list) if c == majority_keep_count), 0
+        )
     else:
-        majority_class = 0
+        majority_keep_count = int(candidates_tensor[0].item())
+        majority_class_idx = 0
         majority_total = 0
 
     joint.eval()
@@ -584,16 +594,7 @@ def _evaluate_count_head(
     joint.train()
 
     n = max(total_samples, 1)
-    majority_correct = sum(
-        1 for t in target_dist
-        if candidates_tensor[t].item() == candidates_tensor[majority_class].item()
-        for _ in range(target_dist[t])
-    )
-    # Simpler: count how many targets are the majority class
-    majority_correct = target_dist.get(
-        next((i for i, c in enumerate(candidates_tensor.tolist()) if c == candidates_tensor[majority_class].item()), 0),
-        0,
-    )
+    majority_correct = target_dist.get(majority_class_idx, 0)
 
     return {
         "count": total_samples,
