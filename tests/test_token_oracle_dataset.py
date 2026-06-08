@@ -1311,3 +1311,144 @@ def test_capping_happens_after_invalid_tied_filtering():
     # All margins must be >= min_loss_gap
     for sample in ds_a.samples:
         assert sample["target_margin"] >= 0.02
+
+
+# ===================================================================
+# Task 2 Step 3: Per-event-type filtering tests
+# ===================================================================
+
+
+def _make_multi_type_events():
+    """Create dedup, eviction, and fifo_topk events with known margins."""
+    events = [
+        # dedup: margins 0.01, 0.02, 0.04
+        {
+            "event_id": "dedup_0",
+            "event_type": "dedup",
+            "layer_id": 0,
+            "score_state": torch.randn(4, 8),
+            "metadata_features": torch.randn(4, 8),
+            "subsets": [
+                {"keep_indices": [0, 1], "loss": 0.10},
+                {"keep_indices": [2, 3], "loss": 0.11},  # margin 0.01
+                {"keep_indices": [1, 2], "loss": 0.14},  # margin 0.04
+                {"keep_indices": [0, 3], "loss": 0.12},  # margin 0.02
+            ],
+        },
+        # eviction: margins 0.01, 0.02, 0.04
+        {
+            "event_id": "eviction_0",
+            "event_type": "eviction",
+            "layer_id": 0,
+            "score_state": torch.randn(4, 8),
+            "metadata_features": torch.randn(4, 8),
+            "subsets": [
+                {"keep_indices": [0, 1], "loss": 0.20},
+                {"keep_indices": [2, 3], "loss": 0.21},  # margin 0.01
+                {"keep_indices": [1, 2], "loss": 0.24},  # margin 0.04
+                {"keep_indices": [0, 3], "loss": 0.22},  # margin 0.02
+            ],
+        },
+        # fifo_topk: margins 0.01, 0.02, 0.04
+        {
+            "event_id": "fifo_0",
+            "event_type": "fifo_topk",
+            "layer_id": 0,
+            "score_state": torch.randn(4, 8),
+            "metadata_features": torch.randn(4, 8),
+            "subsets": [
+                {"keep_indices": [0, 1], "loss": 0.30},
+                {"keep_indices": [2, 3], "loss": 0.31},  # margin 0.01
+                {"keep_indices": [1, 2], "loss": 0.34},  # margin 0.04
+                {"keep_indices": [0, 3], "loss": 0.32},  # margin 0.02
+            ],
+        },
+    ]
+    return events
+
+
+def test_min_loss_gap_still_works_globally():
+    """min_loss_gap filters all event types uniformly."""
+    from ovggt.training.token_oracle_dataset import CounterfactualOracleDataset
+
+    events = _make_multi_type_events()
+    ds = CounterfactualOracleDataset.from_events(events, min_loss_gap=0.02)
+
+    for sample in ds.samples:
+        assert sample["target_margin"] >= 0.02
+
+
+def test_min_loss_gap_by_event_type_filters_per_type():
+    """min_loss_gap_by_event_type uses per-type thresholds."""
+    from ovggt.training.token_oracle_dataset import CounterfactualOracleDataset
+
+    events = _make_multi_type_events()
+    # fifo_topk threshold=0.03: only margin 0.04 passes
+    # dedup threshold=0.02: margins 0.02, 0.04 pass
+    # eviction: falls back to global min_loss_gap=0.0, all pass
+    ds = CounterfactualOracleDataset.from_events(
+        events,
+        min_loss_gap=0.0,
+        min_loss_gap_by_event_type={"fifo_topk": 0.03, "dedup": 0.02},
+    )
+
+    fifo_samples = [s for s in ds.samples if s["event_type"] == "fifo_topk"]
+    dedup_samples = [s for s in ds.samples if s["event_type"] == "dedup"]
+    eviction_samples = [s for s in ds.samples if s["event_type"] == "eviction"]
+
+    # fifo_topk: only 0.04 margin passes the 0.03 threshold
+    for s in fifo_samples:
+        assert s["target_margin"] >= 0.03
+
+    # dedup: 0.02 and 0.04 pass the 0.02 threshold
+    for s in dedup_samples:
+        assert s["target_margin"] >= 0.02
+
+    # eviction: falls back to min_loss_gap=0.0, all margins > 0 pass
+    assert len(eviction_samples) > 0
+    for s in eviction_samples:
+        assert s["target_margin"] > 0.0
+
+
+def test_unknown_mapping_keys_are_ignored():
+    """Keys in min_loss_gap_by_event_type that are not event types are ignored."""
+    from ovggt.training.token_oracle_dataset import CounterfactualOracleDataset
+
+    events = _make_multi_type_events()
+    # "nonexistent_type" should be silently ignored
+    ds = CounterfactualOracleDataset.from_events(
+        events,
+        min_loss_gap=0.0,
+        min_loss_gap_by_event_type={"nonexistent_type": 0.99},
+    )
+    # All valid pairs should pass (global min_loss_gap=0.0)
+    assert len(ds) > 0
+
+
+def test_max_loss_gap_filters_upper_bound():
+    """max_loss_gap removes pairs with margin above the cap."""
+    from ovggt.training.token_oracle_dataset import CounterfactualOracleDataset
+
+    events = _make_multi_type_events()
+    ds = CounterfactualOracleDataset.from_events(
+        events,
+        min_loss_gap=0.0,
+        max_loss_gap=0.025,
+    )
+
+    for sample in ds.samples:
+        assert sample["target_margin"] <= 0.025 + 1e-9
+
+
+def test_max_loss_gap_less_than_min_loss_gap_produces_empty():
+    """If max_loss_gap < min_loss_gap, dataset must be empty."""
+    from ovggt.training.token_oracle_dataset import CounterfactualOracleDataset
+
+    events = _make_multi_type_events()
+    ds = CounterfactualOracleDataset.from_events(
+        events,
+        min_loss_gap=0.1,
+        max_loss_gap=0.01,
+    )
+
+    assert len(ds) == 0

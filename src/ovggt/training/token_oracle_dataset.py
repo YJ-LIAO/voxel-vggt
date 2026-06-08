@@ -103,9 +103,17 @@ class CounterfactualOracleDataset(Dataset):
         fifo_token_pair_mode: str = "any",
         max_pairs_per_event: int | None = 64,
         pair_sampling_seed: int = 0,
+        min_loss_gap_by_event_type: dict[str, float] | None = None,
+        max_loss_gap: float | None = None,
     ) -> None:
         self.min_loss_gap = float(min_loss_gap)
         self.pair_sampling_seed = int(pair_sampling_seed)
+        self.min_loss_gap_by_event_type = (
+            {k: float(v) for k, v in min_loss_gap_by_event_type.items()}
+            if min_loss_gap_by_event_type is not None
+            else None
+        )
+        self.max_loss_gap = float(max_loss_gap) if max_loss_gap is not None else None
         if event_types is not None:
             self.event_types = set(event_types)
             unsupported = self.event_types - self.SUPPORTED_EVENT_TYPES
@@ -136,6 +144,8 @@ class CounterfactualOracleDataset(Dataset):
         fifo_token_pair_mode: str = "any",
         max_pairs_per_event: int | None = 64,
         pair_sampling_seed: int = 0,
+        min_loss_gap_by_event_type: dict[str, float] | None = None,
+        max_loss_gap: float | None = None,
     ) -> "CounterfactualOracleDataset":
         """Build a dataset from a pre-loaded list of events.
 
@@ -145,6 +155,12 @@ class CounterfactualOracleDataset(Dataset):
         dataset = cls.__new__(cls)
         dataset.min_loss_gap = float(min_loss_gap)
         dataset.pair_sampling_seed = int(pair_sampling_seed)
+        dataset.min_loss_gap_by_event_type = (
+            {k: float(v) for k, v in min_loss_gap_by_event_type.items()}
+            if min_loss_gap_by_event_type is not None
+            else None
+        )
+        dataset.max_loss_gap = float(max_loss_gap) if max_loss_gap is not None else None
         if event_types is not None:
             dataset.event_types = set(event_types)
             unsupported = dataset.event_types - cls.SUPPORTED_EVENT_TYPES
@@ -164,6 +180,12 @@ class CounterfactualOracleDataset(Dataset):
             dataset._append_event_pairs(event)
         return dataset
 
+    def _event_min_loss_gap(self, event_type: str) -> float:
+        """Return the per-event-type threshold, falling back to global min_loss_gap."""
+        if self.min_loss_gap_by_event_type and event_type in self.min_loss_gap_by_event_type:
+            return float(self.min_loss_gap_by_event_type[event_type])
+        return float(self.min_loss_gap)
+
     def _append_event_pairs(self, event: dict) -> None:
         import random as _random
 
@@ -180,9 +202,11 @@ class CounterfactualOracleDataset(Dataset):
         loss_min = float(losses.min().item())
         loss_max = float(losses.max().item())
 
-        # C1 fix: skip events where loss range is below min_loss_gap.
-        # All subsets are effectively tied — regression targets would be noise.
-        if loss_max - loss_min < self.min_loss_gap:
+        # C1 fix: skip events where loss range is below the event-specific
+        # min_loss_gap.  All subsets are effectively tied — regression targets
+        # would be noise.
+        event_min_gap = self._event_min_loss_gap(event_type)
+        if loss_max - loss_min < event_min_gap:
             return
 
         denom = max(loss_max - loss_min, 1e-8)
@@ -261,7 +285,10 @@ class CounterfactualOracleDataset(Dataset):
         better_loss = float(better_subset["loss"])
         worse_loss = float(worse_subset["loss"])
         target_margin = worse_loss - better_loss
-        if target_margin <= 0.0 or target_margin < self.min_loss_gap:
+        min_gap = self._event_min_loss_gap(event_type)
+        if target_margin <= 0.0 or target_margin < min_gap:
+            return None
+        if self.max_loss_gap is not None and target_margin > float(self.max_loss_gap):
             return None
 
         # FIFO keep_count metadata: store for fifo_topk events, None otherwise
@@ -599,17 +626,43 @@ def token_oracle_ranking_loss(
     batch: dict,
     margin_scale: float = 1.0,
     regression_weight: float = 0.1,
+    score_mode: str = "set_mean",
 ) -> tuple[Tensor, dict]:
     token_mask = batch.get("token_mask")
     if token_mask is not None:
         token_mask = token_mask.to(device=logits.device)
     better_mask = batch["better_mask"].to(device=logits.device)
     worse_mask = batch["worse_mask"].to(device=logits.device)
-    better_score = _subset_score(logits, better_mask, token_mask, reduction="mean")
-    worse_score = _subset_score(logits, worse_mask, token_mask, reduction="mean")
+
+    if score_mode == "delta_mean":
+        # Compare only tokens unique to each mask
+        better_only = better_mask & ~worse_mask
+        worse_only = worse_mask & ~better_mask
+        # Fall back to set_mean per sample if either delta mask is empty
+        better_only_count = better_only.sum(dim=1)
+        worse_only_count = worse_only.sum(dim=1)
+        fallback = (better_only_count == 0) | (worse_only_count == 0)
+        if fallback.any():
+            # Compute both and blend per-sample
+            delta_better_score = _subset_score(logits, better_only, token_mask, reduction="mean")
+            delta_worse_score = _subset_score(logits, worse_only, token_mask, reduction="mean")
+            set_better_score = _subset_score(logits, better_mask, token_mask, reduction="mean")
+            set_worse_score = _subset_score(logits, worse_mask, token_mask, reduction="mean")
+            better_score = torch.where(fallback, set_better_score, delta_better_score)
+            worse_score = torch.where(fallback, set_worse_score, delta_worse_score)
+        else:
+            better_score = _subset_score(logits, better_only, token_mask, reduction="mean")
+            worse_score = _subset_score(logits, worse_only, token_mask, reduction="mean")
+    else:
+        # set_mean: current behavior
+        better_score = _subset_score(logits, better_mask, token_mask, reduction="mean")
+        worse_score = _subset_score(logits, worse_mask, token_mask, reduction="mean")
+
     target_margin = batch["target_margin"].to(device=logits.device, dtype=logits.dtype) * margin_scale
 
     pairwise = F.softplus(target_margin - (better_score - worse_score)).mean()
+
+    # Regression always uses set_mean scores for backward compatibility
     better_regression_score = _subset_score(logits, better_mask, token_mask, reduction="mean")
     worse_regression_score = _subset_score(logits, worse_mask, token_mask, reduction="mean")
     better_target = batch["better_target"].to(device=logits.device, dtype=logits.dtype)

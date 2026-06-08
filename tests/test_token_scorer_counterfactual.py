@@ -363,3 +363,130 @@ def test_eviction_probe_hook_can_override_commit_eviction_keep_set():
     assert state.num_tokens() == 3
     assert torch.equal(state.score_state[0, :, 0], torch.tensor([0.0, 2.0, 4.0]))
     assert torch.equal(state.metadata.frame_id[0], torch.tensor([0, 0, 2]))
+
+
+# ===================================================================
+# Task 2 Step 1: score_mode="delta_mean" tests
+# ===================================================================
+
+
+def test_delta_mean_ignores_common_tokens_in_rank_score():
+    """Common tokens between better_mask and worse_mask must not affect rank_acc."""
+    from ovggt.training.token_oracle_dataset import token_oracle_ranking_loss
+
+    # 5 tokens. better and worse share tokens 0,1,2. better-only is token 3, worse-only is token 4.
+    # Token scores: common are 10, 20, 30; better-only=5; worse-only=1.
+    # delta_mean: better_only=5 vs worse_only=1 → correct
+    logits = torch.tensor([[10.0, 20.0, 30.0, 5.0, 1.0]])
+    batch = {
+        "better_mask": torch.tensor([[True, True, True, True, False]]),
+        "worse_mask": torch.tensor([[True, True, True, False, True]]),
+        "target_margin": torch.tensor([0.1]),
+        "better_target": torch.tensor([1.0]),
+        "worse_target": torch.tensor([0.0]),
+    }
+
+    _, details_delta = token_oracle_ranking_loss(
+        logits, batch, regression_weight=0.0, score_mode="delta_mean"
+    )
+    assert details_delta["rank_acc"] == 1.0  # 5 > 1
+
+    # Flip: better-only gets lower score than worse-only
+    logits_flip = torch.tensor([[10.0, 20.0, 30.0, 1.0, 5.0]])
+    _, details_flip = token_oracle_ranking_loss(
+        logits_flip, batch, regression_weight=0.0, score_mode="delta_mean"
+    )
+    assert details_flip["rank_acc"] == 0.0  # 1 < 5
+
+
+def test_delta_mean_common_tokens_do_not_affect_score_diff():
+    """Changing common token scores must not change delta_mean score_diff."""
+    from ovggt.training.token_oracle_dataset import token_oracle_ranking_loss
+
+    batch = {
+        "better_mask": torch.tensor([[True, True, True, True, False]]),
+        "worse_mask": torch.tensor([[True, True, True, False, True]]),
+        "target_margin": torch.tensor([0.1]),
+        "better_target": torch.tensor([1.0]),
+        "worse_target": torch.tensor([0.0]),
+    }
+
+    logits_low_common = torch.tensor([[1.0, 2.0, 3.0, 5.0, 1.0]])
+    logits_high_common = torch.tensor([[100.0, 200.0, 300.0, 5.0, 1.0]])
+
+    _, details_low = token_oracle_ranking_loss(
+        logits_low_common, batch, regression_weight=0.0, score_mode="delta_mean"
+    )
+    _, details_high = token_oracle_ranking_loss(
+        logits_high_common, batch, regression_weight=0.0, score_mode="delta_mean"
+    )
+
+    # delta_mean score_diff should be identical: 5.0 - 1.0 = 4.0
+    assert abs(details_low["mean_score_diff"] - details_high["mean_score_diff"]) < 1e-5
+    assert abs(details_low["mean_score_diff"] - 4.0) < 1e-5
+
+
+def test_delta_mean_falls_back_to_set_mean_when_better_only_is_empty():
+    """If better_mask & ~worse_mask is empty, fall back to set_mean for that sample."""
+    from ovggt.training.token_oracle_dataset import token_oracle_ranking_loss
+
+    # better_mask == worse_mask → no delta tokens on either side
+    logits = torch.tensor([[1.0, 2.0, 3.0]])
+    batch = {
+        "better_mask": torch.tensor([[True, True, False]]),
+        "worse_mask": torch.tensor([[True, True, False]]),
+        "target_margin": torch.tensor([0.1]),
+        "better_target": torch.tensor([1.0]),
+        "worse_target": torch.tensor([0.0]),
+    }
+
+    _, details_delta = token_oracle_ranking_loss(
+        logits, batch, regression_weight=0.0, score_mode="delta_mean"
+    )
+    # Fallback to set_mean: both masks identical, score_diff should be 0
+    assert details_delta["mean_score_diff"] == 0.0
+    assert details_delta["rank_acc"] == 0.0
+
+
+def test_delta_mean_falls_back_to_set_mean_when_worse_only_is_empty():
+    """If worse_mask & ~better_mask is empty, fall back to set_mean for that sample."""
+    from ovggt.training.token_oracle_dataset import token_oracle_ranking_loss
+
+    # worse-only is empty (worse is a subset of better)
+    logits = torch.tensor([[1.0, 2.0, 3.0, 4.0]])
+    batch = {
+        "better_mask": torch.tensor([[True, True, True, True]]),
+        "worse_mask": torch.tensor([[True, True, False, False]]),
+        "target_margin": torch.tensor([0.1]),
+        "better_target": torch.tensor([1.0]),
+        "worse_target": torch.tensor([0.0]),
+    }
+
+    _, details_delta = token_oracle_ranking_loss(
+        logits, batch, regression_weight=0.0, score_mode="delta_mean"
+    )
+    # worse_only is empty → fallback to set_mean
+    # set_mean: (1+2+3+4)/4=2.5 vs (1+2)/2=1.5 → score_diff=1.0
+    assert abs(details_delta["mean_score_diff"] - 1.0) < 1e-5
+
+
+def test_delta_mean_with_regression_uses_set_mean_scores():
+    """When regression_weight > 0 with delta_mean, regression uses set_mean scores."""
+    from ovggt.training.token_oracle_dataset import token_oracle_ranking_loss
+
+    logits = torch.tensor([[10.0, 20.0, 30.0, 5.0, 1.0]])
+    batch = {
+        "better_mask": torch.tensor([[True, True, True, True, False]]),
+        "worse_mask": torch.tensor([[True, True, True, False, True]]),
+        "target_margin": torch.tensor([0.1]),
+        "better_target": torch.tensor([1.0]),
+        "worse_target": torch.tensor([0.0]),
+    }
+
+    _, details = token_oracle_ranking_loss(
+        logits, batch, regression_weight=0.5, score_mode="delta_mean"
+    )
+    # Regression should still be computed and finite (using set_mean scores)
+    assert details["regression"] >= 0.0
+    # Pairwise uses delta_mean: 5.0 - 1.0 = 4.0
+    assert details["rank_acc"] == 1.0
