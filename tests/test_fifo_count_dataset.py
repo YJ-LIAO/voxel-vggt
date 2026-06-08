@@ -244,7 +244,17 @@ def test_fifo_count_dataset_returns_correct_keys(tmp_path):
     dataset = FifoCountDataset([shard_path])
     sample = dataset[0]
 
-    expected_keys = {"event_id", "layer_id", "score_state", "metadata_features", "target", "target_keep_count"}
+    expected_keys = {
+        "event_id",
+        "layer_id",
+        "score_state",
+        "metadata_features",
+        "target",
+        "target_keep_count",
+        "count_loss_gap",
+        "best_count_loss",
+        "second_best_count_loss",
+    }
     assert set(sample.keys()) == expected_keys
     assert isinstance(sample["event_id"], str)
     assert isinstance(sample["layer_id"], int)
@@ -377,3 +387,174 @@ def test_fifo_count_dataset_handles_list_shard_format(tmp_path):
     assert len(dataset) == 1
     # keep_count=8 has loss 0.5 < 1.0; index of 8 in (0,8,16) is 1
     assert dataset[0]["target"] == 1
+
+
+# ---------------------------------------------------------------------------
+# Task 3: min_count_loss_gap confidence filtering tests
+# ---------------------------------------------------------------------------
+
+
+def _make_ambiguous_shard(path, event_overrides=None):
+    """Create a shard with ambiguous losses: best gap is only 0.01."""
+    from ovggt.layers.token_scorer import TOKEN_METADATA_FEATURE_DIM
+
+    base_event = {
+        "event_id": "ambiguous_event",
+        "event_type": "fifo_topk",
+        "layer_id": 2,
+        "score_state": torch.randn(20, 128),
+        "metadata_features": torch.randn(20, TOKEN_METADATA_FEATURE_DIM),
+        "demoted_indices": torch.tensor([3, 7, 10, 14]),
+        "subsets": [
+            {"keep_count": 0, "loss": 0.50},
+            {"keep_count": 8, "loss": 0.49},
+            {"keep_count": 16, "loss": 0.10},
+            {"keep_count": 32, "loss": 0.11},
+        ],
+    }
+    if event_overrides:
+        base_event.update(event_overrides)
+
+    torch.save({"events": [base_event]}, path)
+    return path
+
+
+def test_ambiguous_label_gap_zero_keeps_event(tmp_path):
+    """With min_count_loss_gap=0.0 (default), event is kept and target is best keep_count."""
+    from ovggt.training.token_oracle_dataset import FifoCountDataset
+
+    shard_path = _make_ambiguous_shard(tmp_path / "ambiguous.pt")
+
+    dataset = FifoCountDataset(
+        [shard_path],
+        count_candidates=(0, 8, 16, 32),
+        label_reduction="min",
+        min_count_loss_gap=0.0,
+    )
+    assert len(dataset) == 1
+    sample = dataset[0]
+    # Best loss is keep_count=16 at 0.10; second best is 32 at 0.11
+    # Gap is 0.01 >= 0.0, so event is kept
+    assert sample["target"] == 2  # index of 16 in (0, 8, 16, 32)
+    assert sample["target_keep_count"] == 16
+
+
+def test_ambiguous_label_gap_threshold_drops_event(tmp_path):
+    """With min_count_loss_gap=0.05, the event is dropped because best-vs-second gap is 0.01."""
+    from ovggt.training.token_oracle_dataset import FifoCountDataset
+
+    shard_path = _make_ambiguous_shard(tmp_path / "ambiguous.pt")
+
+    dataset = FifoCountDataset(
+        [shard_path],
+        count_candidates=(0, 8, 16, 32),
+        label_reduction="min",
+        min_count_loss_gap=0.05,
+    )
+    # Best=16 (0.10), second=32 (0.11), gap=0.01 < 0.05 -> dropped
+    assert len(dataset) == 0
+
+
+def test_single_candidate_dropped_when_gap_positive(tmp_path):
+    """With one candidate and min_count_loss_gap > 0, the event is dropped."""
+    from ovggt.training.token_oracle_dataset import FifoCountDataset
+
+    shard_path = _make_ambiguous_shard(tmp_path / "single.pt")
+
+    dataset = FifoCountDataset(
+        [shard_path],
+        count_candidates=(16,),  # only one candidate
+        label_reduction="min",
+        min_count_loss_gap=0.01,
+    )
+    # Only keep_count=16 matches, no second candidate to compare -> dropped
+    assert len(dataset) == 0
+
+
+def test_single_candidate_kept_when_gap_zero(tmp_path):
+    """With one candidate and min_count_loss_gap=0, the event is kept."""
+    from ovggt.training.token_oracle_dataset import FifoCountDataset
+
+    shard_path = _make_ambiguous_shard(tmp_path / "single.pt")
+
+    dataset = FifoCountDataset(
+        [shard_path],
+        count_candidates=(16,),
+        label_reduction="min",
+        min_count_loss_gap=0.0,
+    )
+    assert len(dataset) == 1
+    assert dataset[0]["target"] == 0  # index of 16 in (16,)
+    assert dataset[0]["target_keep_count"] == 16
+
+
+def test_all_gaps_below_threshold_produces_empty(tmp_path):
+    """Multiple events where all have gaps below threshold -> empty dataset."""
+    from ovggt.layers.token_scorer import TOKEN_METADATA_FEATURE_DIM
+    from ovggt.training.token_oracle_dataset import FifoCountDataset
+
+    events = [
+        {
+            "event_id": f"tight_{i}",
+            "event_type": "fifo_topk",
+            "layer_id": i,
+            "score_state": torch.randn(10, 128),
+            "metadata_features": torch.randn(10, TOKEN_METADATA_FEATURE_DIM),
+            "demoted_indices": torch.tensor([1, 3]),
+            "subsets": [
+                {"keep_count": 8, "loss": 1.00 + i * 0.1},
+                {"keep_count": 16, "loss": 1.01 + i * 0.1},
+            ],
+        }
+        for i in range(3)
+    ]
+    shard_path = tmp_path / "all_tight.pt"
+    torch.save({"events": events}, shard_path)
+
+    dataset = FifoCountDataset(
+        [shard_path],
+        count_candidates=(0, 8, 16, 32),
+        label_reduction="min",
+        min_count_loss_gap=0.05,
+    )
+    # Each event has gap 0.01 < 0.05 -> all dropped
+    assert len(dataset) == 0
+
+
+def test_count_loss_gap_stored_in_sample(tmp_path):
+    """Sample dict includes count_loss_gap, best_count_loss, second_best_count_loss."""
+    from ovggt.training.token_oracle_dataset import FifoCountDataset
+
+    shard_path = _make_ambiguous_shard(tmp_path / "gap_fields.pt")
+
+    dataset = FifoCountDataset(
+        [shard_path],
+        count_candidates=(0, 8, 16, 32),
+        label_reduction="min",
+        min_count_loss_gap=0.0,
+    )
+    assert len(dataset) == 1
+    sample = dataset[0]
+    assert "count_loss_gap" in sample
+    assert "best_count_loss" in sample
+    assert "second_best_count_loss" in sample
+    # Best=16 (0.10), second=32 (0.11), gap=0.01
+    assert abs(sample["count_loss_gap"] - 0.01) < 1e-6
+    assert abs(sample["best_count_loss"] - 0.10) < 1e-6
+    assert abs(sample["second_best_count_loss"] - 0.11) < 1e-6
+
+
+def test_collate_includes_count_loss_gap(tmp_path):
+    """collate_fifo_count_samples includes count_loss_gap tensor."""
+    from ovggt.training.token_oracle_dataset import FifoCountDataset, collate_fifo_count_samples
+
+    shard_path = _make_ambiguous_shard(tmp_path / "collate_gap.pt")
+
+    dataset = FifoCountDataset(
+        [shard_path],
+        count_candidates=(0, 8, 16, 32),
+        label_reduction="min",
+    )
+    batch = collate_fifo_count_samples([dataset[0]])
+    assert "count_loss_gap" in batch
+    assert batch["count_loss_gap"].dtype == torch.float32

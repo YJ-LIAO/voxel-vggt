@@ -463,11 +463,13 @@ class FifoCountDataset(Dataset):
         shard_paths: Sequence[str | Path],
         count_candidates: Sequence[int] = (0, 8, 16, 32, 64, 128),
         label_reduction: str = "min",
+        min_count_loss_gap: float = 0.0,
     ) -> None:
         if label_reduction not in ("min", "mean"):
             raise ValueError(f"label_reduction must be 'min' or 'mean', got '{label_reduction}'")
         self.count_candidates = list(count_candidates)
         self.label_reduction = label_reduction
+        self.min_count_loss_gap = float(min_count_loss_gap)
         self._old_shard_warnings = 0
         self.samples: list[dict] = []
         for shard_path in shard_paths:
@@ -491,6 +493,7 @@ class FifoCountDataset(Dataset):
         events: list[dict],
         count_candidates: Sequence[int] = (0, 8, 16, 32, 64, 128),
         label_reduction: str = "min",
+        min_count_loss_gap: float = 0.0,
     ) -> "FifoCountDataset":
         """Build a dataset from a pre-loaded list of events.
 
@@ -502,6 +505,7 @@ class FifoCountDataset(Dataset):
             raise ValueError(f"label_reduction must be 'min' or 'mean', got '{label_reduction}'")
         dataset.count_candidates = list(count_candidates)
         dataset.label_reduction = label_reduction
+        dataset.min_count_loss_gap = float(min_count_loss_gap)
         dataset._old_shard_warnings = 0
         dataset.samples: list[dict] = []
         for event in events:
@@ -535,22 +539,35 @@ class FifoCountDataset(Dataset):
         if not groups:
             return
 
-        # Compute group loss using the configured reduction
+        # Compute candidate losses: reduce list[float] to scalar per group,
+        # filtered to configured candidate_set only.
         candidate_set = set(self.count_candidates)
-        best_loss = float("inf")
-        best_keep_count: int | None = None
+        candidate_losses: dict[int, float] = {}
         for kc, losses in groups.items():
             if kc not in candidate_set:
                 continue
             if self.label_reduction == "min":
-                group_loss = min(losses)
+                candidate_losses[kc] = min(losses)
             else:  # mean
-                group_loss = sum(losses) / len(losses)
-            if group_loss < best_loss:
-                best_loss = group_loss
-                best_keep_count = kc
+                candidate_losses[kc] = sum(losses) / len(losses)
 
-        if best_keep_count is None:
+        if len(candidate_losses) < 1:
+            return
+
+        # Rank candidates by reduced loss
+        ranked = sorted(candidate_losses.items(), key=lambda item: item[1])
+        best_keep_count, best_loss = ranked[0]
+
+        # Confidence filtering: single candidate with positive gap threshold -> drop
+        if len(ranked) < 2:
+            if self.min_count_loss_gap > 0.0:
+                return
+            second_loss = best_loss
+        else:
+            second_loss = ranked[1][1]
+
+        count_loss_gap = second_loss - best_loss
+        if count_loss_gap < self.min_count_loss_gap:
             return
 
         target = self.count_candidates.index(best_keep_count)
@@ -574,6 +591,9 @@ class FifoCountDataset(Dataset):
                 "metadata_features": metadata_features,
                 "target": target,
                 "target_keep_count": best_keep_count,
+                "count_loss_gap": count_loss_gap,
+                "best_count_loss": best_loss,
+                "second_best_count_loss": second_loss,
             }
         )
 
@@ -618,6 +638,45 @@ def collate_fifo_count_samples(samples: List[dict]) -> dict:
         "token_mask": token_mask,
         "target": torch.tensor([sample["target"] for sample in samples], dtype=torch.long),
         "target_keep_count": torch.tensor([sample["target_keep_count"] for sample in samples], dtype=torch.long),
+        "count_loss_gap": torch.tensor(
+            [sample.get("count_loss_gap", 0.0) for sample in samples], dtype=torch.float32
+        ),
+    }
+
+
+def summarize_fifo_count_samples(samples: Sequence[dict]) -> dict:
+    """Compute summary statistics from a sequence of fifo count samples.
+
+    Pure helper usable by both trainers and diagnostic scripts.
+    Returns count, target_keep_count distribution, and count_loss_gap percentiles.
+    """
+    import numpy as np
+
+    count = len(samples)
+    if count == 0:
+        return {
+            "count": 0,
+            "target_keep_count": {},
+            "count_loss_gap_p10": 0.0,
+            "count_loss_gap_p50": 0.0,
+            "count_loss_gap_p90": 0.0,
+        }
+
+    keep_counts: dict[int, int] = {}
+    gaps: list[float] = []
+    for sample in samples:
+        tkc = int(sample.get("target_keep_count", 0))
+        keep_counts[tkc] = keep_counts.get(tkc, 0) + 1
+        gaps.append(float(sample.get("count_loss_gap", 0.0)))
+
+    gaps_arr = np.array(gaps, dtype=np.float64)
+
+    return {
+        "count": count,
+        "target_keep_count": keep_counts,
+        "count_loss_gap_p10": float(np.percentile(gaps_arr, 10)),
+        "count_loss_gap_p50": float(np.percentile(gaps_arr, 50)),
+        "count_loss_gap_p90": float(np.percentile(gaps_arr, 90)),
     }
 
 
