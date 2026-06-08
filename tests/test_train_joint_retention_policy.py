@@ -298,3 +298,212 @@ def test_parse_args_with_yaml_override(tmp_path):
     assert args.hidden_dim == 128, f"Expected 128, got {args.hidden_dim}"
     # YAML values that were NOT overridden should come through
     assert args.lr == 0.001, f"Expected 0.001 from YAML, got {args.lr}"
+
+
+# --------------------------------------------------------------------------- #
+# Step 4.2: Config forwarding test for new dataset options
+# --------------------------------------------------------------------------- #
+
+def test_parse_args_forwards_new_dataset_options(tmp_path):
+    """New dataset options from YAML config reach parse_args output."""
+    from train_joint_retention_policy import parse_args
+
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "oracle_shards:\n  - /fake/shard.pt\n"
+        "output: /fake/output.pt\n"
+        "fifo_token_pair_mode: same_keep_count\n"
+        "token_score_mode: delta_mean\n"
+        "pair_sampling_seed: 7\n"
+        "max_pairs_per_event: 4\n"
+        "min_loss_gap_by_event_type:\n"
+        "  eviction: 0.02\n"
+        "max_loss_gap: 0.5\n"
+        "min_count_loss_gap: 0.01\n"
+    )
+
+    shard = tmp_path / "shard.pt"
+    output = tmp_path / "out.pt"
+
+    args = parse_args([
+        "--config", str(config_path),
+        "--oracle-shards", str(shard),
+        "--output", str(output),
+    ])
+
+    assert args.fifo_token_pair_mode == "same_keep_count", (
+        f"Expected same_keep_count, got {args.fifo_token_pair_mode}"
+    )
+    assert args.token_score_mode == "delta_mean", (
+        f"Expected delta_mean, got {args.token_score_mode}"
+    )
+    assert args.pair_sampling_seed == 7, (
+        f"Expected 7, got {args.pair_sampling_seed}"
+    )
+    assert args.max_pairs_per_event == 4, (
+        f"Expected 4, got {args.max_pairs_per_event}"
+    )
+    assert args.min_loss_gap_by_event_type == {"eviction": 0.02}, (
+        f"Expected {{'eviction': 0.02}}, got {args.min_loss_gap_by_event_type}"
+    )
+    assert args.max_loss_gap == 0.5, (
+        f"Expected 0.5, got {args.max_loss_gap}"
+    )
+    assert args.min_count_loss_gap == 0.01, (
+        f"Expected 0.01, got {args.min_count_loss_gap}"
+    )
+
+
+def test_parse_args_cli_json_for_min_loss_gap_by_event_type(tmp_path):
+    """CLI --min-loss-gap-by-event-type accepts JSON string."""
+    from train_joint_retention_policy import parse_args
+
+    shard = tmp_path / "shard.pt"
+    output = tmp_path / "out.pt"
+
+    args = parse_args([
+        "--oracle-shards", str(shard),
+        "--output", str(output),
+        "--min-loss-gap-by-event-type", '{"eviction": 0.03, "fifo_topk": 0.05}',
+    ])
+
+    assert args.min_loss_gap_by_event_type == {"eviction": 0.03, "fifo_topk": 0.05}, (
+        f"Expected {{'eviction': 0.03, 'fifo_topk': 0.05}}, got {args.min_loss_gap_by_event_type}"
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Step 4.4: CLI smoke test proving main() forwards new options
+# --------------------------------------------------------------------------- #
+
+def test_cli_smoke_forwards_config_to_checkpoint(tmp_path):
+    """CLI smoke: YAML config values survive through main() into checkpoint."""
+    import subprocess
+
+    # Build a tiny fake shard
+    shard_path = tmp_path / "shard.pt"
+    _make_fake_shard(shard_path, num_eviction=1, num_fifo=1)
+    output_path = tmp_path / "output.pt"
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        f"oracle_shards:\n  - {shard_path}\n"
+        f"output: {output_path}\n"
+        "fifo_token_pair_mode: same_keep_count\n"
+        "token_score_mode: delta_mean\n"
+        "pair_sampling_seed: 7\n"
+        "max_pairs_per_event: 4\n"
+        "min_count_loss_gap: 0.01\n"
+        "hidden_dim: 16\n"
+        "num_layers: 4\n"
+        "score_state_dim: 32\n"
+        "epochs: 1\n"
+        "device: cpu\n"
+        "batch_size: 2\n"
+    )
+
+    result = subprocess.run(
+        [
+            sys.executable, "-m", "train_joint_retention_policy",
+            "--config", str(config_path),
+        ],
+        capture_output=True,
+        text=True,
+        cwd=os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src")),
+        timeout=120,
+    )
+    assert result.returncode == 0, (
+        f"CLI smoke failed:\nstdout: {result.stdout}\nstderr: {result.stderr}"
+    )
+
+    checkpoint = torch.load(output_path, map_location="cpu", weights_only=False)
+    opts = checkpoint.get("training_options", {})
+
+    assert opts.get("fifo_token_pair_mode") == "same_keep_count", (
+        f"Expected same_keep_count, got {opts.get('fifo_token_pair_mode')}"
+    )
+    assert opts.get("token_score_mode") == "delta_mean", (
+        f"Expected delta_mean, got {opts.get('token_score_mode')}"
+    )
+    assert opts.get("pair_sampling_seed") == 7, (
+        f"Expected 7, got {opts.get('pair_sampling_seed')}"
+    )
+    assert opts.get("max_pairs_per_event") == 4, (
+        f"Expected 4, got {opts.get('max_pairs_per_event')}"
+    )
+    assert opts.get("min_count_loss_gap") == 0.01, (
+        f"Expected 0.01, got {opts.get('min_count_loss_gap')}"
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Step 4.4: Validation checkpoint test
+# --------------------------------------------------------------------------- #
+
+def test_train_with_validation_produces_validation_metrics(tmp_path):
+    """Training with val_fraction=0.5 produces validation_metrics in checkpoint."""
+    from train_joint_retention_policy import train_joint_retention
+
+    shard_path = _make_fake_shard(
+        tmp_path / "fake_shard.pt",
+        num_eviction=4,
+        num_fifo=4,
+    )
+    output_path = tmp_path / "output" / "joint_retention.pt"
+
+    train_joint_retention(
+        oracle_shards=[str(shard_path)],
+        output=str(output_path),
+        score_state_dim=_SCORE_STATE_DIM,
+        metadata_dim=_METADATA_DIM,
+        hidden_dim=16,
+        num_layers=4,
+        count_candidates=[0, 4, 8, 16],
+        count_head_arch="shared_encoder_v2",
+        batch_size=2,
+        epochs=1,
+        lr=1e-3,
+        weight_decay=0.01,
+        regression_weight=0.1,
+        min_loss_gap=0.01,
+        count_loss_weight=1.0,
+        count_label_reduction="min",
+        count_repeat_factor=1.0,
+        val_fraction=0.5,
+        split_key="event_id_hash",
+        split_seed=0,
+        device="cpu",
+    )
+
+    assert output_path.exists(), f"Checkpoint not written to {output_path}"
+    checkpoint = torch.load(output_path, map_location="cpu", weights_only=False)
+
+    # Validation metrics structure
+    assert "validation_metrics" in checkpoint, "Missing 'validation_metrics' in checkpoint"
+    val_metrics = checkpoint["validation_metrics"]
+
+    # Token validation metrics
+    assert "token" in val_metrics, "Missing 'token' in validation_metrics"
+    token_val = val_metrics["token"]
+    assert "count" in token_val, "Missing 'count' in token validation"
+    assert "loss" in token_val, "Missing 'loss' in token validation"
+    assert "rank_acc" in token_val, "Missing 'rank_acc' in token validation"
+    assert "per_event_type" in token_val, "Missing 'per_event_type' in token validation"
+
+    # Count validation metrics
+    assert "count" in val_metrics, "Missing 'count' in validation_metrics"
+    count_val = val_metrics["count"]
+    assert "count" in count_val, "Missing 'count' in count validation"
+    assert "accuracy" in count_val, "Missing 'accuracy' in count validation"
+    assert "majority_accuracy" in count_val, "Missing 'majority_accuracy' in count validation"
+    assert "mean_abs_count_error" in count_val, "Missing 'mean_abs_count_error' in count validation"
+    assert "target_distribution" in count_val, "Missing 'target_distribution' in count validation"
+    assert "prediction_distribution" in count_val, "Missing 'prediction_distribution' in count validation"
+
+    # Dataset stats
+    assert "dataset_stats" in checkpoint, "Missing 'dataset_stats' in checkpoint"
+    stats = checkpoint["dataset_stats"]
+    for key in ("train_token", "val_token", "train_count", "val_count"):
+        assert key in stats, f"Missing '{key}' in dataset_stats"
+
+    # Training options
+    assert "training_options" in checkpoint, "Missing 'training_options' in checkpoint"

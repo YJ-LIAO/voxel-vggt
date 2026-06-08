@@ -14,6 +14,7 @@ for direct loading into an OVGGT model.
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 from typing import Sequence
 
@@ -36,6 +37,8 @@ from ovggt.training.token_oracle_dataset import (
     collate_oracle_pairs,
     load_oracle_events,
     split_oracle_events,
+    summarize_fifo_count_samples,
+    summarize_oracle_pair_samples,
     token_oracle_ranking_loss,
 )
 from train_token_scorer_oracle import (
@@ -76,6 +79,14 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--split-key", choices=["event_id_hash", "sequence_id"],
                         help="Strategy for train/val split")
     parser.add_argument("--split-seed", type=int, help="Seed for deterministic train/val split")
+    parser.add_argument("--fifo-token-pair-mode", choices=["any", "same_keep_count"])
+    parser.add_argument("--token-score-mode", choices=["set_mean", "delta_mean"])
+    parser.add_argument("--pair-sampling-seed", type=int)
+    parser.add_argument("--max-pairs-per-event", type=int)
+    parser.add_argument("--min-loss-gap-by-event-type",
+                        help="JSON dict mapping event_type to min_loss_gap, e.g. '{\"eviction\": 0.02}'")
+    parser.add_argument("--max-loss-gap", type=float)
+    parser.add_argument("--min-count-loss-gap", type=float)
     parser.add_argument("--device")
     args = parser.parse_args(argv)
 
@@ -101,6 +112,13 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "val_fraction": 0.1,
         "split_key": "event_id_hash",
         "split_seed": 0,
+        "fifo_token_pair_mode": "same_keep_count",
+        "token_score_mode": "delta_mean",
+        "pair_sampling_seed": 0,
+        "max_pairs_per_event": 64,
+        "min_loss_gap_by_event_type": None,
+        "max_loss_gap": None,
+        "min_count_loss_gap": 0.0,
         "device": "cuda" if torch.cuda.is_available() else "cpu",
     }
     values = dict(defaults)
@@ -113,6 +131,9 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     cli_values = vars(args)
     for key, value in cli_values.items():
         if key == "config" or value is None:
+            continue
+        if key == "min_loss_gap_by_event_type" and isinstance(value, str):
+            values[key] = json.loads(value)
             continue
         values[key] = value
 
@@ -195,6 +216,230 @@ def _param_grad_norm(module: torch.nn.Module) -> float:
 
 
 # --------------------------------------------------------------------------- #
+# Validation evaluation helpers
+# --------------------------------------------------------------------------- #
+
+def _evaluate_token_ranking(
+    joint: JointRetentionPolicy,
+    dataset: CounterfactualOracleDataset,
+    batch_size: int,
+    device: torch.device,
+    score_mode: str = "set_mean",
+) -> dict:
+    """Evaluate token ranking on a dataset (no gradients).
+
+    Returns dict with: count, loss, pairwise, regression, rank_acc,
+    mean_score_diff, per_event_type.
+    """
+    if dataset is None or len(dataset) == 0:
+        return {
+            "count": 0,
+            "loss": 0.0,
+            "pairwise": 0.0,
+            "regression": 0.0,
+            "rank_acc": 0.0,
+            "mean_score_diff": 0.0,
+            "per_event_type": {},
+        }
+
+    loader = DataLoader(
+        dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        collate_fn=collate_oracle_pairs,
+    )
+
+    total_loss = 0.0
+    total_pairwise = 0.0
+    total_regression = 0.0
+    total_rank_acc = 0.0
+    total_mean_score_diff = 0.0
+    total_samples = 0
+    per_event_type_correct: dict[str, int] = {}
+    per_event_type_total: dict[str, int] = {}
+
+    joint.eval()
+    with torch.no_grad():
+        for batch in loader:
+            batch = _move_batch_to_device(batch, device)
+            logits = joint.forward_token(
+                batch["score_state"],
+                batch["metadata_features"],
+                layer_id=batch["layer_id"],
+            )
+            loss_tensor, details = token_oracle_ranking_loss(
+                logits, batch,
+                regression_weight=0.1,
+                score_mode=score_mode,
+            )
+            n = logits.shape[0]
+            total_loss += float(loss_tensor.detach().cpu()) * n
+            total_pairwise += details["pairwise"] * n
+            total_regression += details["regression"] * n
+            total_rank_acc += details["rank_acc"] * n
+            total_mean_score_diff += details["mean_score_diff"] * n
+            total_samples += n
+
+            # Per-event-type accuracy
+            event_types = batch.get("event_type")
+            if event_types is not None:
+                better_mask = batch["better_mask"].to(device=device)
+                worse_mask = batch["worse_mask"].to(device=device)
+                token_mask = batch.get("token_mask")
+                if token_mask is not None:
+                    token_mask = token_mask.to(device=device)
+
+                # Compute score diff per sample for correctness
+                if score_mode == "delta_mean":
+                    better_only = better_mask & ~worse_mask
+                    worse_only = worse_mask & ~better_mask
+                    from ovggt.training.token_oracle_dataset import _subset_score
+                    better_score = _subset_score(logits, better_only, token_mask, reduction="mean")
+                    worse_score = _subset_score(logits, worse_only, token_mask, reduction="mean")
+                    better_only_count = better_only.sum(dim=1)
+                    worse_only_count = worse_only.sum(dim=1)
+                    fallback = (better_only_count == 0) | (worse_only_count == 0)
+                    if fallback.any():
+                        set_better = _subset_score(logits, better_mask, token_mask, reduction="mean")
+                        set_worse = _subset_score(logits, worse_mask, token_mask, reduction="mean")
+                        better_score = torch.where(fallback, set_better, better_score)
+                        worse_score = torch.where(fallback, set_worse, worse_score)
+                else:
+                    from ovggt.training.token_oracle_dataset import _subset_score
+                    better_score = _subset_score(logits, better_mask, token_mask, reduction="mean")
+                    worse_score = _subset_score(logits, worse_mask, token_mask, reduction="mean")
+
+                correct = (better_score > worse_score).cpu().tolist()
+
+                for i, et in enumerate(event_types):
+                    if et not in per_event_type_correct:
+                        per_event_type_correct[et] = 0
+                        per_event_type_total[et] = 0
+                    per_event_type_total[et] += 1
+                    if correct[i]:
+                        per_event_type_correct[et] += 1
+
+    joint.train()
+
+    per_event_type_acc = {}
+    for et in per_event_type_total:
+        t = per_event_type_total[et]
+        per_event_type_acc[et] = per_event_type_correct[et] / t if t > 0 else 0.0
+
+    n = max(total_samples, 1)
+    return {
+        "count": total_samples,
+        "loss": total_loss / n,
+        "pairwise": total_pairwise / n,
+        "regression": total_regression / n,
+        "rank_acc": total_rank_acc / n,
+        "mean_score_diff": total_mean_score_diff / n,
+        "per_event_type": per_event_type_acc,
+    }
+
+
+def _evaluate_count_head(
+    joint: JointRetentionPolicy,
+    dataset: FifoCountDataset,
+    batch_size: int,
+    device: torch.device,
+) -> dict:
+    """Evaluate count head on a dataset (no gradients).
+
+    Returns dict with: count, loss, accuracy, mean_abs_count_error,
+    majority_accuracy, target_distribution, prediction_distribution.
+    """
+    if dataset is None or len(dataset) == 0:
+        return {
+            "count": 0,
+            "loss": 0.0,
+            "accuracy": 0.0,
+            "mean_abs_count_error": 0.0,
+            "majority_accuracy": 0.0,
+            "target_distribution": {},
+            "prediction_distribution": {},
+        }
+
+    loader = DataLoader(
+        dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        collate_fn=collate_fifo_count_samples,
+    )
+
+    total_loss = 0.0
+    total_correct = 0
+    total_samples = 0
+    total_abs_error = 0.0
+    target_dist: dict[int, int] = {}
+    pred_dist: dict[int, int] = {}
+    candidates_tensor = joint.count_head.candidates
+
+    # Compute majority class from dataset
+    target_counts: dict[int, int] = {}
+    for sample in dataset.samples:
+        tkc = int(sample.get("target_keep_count", 0))
+        target_counts[tkc] = target_counts.get(tkc, 0) + 1
+    if target_counts:
+        majority_class = max(target_counts, key=target_counts.get)
+        majority_total = target_counts[majority_class]
+    else:
+        majority_class = 0
+        majority_total = 0
+
+    joint.eval()
+    with torch.no_grad():
+        for batch in loader:
+            batch = _move_batch_to_device(batch, device)
+            logits = joint.forward_count(
+                batch["score_state"],
+                batch["metadata_features"],
+                layer_id=batch["layer_id"],
+                token_mask=batch["token_mask"],
+            )
+            loss_tensor = F.cross_entropy(logits, batch["target"])
+            n = batch["target"].shape[0]
+            total_loss += float(loss_tensor.detach().cpu()) * n
+            total_samples += n
+
+            preds = logits.argmax(dim=-1)
+            total_correct += int((preds == batch["target"]).sum().cpu().item())
+
+            pred_counts = candidates_tensor[preds].float()
+            target_c = candidates_tensor[batch["target"]].float()
+            total_abs_error += float((pred_counts - target_c).abs().sum().cpu().item())
+
+            for p in preds.cpu().tolist():
+                pred_dist[p] = pred_dist.get(p, 0) + 1
+            for t in batch["target"].cpu().tolist():
+                target_dist[t] = target_dist.get(t, 0) + 1
+
+    joint.train()
+
+    n = max(total_samples, 1)
+    majority_correct = sum(
+        1 for t in target_dist
+        if candidates_tensor[t].item() == candidates_tensor[majority_class].item()
+        for _ in range(target_dist[t])
+    )
+    # Simpler: count how many targets are the majority class
+    majority_correct = target_dist.get(
+        next((i for i, c in enumerate(candidates_tensor.tolist()) if c == candidates_tensor[majority_class].item()), 0),
+        0,
+    )
+
+    return {
+        "count": total_samples,
+        "loss": total_loss / n,
+        "accuracy": total_correct / n,
+        "mean_abs_count_error": total_abs_error / n,
+        "majority_accuracy": majority_total / n if n > 0 else 0.0,
+        "target_distribution": {str(k): v for k, v in target_dist.items()},
+        "prediction_distribution": {str(k): v for k, v in pred_dist.items()},
+    }
+
+
+# --------------------------------------------------------------------------- #
 # Core training function
 # --------------------------------------------------------------------------- #
 
@@ -220,6 +465,13 @@ def train_joint_retention(
     val_fraction: float = 0.1,
     split_key: str = "event_id_hash",
     split_seed: int = 0,
+    fifo_token_pair_mode: str = "same_keep_count",
+    token_score_mode: str = "delta_mean",
+    pair_sampling_seed: int = 0,
+    max_pairs_per_event: int = 64,
+    min_loss_gap_by_event_type: dict[str, float] | None = None,
+    max_loss_gap: float | None = None,
+    min_count_loss_gap: float = 0.0,
     device: str = "cpu",
 ) -> None:
     """Train JointRetentionPolicy and save checkpoint.
@@ -232,7 +484,7 @@ def train_joint_retention(
 
     # Load events and split
     all_events = load_oracle_events(oracle_shards)
-    train_events, _ = split_oracle_events(
+    train_events, val_events = split_oracle_events(
         all_events,
         val_fraction=val_fraction,
         split_key=split_key,
@@ -241,7 +493,13 @@ def train_joint_retention(
 
     # Build token-ranking dataset from train events
     token_dataset = CounterfactualOracleDataset.from_events(
-        train_events, min_loss_gap=min_loss_gap,
+        train_events,
+        min_loss_gap=min_loss_gap,
+        fifo_token_pair_mode=fifo_token_pair_mode,
+        max_pairs_per_event=max_pairs_per_event,
+        pair_sampling_seed=pair_sampling_seed,
+        min_loss_gap_by_event_type=min_loss_gap_by_event_type,
+        max_loss_gap=max_loss_gap,
     )
     if len(token_dataset) == 0:
         raise RuntimeError(
@@ -259,6 +517,7 @@ def train_joint_retention(
         train_events,
         count_candidates=count_candidates,
         label_reduction=count_label_reduction,
+        min_count_loss_gap=min_count_loss_gap,
     )
     has_count_samples = len(count_dataset) > 0
 
@@ -271,6 +530,50 @@ def train_joint_retention(
         )
     else:
         count_loader = None
+
+    # Build validation datasets
+    val_token_dataset = CounterfactualOracleDataset.from_events(
+        val_events,
+        min_loss_gap=min_loss_gap,
+        fifo_token_pair_mode=fifo_token_pair_mode,
+        max_pairs_per_event=max_pairs_per_event,
+        pair_sampling_seed=pair_sampling_seed,
+        min_loss_gap_by_event_type=min_loss_gap_by_event_type,
+        max_loss_gap=max_loss_gap,
+    ) if val_events else None
+
+    val_count_dataset = FifoCountDataset.from_events(
+        val_events,
+        count_candidates=count_candidates,
+        label_reduction=count_label_reduction,
+        min_count_loss_gap=min_count_loss_gap,
+    ) if val_events else None
+
+    # Print dataset summaries
+    train_token_summary = summarize_oracle_pair_samples(token_dataset.samples)
+    print(f"token_dataset train {train_token_summary}", flush=True)
+    if val_token_dataset and len(val_token_dataset) > 0:
+        val_token_summary = summarize_oracle_pair_samples(val_token_dataset.samples)
+        print(f"token_dataset val {val_token_summary}", flush=True)
+    else:
+        val_token_summary = summarize_oracle_pair_samples([])
+        print(f"token_dataset val {val_token_summary}", flush=True)
+
+    train_count_summary = summarize_fifo_count_samples(count_dataset.samples)
+    print(f"count_dataset train {train_count_summary}", flush=True)
+    if val_count_dataset and len(val_count_dataset) > 0:
+        val_count_summary = summarize_fifo_count_samples(val_count_dataset.samples)
+        print(f"count_dataset val {val_count_summary}", flush=True)
+    else:
+        val_count_summary = summarize_fifo_count_samples([])
+        print(f"count_dataset val {val_count_summary}", flush=True)
+
+    dataset_stats = {
+        "train_token": train_token_summary,
+        "val_token": val_token_summary,
+        "train_count": train_count_summary,
+        "val_count": val_count_summary,
+    }
 
     count_head_trained = False
 
@@ -310,6 +613,7 @@ def train_joint_retention(
                 token_logits,
                 token_batch,
                 regression_weight=regression_weight,
+                score_mode=token_score_mode,
             )
 
             # --- Count loss (multi-task batching with count_repeat_factor) ---
@@ -421,6 +725,29 @@ def train_joint_retention(
         ])
         print(" ".join(summary_parts), flush=True)
 
+    # --- Validation evaluation ---
+    token_validation_metrics = _evaluate_token_ranking(
+        joint, val_token_dataset, batch_size, torch_device,
+        score_mode=token_score_mode,
+    )
+    count_validation_metrics = _evaluate_count_head(
+        joint, val_count_dataset, batch_size, torch_device,
+    )
+
+    print(
+        f"validation token: count={token_validation_metrics['count']} "
+        f"loss={token_validation_metrics['loss']:.6f} "
+        f"rank_acc={token_validation_metrics['rank_acc']:.4f}",
+        flush=True,
+    )
+    print(
+        f"validation count: count={count_validation_metrics['count']} "
+        f"loss={count_validation_metrics['loss']:.6f} "
+        f"accuracy={count_validation_metrics['accuracy']:.4f} "
+        f"majority_acc={count_validation_metrics['majority_accuracy']:.4f}",
+        flush=True,
+    )
+
     # --- Save checkpoint ---
     output_path = Path(output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -440,6 +767,38 @@ def train_joint_retention(
         score_state_projection_state=projection_state,
     )
 
+    training_options = {
+        "oracle_shards": oracle_shards,
+        "output": output,
+        "score_state_proj_checkpoint": score_state_proj_checkpoint,
+        "score_state_dim": score_state_dim,
+        "metadata_dim": metadata_dim,
+        "hidden_dim": hidden_dim,
+        "num_layers": num_layers,
+        "count_candidates": count_candidates,
+        "count_head_arch": count_head_arch,
+        "batch_size": batch_size,
+        "epochs": epochs,
+        "lr": lr,
+        "weight_decay": weight_decay,
+        "regression_weight": regression_weight,
+        "min_loss_gap": min_loss_gap,
+        "count_loss_weight": count_loss_weight,
+        "count_label_reduction": count_label_reduction,
+        "count_repeat_factor": count_repeat_factor,
+        "val_fraction": val_fraction,
+        "split_key": split_key,
+        "split_seed": split_seed,
+        "fifo_token_pair_mode": fifo_token_pair_mode,
+        "token_score_mode": token_score_mode,
+        "pair_sampling_seed": pair_sampling_seed,
+        "max_pairs_per_event": max_pairs_per_event,
+        "min_loss_gap_by_event_type": min_loss_gap_by_event_type,
+        "max_loss_gap": max_loss_gap,
+        "min_count_loss_gap": min_count_loss_gap,
+        "device": device,
+    }
+
     torch.save(
         {
             "joint_arch": "shared_token_encoder_v1",
@@ -455,6 +814,12 @@ def train_joint_retention(
             "count_candidates": count_candidates,
             "count_head_trained": bool(count_head_trained),
             "score_state_projection_checkpoint": score_state_proj_checkpoint,
+            "validation_metrics": {
+                "token": token_validation_metrics,
+                "count": count_validation_metrics,
+            },
+            "dataset_stats": dataset_stats,
+            "training_options": training_options,
         },
         output_path,
     )
@@ -489,6 +854,13 @@ def main() -> None:
         val_fraction=args.val_fraction,
         split_key=args.split_key,
         split_seed=args.split_seed,
+        fifo_token_pair_mode=args.fifo_token_pair_mode,
+        token_score_mode=args.token_score_mode,
+        pair_sampling_seed=args.pair_sampling_seed,
+        max_pairs_per_event=args.max_pairs_per_event,
+        min_loss_gap_by_event_type=args.min_loss_gap_by_event_type,
+        max_loss_gap=args.max_loss_gap,
+        min_count_loss_gap=args.min_count_loss_gap,
         device=args.device,
     )
 
