@@ -1,5 +1,6 @@
 import os
 import sys
+from pathlib import Path
 
 import torch
 
@@ -1452,3 +1453,251 @@ def test_max_loss_gap_less_than_min_loss_gap_produces_empty():
     )
 
     assert len(ds) == 0
+
+
+# ===================================================================
+# Task 6: Oracle Signal Diagnostic Tool helpers
+# ===================================================================
+
+
+def _make_diagnostic_events():
+    """Create a mixed set of events for diagnostic helper tests."""
+    from ovggt.layers.token_scorer import TOKEN_METADATA_FEATURE_DIM
+
+    events = [
+        # dedup event
+        {
+            "event_id": "seq_001:dedup:frame2:layer0",
+            "event_type": "dedup",
+            "layer_id": 0,
+            "frame_id": 2,
+            "score_state": torch.randn(4, 8),
+            "metadata_features": torch.randn(4, TOKEN_METADATA_FEATURE_DIM),
+            "sequence_provenance": {"sequence_id": "seq_001", "dataset": "test_A"},
+            "subsets": [
+                {"keep_indices": [0, 1], "loss": 0.10},
+                {"keep_indices": [2, 3], "loss": 0.20},
+                {"keep_indices": [1, 2], "loss": 0.30},
+            ],
+        },
+        # eviction event
+        {
+            "event_id": "seq_001:evict:frame4:layer1",
+            "event_type": "eviction",
+            "layer_id": 1,
+            "frame_id": 4,
+            "score_state": torch.randn(6, 8),
+            "metadata_features": torch.randn(6, TOKEN_METADATA_FEATURE_DIM),
+            "sequence_provenance": {"sequence_id": "seq_001", "dataset": "test_A"},
+            "subsets": [
+                {"keep_indices": [0, 1, 2], "loss": 0.05},
+                {"keep_indices": [3, 4, 5], "loss": 0.15},
+                {"keep_indices": [0, 3, 5], "loss": 0.25},
+            ],
+        },
+        # fifo_topk event
+        {
+            "event_id": "seq_002:fifo:frame3:layer0",
+            "event_type": "fifo_topk",
+            "layer_id": 0,
+            "frame_id": 3,
+            "score_state": torch.randn(8, 8),
+            "metadata_features": torch.randn(8, TOKEN_METADATA_FEATURE_DIM),
+            "sequence_provenance": {"sequence_id": "seq_002", "dataset": "test_B"},
+            "demoted_indices": [0, 1, 2, 3],
+            "keep_count": 8,
+            "subsets": [
+                {"keep_indices": [0, 1], "loss": 0.10, "keep_count": 0},
+                {"keep_indices": [0, 1], "loss": 0.05, "keep_count": 8},
+                {"keep_indices": [0, 1], "loss": 0.02, "keep_count": 16},
+                {"keep_indices": [0, 1], "loss": 0.04, "keep_count": 32},
+            ],
+        },
+        # another dedup event in a different sequence
+        {
+            "event_id": "seq_002:dedup:frame5:layer0",
+            "event_type": "dedup",
+            "layer_id": 0,
+            "frame_id": 5,
+            "score_state": torch.randn(4, 8),
+            "metadata_features": torch.randn(4, TOKEN_METADATA_FEATURE_DIM),
+            "sequence_provenance": {"sequence_id": "seq_002", "dataset": "test_B"},
+            "subsets": [
+                {"keep_indices": [0, 1], "loss": 0.40},
+                {"keep_indices": [2, 3], "loss": 0.50},
+            ],
+        },
+        # another eviction event
+        {
+            "event_id": "seq_003:evict:frame6:layer2",
+            "event_type": "eviction",
+            "layer_id": 2,
+            "frame_id": 6,
+            "score_state": torch.randn(5, 8),
+            "metadata_features": torch.randn(5, TOKEN_METADATA_FEATURE_DIM),
+            "sequence_provenance": {"sequence_id": "seq_003", "dataset": "test_A"},
+            "subsets": [
+                {"keep_indices": [0, 1], "loss": 0.10},
+                {"keep_indices": [2, 3], "loss": 0.60},
+            ],
+        },
+        # another fifo_topk event with different keep_counts
+        {
+            "event_id": "seq_001:fifo:frame7:layer1",
+            "event_type": "fifo_topk",
+            "layer_id": 1,
+            "frame_id": 7,
+            "score_state": torch.randn(8, 8),
+            "metadata_features": torch.randn(8, TOKEN_METADATA_FEATURE_DIM),
+            "sequence_provenance": {"sequence_id": "seq_001", "dataset": "test_A"},
+            "demoted_indices": [0, 1, 2],
+            "keep_count": 16,
+            "subsets": [
+                {"keep_indices": [0, 1], "loss": 0.08, "keep_count": 0},
+                {"keep_indices": [0, 1], "loss": 0.03, "keep_count": 8},
+                {"keep_indices": [0, 1], "loss": 0.01, "keep_count": 64},
+            ],
+        },
+    ]
+    return events
+
+
+def test_summarize_threshold_sweep_returns_per_threshold():
+    """summarize_threshold_sweep reports stats for each threshold."""
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
+    from analyze_oracle_training_signal import summarize_threshold_sweep
+
+    events = _make_diagnostic_events()
+    result = summarize_threshold_sweep(
+        events,
+        thresholds=[0.01, 0.02, 0.05],
+        fifo_token_pair_mode="same_keep_count",
+        max_pairs_per_event=64,
+        pair_sampling_seed=0,
+    )
+
+    # Must have entries for each threshold
+    assert "0.01" in result
+    assert "0.02" in result
+    assert "0.05" in result
+
+    # Each entry must have required keys
+    for threshold_key, summary in result.items():
+        assert "total_pairs" in summary
+        assert "by_event_type" in summary
+        assert "margin_p50" in summary
+        assert "usable_events" in summary
+        assert "fifo_cross_keep_frac" in summary
+        assert isinstance(summary["total_pairs"], int)
+        assert isinstance(summary["margin_p50"], float)
+
+    # Higher thresholds should produce fewer or equal pairs
+    assert result["0.01"]["total_pairs"] >= result["0.02"]["total_pairs"]
+    assert result["0.02"]["total_pairs"] >= result["0.05"]["total_pairs"]
+
+
+def test_summarize_threshold_sweep_with_empty_events():
+    """summarize_threshold_sweep handles empty events gracefully."""
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
+    from analyze_oracle_training_signal import summarize_threshold_sweep
+
+    result = summarize_threshold_sweep(
+        [],
+        thresholds=[0.01, 0.02],
+        fifo_token_pair_mode="any",
+        max_pairs_per_event=64,
+        pair_sampling_seed=0,
+    )
+
+    assert "0.01" in result
+    assert result["0.01"]["total_pairs"] == 0
+    assert result["0.02"]["total_pairs"] == 0
+
+
+def test_summarize_sequence_distribution_returns_structure():
+    """summarize_sequence_distribution reports sequence-level statistics."""
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
+    from analyze_oracle_training_signal import summarize_sequence_distribution
+
+    events = _make_diagnostic_events()
+    result = summarize_sequence_distribution(events)
+
+    assert "total_sequences" in result
+    assert "events_per_sequence_p10" in result
+    assert "events_per_sequence_p50" in result
+    assert "events_per_sequence_p90" in result
+    assert "top_sequences" in result
+
+    # Our test events have 3 sequences: seq_001, seq_002, seq_003
+    assert result["total_sequences"] == 3
+
+    # top_sequences should be a list sorted by count descending
+    top = result["top_sequences"]
+    assert len(top) > 0
+    assert top[0][1] >= top[-1][1]  # descending order
+
+
+def test_summarize_sequence_distribution_with_empty_events():
+    """summarize_sequence_distribution handles empty events."""
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
+    from analyze_oracle_training_signal import summarize_sequence_distribution
+
+    result = summarize_sequence_distribution([])
+
+    assert result["total_sequences"] == 0
+    assert result["events_per_sequence_p10"] == 0.0
+    assert result["events_per_sequence_p50"] == 0.0
+    assert result["events_per_sequence_p90"] == 0.0
+
+
+def test_summarize_count_confidence_returns_distribution():
+    """summarize_count_confidence reports best-vs-second-best gap statistics."""
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
+    from analyze_oracle_training_signal import summarize_count_confidence
+
+    events = _make_diagnostic_events()
+    result = summarize_count_confidence(
+        events,
+        count_candidates=[0, 8, 16, 32, 64, 128],
+        label_reduction="min",
+    )
+
+    assert "p10" in result
+    assert "p50" in result
+    assert "p90" in result
+    assert "above_thresholds" in result
+    assert "total_samples" in result
+    assert isinstance(result["total_samples"], int)
+    assert isinstance(result["above_thresholds"], dict)
+
+    # Should find fifo_topk events with count data
+    assert result["total_samples"] > 0
+
+
+def test_summarize_count_confidence_with_no_fifo_events():
+    """summarize_count_confidence handles events without fifo_topk."""
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
+    from analyze_oracle_training_signal import summarize_count_confidence
+
+    # Only dedup and eviction events, no fifo_topk
+    events = [
+        {
+            "event_id": "ev_0",
+            "event_type": "dedup",
+            "layer_id": 0,
+            "score_state": torch.randn(4, 8),
+            "metadata_features": torch.randn(4, 8),
+            "subsets": [
+                {"keep_indices": [0, 1], "loss": 0.1},
+                {"keep_indices": [2, 3], "loss": 0.3},
+            ],
+        },
+    ]
+
+    result = summarize_count_confidence(
+        events,
+        count_candidates=[0, 8, 16],
+        label_reduction="min",
+    )
+
+    assert result["total_samples"] == 0
