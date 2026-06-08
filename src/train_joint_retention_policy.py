@@ -14,6 +14,7 @@ for direct loading into an OVGGT model.
 from __future__ import annotations
 
 import argparse
+import copy
 import json
 from pathlib import Path
 from typing import Sequence
@@ -87,6 +88,19 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
                         help="JSON dict mapping event_type to min_loss_gap, e.g. '{\"eviction\": 0.02}'")
     parser.add_argument("--max-loss-gap", type=float)
     parser.add_argument("--min-count-loss-gap", type=float)
+    parser.add_argument("--save-best", action=argparse.BooleanOptionalAction)
+    parser.add_argument("--best-metric", choices=[
+        "token.rank_acc",
+        "token.eviction_rank_acc",
+        "token.fifo_topk_rank_acc",
+        "token.eviction_fifo_mean_rank_acc",
+        "count.accuracy",
+    ])
+    parser.add_argument("--best-output")
+    parser.add_argument("--early-stop-patience", type=int)
+    parser.add_argument("--early-stop-min-delta", type=float)
+    parser.add_argument("--deploy-count-head", choices=["auto", "always", "never"])
+    parser.add_argument("--deploy-count-head-min-delta", type=float)
     parser.add_argument("--device")
     args = parser.parse_args(argv)
 
@@ -120,6 +134,13 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "max_loss_gap": None,
         "min_count_loss_gap": 0.0,
         "device": "cuda" if torch.cuda.is_available() else "cpu",
+        "save_best": False,
+        "best_metric": "token.rank_acc",
+        "best_output": None,
+        "early_stop_patience": None,
+        "early_stop_min_delta": 0.0,
+        "deploy_count_head": "auto",
+        "deploy_count_head_min_delta": 0.0,
     }
     values = dict(defaults)
     if args.config:
@@ -213,6 +234,152 @@ def _param_grad_norm(module: torch.nn.Module) -> float:
         if p.grad is not None:
             total += p.grad.data.norm(2).item() ** 2
     return total ** 0.5
+
+
+def _select_best_metric(
+    token_metrics: dict,
+    count_metrics: dict,
+    metric_name: str,
+) -> float:
+    """Extract a scalar metric value for best-checkpoint selection.
+
+    Returns float("-inf") with a warning if the metric key is missing.
+    """
+    if metric_name == "token.rank_acc":
+        val = token_metrics.get("rank_acc")
+    elif metric_name == "token.eviction_rank_acc":
+        per_et = token_metrics.get("per_event_type", {})
+        eviction = per_et.get("eviction", {})
+        val = eviction.get("rank_acc")
+    elif metric_name == "token.fifo_topk_rank_acc":
+        per_et = token_metrics.get("per_event_type", {})
+        fifo = per_et.get("fifo_topk", {})
+        val = fifo.get("rank_acc")
+    elif metric_name == "token.eviction_fifo_mean_rank_acc":
+        per_et = token_metrics.get("per_event_type", {})
+        vals = []
+        for key in ("eviction", "fifo_topk"):
+            if key in per_et and "rank_acc" in per_et[key]:
+                vals.append(float(per_et[key]["rank_acc"]))
+        val = sum(vals) / len(vals) if vals else None
+    elif metric_name == "count.accuracy":
+        val = count_metrics.get("accuracy")
+    else:
+        print(f"WARNING: unknown best_metric '{metric_name}'", flush=True)
+        return float("-inf")
+
+    if val is None:
+        print(f"WARNING: best_metric '{metric_name}' not found in validation metrics", flush=True)
+        return float("-inf")
+    return float(val)
+
+
+def _should_deploy_count_head(
+    count_head_trained: bool,
+    count_metrics: dict,
+    deploy_count_head: str,
+    min_delta: float,
+) -> bool:
+    """Decide whether to include count head in the deploy state dict.
+
+    Rules:
+      - Not trained => False
+      - "always" => True (if trained)
+      - "never" => False
+      - "auto" => accuracy >= majority_accuracy + min_delta
+    """
+    if not count_head_trained:
+        return False
+    if deploy_count_head == "always":
+        return True
+    if deploy_count_head == "never":
+        return False
+    # auto mode
+    acc = count_metrics.get("accuracy")
+    majority = count_metrics.get("majority_accuracy")
+    if acc is None or majority is None:
+        return False
+    return float(acc) >= float(majority) + float(min_delta)
+
+
+def _save_joint_checkpoint(
+    joint: JointRetentionPolicy,
+    output_path: Path,
+    *,
+    checkpoint_role: str,
+    count_head_trained: bool,
+    count_head_arch: str,
+    num_layers: int,
+    count_candidates: list[int],
+    score_state_dim: int,
+    metadata_dim: int,
+    hidden_dim: int,
+    score_state_proj_checkpoint: str | None,
+    projection_state: dict | None,
+    dataset_stats: dict,
+    training_options: dict,
+    validation_metrics: dict,
+    best_info: dict,
+    deploy_count_head: str,
+    deploy_count_head_min_delta: float,
+) -> None:
+    """Build and save a checkpoint with deploy gating applied."""
+    token_scorer_state = build_token_scorer_state_from_joint(joint)
+    count_head_state = build_count_head_state_from_joint(joint) if count_head_trained else None
+
+    # Deploy gating: decide whether to include count head in deploy state
+    # No validation data => auto mode cannot make an informed decision => disable
+    has_val = best_info.get("has_validation", True)
+    count_metrics_for_gating = validation_metrics.get("count", {})
+    if not has_val and deploy_count_head == "auto":
+        deploy_count = False
+    else:
+        deploy_count = _should_deploy_count_head(
+            count_head_trained=count_head_trained,
+            count_metrics=count_metrics_for_gating,
+            deploy_count_head=deploy_count_head,
+            min_delta=deploy_count_head_min_delta,
+        )
+    deploy_count_head_state = count_head_state if deploy_count else None
+    deploy_state = build_ovggt_joint_retention_state_dict(
+        token_scorer_state=token_scorer_state,
+        count_head_state=deploy_count_head_state,
+        num_layers=num_layers,
+        score_state_projection_state=projection_state,
+    )
+
+    checkpoint = {
+        "joint_arch": "shared_token_encoder_v1",
+        "count_head_arch": count_head_arch,
+        "joint_policy": joint.state_dict(),
+        "token_scorer": token_scorer_state,
+        "count_head": count_head_state,
+        "model": deploy_state,
+        "score_state_dim": score_state_dim,
+        "metadata_dim": metadata_dim,
+        "hidden_dim": hidden_dim,
+        "num_layers": num_layers,
+        "count_candidates": count_candidates,
+        "count_head_trained": bool(count_head_trained),
+        "count_head_deploy_enabled": deploy_count,
+        "score_state_projection_checkpoint": score_state_proj_checkpoint,
+        "validation_metrics": validation_metrics,
+        "dataset_stats": dataset_stats,
+        "training_options": training_options,
+        # Checkpoint role and best-info
+        "checkpoint_role": checkpoint_role,
+        "best_metric": best_info.get("best_metric"),
+        "best_metric_value": best_info.get("best_metric_value"),
+        "best_epoch": best_info.get("best_epoch"),
+        "final_epoch": best_info.get("final_epoch"),
+        "has_validation": best_info.get("has_validation"),
+        "best_selection_reason": best_info.get("best_selection_reason"),
+        "best_validation_metrics": best_info.get("best_validation_metrics"),
+    }
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    torch.save(checkpoint, output_path)
+    print(f"saved_checkpoint={output_path} role={checkpoint_role}", flush=True)
 
 
 # --------------------------------------------------------------------------- #
@@ -473,6 +640,13 @@ def train_joint_retention(
     max_loss_gap: float | None = None,
     min_count_loss_gap: float = 0.0,
     device: str = "cpu",
+    save_best: bool = False,
+    best_metric: str = "token.rank_acc",
+    best_output: str | None = None,
+    early_stop_patience: int | None = None,
+    early_stop_min_delta: float = 0.0,
+    deploy_count_head: str = "auto",
+    deploy_count_head_min_delta: float = 0.0,
 ) -> None:
     """Train JointRetentionPolicy and save checkpoint.
 
@@ -591,6 +765,62 @@ def train_joint_retention(
     )
 
     step = 0
+    has_validation = val_fraction > 0.0 and val_events is not None and len(val_events) > 0
+
+    # Best-checkpoint tracking
+    best_value = float("-inf")
+    best_epoch = None
+    best_validation_metrics: dict = {"token": {}, "count": {}}
+    epochs_without_improvement = 0
+    final_epoch = 0
+
+    # Projection state (loaded once)
+    projection_state = load_score_state_projection_state(score_state_proj_checkpoint)
+    if not projection_state:
+        projection_state = load_score_state_projection_state_from_oracle_shards(oracle_shards)
+
+    training_options = {
+        "oracle_shards": oracle_shards,
+        "output": output,
+        "score_state_proj_checkpoint": score_state_proj_checkpoint,
+        "score_state_dim": score_state_dim,
+        "metadata_dim": metadata_dim,
+        "hidden_dim": hidden_dim,
+        "num_layers": num_layers,
+        "count_candidates": count_candidates,
+        "count_head_arch": count_head_arch,
+        "batch_size": batch_size,
+        "epochs": epochs,
+        "lr": lr,
+        "weight_decay": weight_decay,
+        "regression_weight": regression_weight,
+        "min_loss_gap": min_loss_gap,
+        "count_loss_weight": count_loss_weight,
+        "count_label_reduction": count_label_reduction,
+        "count_repeat_factor": count_repeat_factor,
+        "val_fraction": val_fraction,
+        "split_key": split_key,
+        "split_seed": split_seed,
+        "fifo_token_pair_mode": fifo_token_pair_mode,
+        "token_score_mode": token_score_mode,
+        "pair_sampling_seed": pair_sampling_seed,
+        "max_pairs_per_event": max_pairs_per_event,
+        "min_loss_gap_by_event_type": min_loss_gap_by_event_type,
+        "max_loss_gap": max_loss_gap,
+        "min_count_loss_gap": min_count_loss_gap,
+        "device": device,
+        "save_best": save_best,
+        "best_metric": best_metric,
+        "best_output": best_output,
+        "early_stop_patience": early_stop_patience,
+        "early_stop_min_delta": early_stop_min_delta,
+        "deploy_count_head": deploy_count_head,
+        "deploy_count_head_min_delta": deploy_count_head_min_delta,
+    }
+
+    # Determine effective early stopping (disabled when no validation)
+    effective_early_stop_patience = early_stop_patience if has_validation else None
+
     for epoch in range(epochs):
         epoch_metrics = _empty_metric_sums()
 
@@ -725,105 +955,184 @@ def train_joint_retention(
         ])
         print(" ".join(summary_parts), flush=True)
 
-    # --- Validation evaluation ---
-    token_validation_metrics = _evaluate_token_ranking(
-        joint, val_token_dataset, batch_size, torch_device,
-        score_mode=token_score_mode,
-    )
-    count_validation_metrics = _evaluate_count_head(
-        joint, val_count_dataset, batch_size, torch_device,
-    )
+        final_epoch = epoch
 
-    print(
-        f"validation token: count={token_validation_metrics['count']} "
-        f"loss={token_validation_metrics['loss']:.6f} "
-        f"rank_acc={token_validation_metrics['rank_acc']:.4f}",
-        flush=True,
-    )
-    print(
-        f"validation count: count={count_validation_metrics['count']} "
-        f"loss={count_validation_metrics['loss']:.6f} "
-        f"accuracy={count_validation_metrics['accuracy']:.4f} "
-        f"majority_acc={count_validation_metrics['majority_accuracy']:.4f}",
-        flush=True,
-    )
+        # --- Per-epoch validation (only if we have validation data) ---
+        if has_validation:
+            token_validation_metrics = _evaluate_token_ranking(
+                joint, val_token_dataset, batch_size, torch_device,
+                score_mode=token_score_mode,
+            )
+            count_validation_metrics = _evaluate_count_head(
+                joint, val_count_dataset, batch_size, torch_device,
+            )
 
-    # --- Save checkpoint ---
-    output_path = Path(output)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
+            print(
+                f"validation token: count={token_validation_metrics['count']} "
+                f"loss={token_validation_metrics['loss']:.6f} "
+                f"rank_acc={token_validation_metrics['rank_acc']:.4f}",
+                flush=True,
+            )
+            print(
+                f"validation count: count={count_validation_metrics['count']} "
+                f"loss={count_validation_metrics['loss']:.6f} "
+                f"accuracy={count_validation_metrics['accuracy']:.4f} "
+                f"majority_acc={count_validation_metrics['majority_accuracy']:.4f}",
+                flush=True,
+            )
 
-    # Projection state
-    projection_state = load_score_state_projection_state(score_state_proj_checkpoint)
-    if not projection_state:
-        projection_state = load_score_state_projection_state_from_oracle_shards(oracle_shards)
-
-    # Export sub-components
-    token_scorer_state = build_token_scorer_state_from_joint(joint)
-    count_head_state = build_count_head_state_from_joint(joint) if count_head_trained else None
-    deploy_state = build_ovggt_joint_retention_state_dict(
-        token_scorer_state=token_scorer_state,
-        count_head_state=count_head_state,
-        num_layers=num_layers,
-        score_state_projection_state=projection_state,
-    )
-
-    training_options = {
-        "oracle_shards": oracle_shards,
-        "output": output,
-        "score_state_proj_checkpoint": score_state_proj_checkpoint,
-        "score_state_dim": score_state_dim,
-        "metadata_dim": metadata_dim,
-        "hidden_dim": hidden_dim,
-        "num_layers": num_layers,
-        "count_candidates": count_candidates,
-        "count_head_arch": count_head_arch,
-        "batch_size": batch_size,
-        "epochs": epochs,
-        "lr": lr,
-        "weight_decay": weight_decay,
-        "regression_weight": regression_weight,
-        "min_loss_gap": min_loss_gap,
-        "count_loss_weight": count_loss_weight,
-        "count_label_reduction": count_label_reduction,
-        "count_repeat_factor": count_repeat_factor,
-        "val_fraction": val_fraction,
-        "split_key": split_key,
-        "split_seed": split_seed,
-        "fifo_token_pair_mode": fifo_token_pair_mode,
-        "token_score_mode": token_score_mode,
-        "pair_sampling_seed": pair_sampling_seed,
-        "max_pairs_per_event": max_pairs_per_event,
-        "min_loss_gap_by_event_type": min_loss_gap_by_event_type,
-        "max_loss_gap": max_loss_gap,
-        "min_count_loss_gap": min_count_loss_gap,
-        "device": device,
-    }
-
-    torch.save(
-        {
-            "joint_arch": "shared_token_encoder_v1",
-            "count_head_arch": count_head_arch,
-            "joint_policy": joint.state_dict(),
-            "token_scorer": token_scorer_state,
-            "count_head": count_head_state,
-            "model": deploy_state,
-            "score_state_dim": score_state_dim,
-            "metadata_dim": metadata_dim,
-            "hidden_dim": hidden_dim,
-            "num_layers": num_layers,
-            "count_candidates": count_candidates,
-            "count_head_trained": bool(count_head_trained),
-            "score_state_projection_checkpoint": score_state_proj_checkpoint,
-            "validation_metrics": {
+            current_validation_metrics = {
                 "token": token_validation_metrics,
                 "count": count_validation_metrics,
+            }
+
+            # Check for improvement
+            current_value = _select_best_metric(
+                token_validation_metrics, count_validation_metrics, best_metric,
+            )
+            if current_value > best_value + early_stop_min_delta:
+                best_value = current_value
+                best_epoch = epoch
+                best_validation_metrics = copy.deepcopy(current_validation_metrics)
+                epochs_without_improvement = 0
+                print(
+                    f"best_improved epoch={epoch} {best_metric}={best_value:.6f}",
+                    flush=True,
+                )
+
+                # Save .best.pt on improvement
+                if save_best:
+                    best_path = Path(best_output) if best_output else Path(output).with_suffix(".best.pt")
+                    best_info = {
+                        "best_metric": best_metric,
+                        "best_metric_value": best_value,
+                        "best_epoch": best_epoch,
+                        "final_epoch": final_epoch,
+                        "has_validation": has_validation,
+                        "best_selection_reason": "metric_improved",
+                        "best_validation_metrics": copy.deepcopy(best_validation_metrics),
+                    }
+                    _save_joint_checkpoint(
+                        joint,
+                        best_path,
+                        checkpoint_role="best",
+                        count_head_trained=count_head_trained,
+                        count_head_arch=count_head_arch,
+                        num_layers=num_layers,
+                        count_candidates=count_candidates,
+                        score_state_dim=score_state_dim,
+                        metadata_dim=metadata_dim,
+                        hidden_dim=hidden_dim,
+                        score_state_proj_checkpoint=score_state_proj_checkpoint,
+                        projection_state=projection_state,
+                        dataset_stats=dataset_stats,
+                        training_options=training_options,
+                        validation_metrics=copy.deepcopy(current_validation_metrics),
+                        best_info=best_info,
+                        deploy_count_head=deploy_count_head,
+                        deploy_count_head_min_delta=deploy_count_head_min_delta,
+                    )
+            else:
+                epochs_without_improvement += 1
+
+            # Early stopping
+            if effective_early_stop_patience is not None and epochs_without_improvement >= effective_early_stop_patience:
+                print(
+                    f"early_stop epoch={epoch} best_epoch={best_epoch} best_metric_value={best_value:.6f}",
+                    flush=True,
+                )
+                break
+
+    # --- Final validation (if not already done per-epoch, or no validation) ---
+    if not has_validation:
+        token_validation_metrics = _evaluate_token_ranking(
+            joint, val_token_dataset, batch_size, torch_device,
+            score_mode=token_score_mode,
+        )
+        count_validation_metrics = _evaluate_count_head(
+            joint, val_count_dataset, batch_size, torch_device,
+        )
+
+    current_validation_metrics = {
+        "token": token_validation_metrics,
+        "count": count_validation_metrics,
+    }
+
+    # Build best_info for final checkpoint
+    if has_validation:
+        best_selection_reason = "metric_improved" if best_epoch is not None else "no_improvement"
+    else:
+        best_selection_reason = "no_validation"
+        best_value = None
+        # For no-validation: save .best.pt at the final state
+        best_epoch = final_epoch
+        best_validation_metrics = copy.deepcopy(current_validation_metrics)
+
+    best_info = {
+        "best_metric": best_metric,
+        "best_metric_value": best_value,
+        "best_epoch": best_epoch,
+        "final_epoch": final_epoch,
+        "has_validation": has_validation,
+        "best_selection_reason": best_selection_reason,
+        "best_validation_metrics": copy.deepcopy(best_validation_metrics),
+    }
+
+    # Save no-validation .best.pt if needed
+    if save_best and not has_validation:
+        best_path = Path(best_output) if best_output else Path(output).with_suffix(".best.pt")
+        _save_joint_checkpoint(
+            joint,
+            best_path,
+            checkpoint_role="best",
+            count_head_trained=count_head_trained,
+            count_head_arch=count_head_arch,
+            num_layers=num_layers,
+            count_candidates=count_candidates,
+            score_state_dim=score_state_dim,
+            metadata_dim=metadata_dim,
+            hidden_dim=hidden_dim,
+            score_state_proj_checkpoint=score_state_proj_checkpoint,
+            projection_state=projection_state,
+            dataset_stats=dataset_stats,
+            training_options=training_options,
+            validation_metrics=copy.deepcopy(current_validation_metrics),
+            best_info={
+                "best_metric": best_metric,
+                "best_metric_value": None,
+                "best_epoch": final_epoch,
+                "final_epoch": final_epoch,
+                "has_validation": False,
+                "best_selection_reason": "no_validation",
+                "best_validation_metrics": {"token": {}, "count": {}},
             },
-            "dataset_stats": dataset_stats,
-            "training_options": training_options,
-        },
+            deploy_count_head=deploy_count_head,
+            deploy_count_head_min_delta=deploy_count_head_min_delta,
+        )
+
+    # --- Save final checkpoint ---
+    output_path = Path(output)
+    _save_joint_checkpoint(
+        joint,
         output_path,
+        checkpoint_role="final",
+        count_head_trained=count_head_trained,
+        count_head_arch=count_head_arch,
+        num_layers=num_layers,
+        count_candidates=count_candidates,
+        score_state_dim=score_state_dim,
+        metadata_dim=metadata_dim,
+        hidden_dim=hidden_dim,
+        score_state_proj_checkpoint=score_state_proj_checkpoint,
+        projection_state=projection_state,
+        dataset_stats=dataset_stats,
+        training_options=training_options,
+        validation_metrics=current_validation_metrics,
+        best_info=best_info,
+        deploy_count_head=deploy_count_head,
+        deploy_count_head_min_delta=deploy_count_head_min_delta,
     )
-    print(f"saved_checkpoint={output_path} total_steps={step}", flush=True)
+    print(f"total_steps={step}", flush=True)
 
 
 # --------------------------------------------------------------------------- #
@@ -862,6 +1171,13 @@ def main() -> None:
         max_loss_gap=args.max_loss_gap,
         min_count_loss_gap=args.min_count_loss_gap,
         device=args.device,
+        save_best=args.save_best,
+        best_metric=args.best_metric,
+        best_output=args.best_output,
+        early_stop_patience=args.early_stop_patience,
+        early_stop_min_delta=args.early_stop_min_delta,
+        deploy_count_head=args.deploy_count_head,
+        deploy_count_head_min_delta=args.deploy_count_head_min_delta,
     )
 
 

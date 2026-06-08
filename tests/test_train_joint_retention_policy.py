@@ -178,9 +178,10 @@ def test_train_one_epoch_produces_valid_checkpoint(tmp_path):
         "Missing aggregator.token_scorers.0.scorer.1.weight"
     )
 
-    # Deploy keys for count head
-    assert "aggregator.count_head._encoder.layer_embed.weight" in deploy_state, (
-        "Missing aggregator.count_head._encoder.layer_embed.weight"
+    # Deploy keys for count head (disabled when no validation + auto)
+    assert "count_head_deploy_enabled" in checkpoint
+    assert checkpoint["count_head_deploy_enabled"] is False, (
+        "count_head should not be deployed when val_fraction=0.0 and deploy_count_head=auto"
     )
 
     # --- Dimension keys ---
@@ -507,3 +508,394 @@ def test_train_with_validation_produces_validation_metrics(tmp_path):
 
     # Training options
     assert "training_options" in checkpoint, "Missing 'training_options' in checkpoint"
+
+
+# --------------------------------------------------------------------------- #
+# Step 5.1: Tests for best checkpoint metadata
+# --------------------------------------------------------------------------- #
+
+def test_save_best_produces_best_checkpoint(tmp_path):
+    """save_best=True with validation produces .best.pt with correct metadata."""
+    from train_joint_retention_policy import train_joint_retention
+
+    shard_path = _make_fake_shard(
+        tmp_path / "fake_shard.pt",
+        num_eviction=4,
+        num_fifo=4,
+    )
+    output_path = tmp_path / "output" / "joint_retention.pt"
+
+    train_joint_retention(
+        oracle_shards=[str(shard_path)],
+        output=str(output_path),
+        score_state_dim=_SCORE_STATE_DIM,
+        metadata_dim=_METADATA_DIM,
+        hidden_dim=16,
+        num_layers=4,
+        count_candidates=[0, 4, 8, 16],
+        count_head_arch="shared_encoder_v2",
+        batch_size=2,
+        epochs=2,
+        lr=1e-3,
+        weight_decay=0.01,
+        regression_weight=0.1,
+        min_loss_gap=0.01,
+        count_loss_weight=1.0,
+        count_label_reduction="min",
+        count_repeat_factor=1.0,
+        val_fraction=0.5,
+        split_key="event_id_hash",
+        split_seed=0,
+        device="cpu",
+        save_best=True,
+        best_metric="token.rank_acc",
+        early_stop_patience=None,
+    )
+
+    # Main checkpoint exists
+    assert output_path.exists(), f"Main checkpoint not written to {output_path}"
+
+    # Best checkpoint exists
+    best_path = output_path.with_suffix(".best.pt")
+    assert best_path.exists(), f"Best checkpoint not written to {best_path}"
+
+    # Check main checkpoint metadata
+    main_ckpt = torch.load(output_path, map_location="cpu", weights_only=False)
+    for key in ("best_metric", "best_metric_value", "best_epoch", "final_epoch",
+                "has_validation", "best_selection_reason"):
+        assert key in main_ckpt, f"Missing '{key}' in main checkpoint"
+    assert "best_validation_metrics" in main_ckpt, "Missing 'best_validation_metrics' in main checkpoint"
+    assert main_ckpt["has_validation"] is True
+    assert main_ckpt["final_epoch"] >= 0
+
+    # Check best checkpoint metadata
+    best_ckpt = torch.load(best_path, map_location="cpu", weights_only=False)
+    for key in ("best_metric", "best_metric_value", "best_epoch", "final_epoch",
+                "has_validation", "best_selection_reason", "validation_metrics",
+                "checkpoint_role"):
+        assert key in best_ckpt, f"Missing '{key}' in best checkpoint"
+    assert best_ckpt["checkpoint_role"] == "best"
+    assert best_ckpt["has_validation"] is True
+    assert best_ckpt["best_metric"] == "token.rank_acc"
+    assert best_ckpt["best_metric_value"] is not None
+    assert best_ckpt["best_epoch"] >= 0
+
+    # Both checkpoints share the same best info
+    assert main_ckpt["best_metric"] == best_ckpt["best_metric"]
+    assert main_ckpt["best_epoch"] == best_ckpt["best_epoch"]
+
+
+def test_save_best_no_validation(tmp_path):
+    """val_fraction=0.0 with save_best=True produces .best.pt with no_validation metadata."""
+    from train_joint_retention_policy import train_joint_retention
+
+    shard_path = _make_fake_shard(
+        tmp_path / "fake_shard.pt",
+        num_eviction=3,
+        num_fifo=3,
+    )
+    output_path = tmp_path / "output" / "joint_retention.pt"
+
+    train_joint_retention(
+        oracle_shards=[str(shard_path)],
+        output=str(output_path),
+        score_state_dim=_SCORE_STATE_DIM,
+        metadata_dim=_METADATA_DIM,
+        hidden_dim=16,
+        num_layers=4,
+        count_candidates=[0, 4, 8, 16],
+        count_head_arch="shared_encoder_v2",
+        batch_size=2,
+        epochs=1,
+        lr=1e-3,
+        weight_decay=0.01,
+        regression_weight=0.1,
+        min_loss_gap=0.01,
+        count_loss_weight=1.0,
+        count_label_reduction="min",
+        count_repeat_factor=1.0,
+        val_fraction=0.0,
+        split_key="event_id_hash",
+        split_seed=0,
+        device="cpu",
+        save_best=True,
+        best_metric="token.rank_acc",
+    )
+
+    # Best checkpoint exists
+    best_path = output_path.with_suffix(".best.pt")
+    assert best_path.exists(), f"Best checkpoint not written to {best_path}"
+
+    best_ckpt = torch.load(best_path, map_location="cpu", weights_only=False)
+    assert best_ckpt["best_metric_value"] is None
+    assert best_ckpt["has_validation"] is False
+    assert best_ckpt["best_selection_reason"] == "no_validation"
+    assert best_ckpt["checkpoint_role"] == "best"
+
+    # Main checkpoint also reflects no validation
+    main_ckpt = torch.load(output_path, map_location="cpu", weights_only=False)
+    assert main_ckpt["best_metric_value"] is None
+    assert main_ckpt["has_validation"] is False
+    assert main_ckpt["best_selection_reason"] == "no_validation"
+
+
+def test_save_best_false_no_best_checkpoint(tmp_path):
+    """save_best=False (default) does not produce .best.pt."""
+    from train_joint_retention_policy import train_joint_retention
+
+    shard_path = _make_fake_shard(
+        tmp_path / "fake_shard.pt",
+        num_eviction=2,
+        num_fifo=2,
+    )
+    output_path = tmp_path / "output" / "joint_retention.pt"
+
+    train_joint_retention(
+        oracle_shards=[str(shard_path)],
+        output=str(output_path),
+        score_state_dim=_SCORE_STATE_DIM,
+        metadata_dim=_METADATA_DIM,
+        hidden_dim=16,
+        num_layers=4,
+        count_candidates=[0, 4, 8, 16],
+        batch_size=2,
+        epochs=1,
+        lr=1e-3,
+        device="cpu",
+    )
+
+    assert output_path.exists()
+    best_path = output_path.with_suffix(".best.pt")
+    assert not best_path.exists(), ".best.pt should not exist when save_best=False"
+
+
+# --------------------------------------------------------------------------- #
+# Step 5.7: Tests for CountHead deploy gating
+# --------------------------------------------------------------------------- #
+
+def test_should_deploy_count_head_auto_weak():
+    """auto mode: count head below majority accuracy disables deploy."""
+    from train_joint_retention_policy import _should_deploy_count_head
+
+    assert _should_deploy_count_head(
+        count_head_trained=True,
+        count_metrics={"accuracy": 0.30, "majority_accuracy": 0.40},
+        deploy_count_head="auto",
+        min_delta=0.0,
+    ) is False
+
+
+def test_should_deploy_count_head_auto_strong():
+    """auto mode: count head at or above majority accuracy enables deploy."""
+    from train_joint_retention_policy import _should_deploy_count_head
+
+    assert _should_deploy_count_head(
+        count_head_trained=True,
+        count_metrics={"accuracy": 0.50, "majority_accuracy": 0.40},
+        deploy_count_head="auto",
+        min_delta=0.0,
+    ) is True
+
+
+def test_should_deploy_count_head_auto_with_delta():
+    """auto mode: min_delta raises the bar."""
+    from train_joint_retention_policy import _should_deploy_count_head
+
+    # Exactly at majority + delta => enabled
+    assert _should_deploy_count_head(
+        count_head_trained=True,
+        count_metrics={"accuracy": 0.45, "majority_accuracy": 0.40},
+        deploy_count_head="auto",
+        min_delta=0.05,
+    ) is True
+
+    # Just below majority + delta => disabled
+    assert _should_deploy_count_head(
+        count_head_trained=True,
+        count_metrics={"accuracy": 0.44, "majority_accuracy": 0.40},
+        deploy_count_head="auto",
+        min_delta=0.05,
+    ) is False
+
+
+def test_should_deploy_count_head_always():
+    """always mode: always deploy if trained."""
+    from train_joint_retention_policy import _should_deploy_count_head
+
+    assert _should_deploy_count_head(
+        count_head_trained=True,
+        count_metrics={},
+        deploy_count_head="always",
+        min_delta=0.0,
+    ) is True
+
+
+def test_should_deploy_count_head_never():
+    """never mode: never deploy."""
+    from train_joint_retention_policy import _should_deploy_count_head
+
+    assert _should_deploy_count_head(
+        count_head_trained=True,
+        count_metrics={"accuracy": 0.99, "majority_accuracy": 0.10},
+        deploy_count_head="never",
+        min_delta=0.0,
+    ) is False
+
+
+def test_should_deploy_count_head_not_trained():
+    """Not trained: never deploy regardless of mode."""
+    from train_joint_retention_policy import _should_deploy_count_head
+
+    for mode in ("auto", "always", "never"):
+        assert _should_deploy_count_head(
+            count_head_trained=False,
+            count_metrics={},
+            deploy_count_head=mode,
+            min_delta=0.0,
+        ) is False
+
+
+def test_should_deploy_count_head_auto_missing_metrics():
+    """auto mode: missing accuracy or majority returns False."""
+    from train_joint_retention_policy import _should_deploy_count_head
+
+    assert _should_deploy_count_head(
+        count_head_trained=True,
+        count_metrics={"accuracy": 0.50},
+        deploy_count_head="auto",
+        min_delta=0.0,
+    ) is False
+
+    assert _should_deploy_count_head(
+        count_head_trained=True,
+        count_metrics={"majority_accuracy": 0.40},
+        deploy_count_head="auto",
+        min_delta=0.0,
+    ) is False
+
+
+def test_deploy_gating_in_checkpoint_weak_count_head(tmp_path):
+    """Weak count head: count_head_deploy_enabled=False, no deploy keys."""
+    from train_joint_retention_policy import train_joint_retention
+
+    shard_path = _make_fake_shard(
+        tmp_path / "fake_shard.pt",
+        num_eviction=4,
+        num_fifo=4,
+    )
+    output_path = tmp_path / "output" / "joint_retention.pt"
+
+    train_joint_retention(
+        oracle_shards=[str(shard_path)],
+        output=str(output_path),
+        score_state_dim=_SCORE_STATE_DIM,
+        metadata_dim=_METADATA_DIM,
+        hidden_dim=16,
+        num_layers=4,
+        count_candidates=[0, 4, 8, 16],
+        count_head_arch="shared_encoder_v2",
+        batch_size=2,
+        epochs=1,
+        lr=1e-3,
+        device="cpu",
+        val_fraction=0.5,
+        deploy_count_head="auto",
+        deploy_count_head_min_delta=0.0,
+    )
+
+    checkpoint = torch.load(output_path, map_location="cpu", weights_only=False)
+
+    # count_head_trained remains True for debugging/resume
+    assert checkpoint["count_head_trained"] is True
+    # Top-level count_head present for debugging/resume
+    assert checkpoint["count_head"] is not None
+
+    # Deploy gating
+    assert "count_head_deploy_enabled" in checkpoint
+    # With only 1 epoch of tiny training, accuracy is likely weak
+    # Check deploy state for count_head keys
+    deploy_state = checkpoint["model"]
+    count_head_deploy_keys = [k for k in deploy_state if "count_head" in k]
+
+    if not checkpoint["count_head_deploy_enabled"]:
+        assert len(count_head_deploy_keys) == 0, (
+            f"Found count_head deploy keys when deploy disabled: {count_head_deploy_keys}"
+        )
+
+
+def test_deploy_gating_always_includes_count_head(tmp_path):
+    """deploy_count_head='always' includes count_head in deploy state."""
+    from train_joint_retention_policy import train_joint_retention
+
+    shard_path = _make_fake_shard(
+        tmp_path / "fake_shard.pt",
+        num_eviction=4,
+        num_fifo=4,
+    )
+    output_path = tmp_path / "output" / "joint_retention.pt"
+
+    train_joint_retention(
+        oracle_shards=[str(shard_path)],
+        output=str(output_path),
+        score_state_dim=_SCORE_STATE_DIM,
+        metadata_dim=_METADATA_DIM,
+        hidden_dim=16,
+        num_layers=4,
+        count_candidates=[0, 4, 8, 16],
+        count_head_arch="shared_encoder_v2",
+        batch_size=2,
+        epochs=1,
+        lr=1e-3,
+        device="cpu",
+        val_fraction=0.5,
+        deploy_count_head="always",
+    )
+
+    checkpoint = torch.load(output_path, map_location="cpu", weights_only=False)
+    assert checkpoint["count_head_trained"] is True
+    assert checkpoint["count_head_deploy_enabled"] is True
+
+    deploy_state = checkpoint["model"]
+    count_head_deploy_keys = [k for k in deploy_state if "count_head" in k]
+    assert len(count_head_deploy_keys) > 0, (
+        "Expected count_head deploy keys when deploy_count_head='always'"
+    )
+
+
+def test_deploy_gating_auto_no_validation_disables(tmp_path):
+    """No validation + auto: deploy is disabled."""
+    from train_joint_retention_policy import train_joint_retention
+
+    shard_path = _make_fake_shard(
+        tmp_path / "fake_shard.pt",
+        num_eviction=4,
+        num_fifo=4,
+    )
+    output_path = tmp_path / "output" / "joint_retention.pt"
+
+    train_joint_retention(
+        oracle_shards=[str(shard_path)],
+        output=str(output_path),
+        score_state_dim=_SCORE_STATE_DIM,
+        metadata_dim=_METADATA_DIM,
+        hidden_dim=16,
+        num_layers=4,
+        count_candidates=[0, 4, 8, 16],
+        count_head_arch="shared_encoder_v2",
+        batch_size=2,
+        epochs=1,
+        lr=1e-3,
+        device="cpu",
+        val_fraction=0.0,
+        deploy_count_head="auto",
+    )
+
+    checkpoint = torch.load(output_path, map_location="cpu", weights_only=False)
+    assert checkpoint["count_head_trained"] is True
+    assert checkpoint["count_head_deploy_enabled"] is False
+
+    deploy_state = checkpoint["model"]
+    count_head_deploy_keys = [k for k in deploy_state if "count_head" in k]
+    assert len(count_head_deploy_keys) == 0, (
+        f"Found count_head deploy keys with no validation + auto: {count_head_deploy_keys}"
+    )
