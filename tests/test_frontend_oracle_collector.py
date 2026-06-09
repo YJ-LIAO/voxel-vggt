@@ -297,6 +297,40 @@ def test_replay_keep_set_probe_requires_matching_batch_index():
     assert torch.equal(keep.cpu(), torch.tensor([0, 2]))
 
 
+def test_fifo_replay_override_protects_requested_demoted_tokens():
+    class FifoReplayProbe:
+        def __init__(self):
+            self.applied = False
+
+        def on_fifo_topk_candidate(self, **kwargs):
+            self.applied = True
+            return torch.tensor([0, 3, 4])
+
+    state = LayerCacheState(
+        k=torch.randn(1, 1, 5, 2),
+        v=torch.randn(1, 1, 5, 2),
+        score_state=None,
+        metadata=_metadata(
+            anchor_slots=[0, 1, 1, 1, 2],
+            importance=[0.0, 0.9, 0.8, 0.1, 0.0],
+        ),
+        protected_count=1,
+    )
+    probe = FifoReplayProbe()
+
+    state.protect_topk_on_demotion_(
+        demoted_slot=1,
+        keep_count=1,
+        layer_id=2,
+        current_frame_id=3,
+        fifo_probe=probe,
+        batch_index=0,
+    )
+
+    assert probe.applied is True
+    assert state.metadata.anchor_slot.tolist() == [[0, 1, 1, 0, 2]]
+
+
 def test_oracle_shard_flusher_writes_partial_shard_atomically(tmp_path):
     from ovggt.training.frontend_oracle_collector import OracleShardFlusher
 
@@ -913,6 +947,74 @@ def test_measure_counterfactual_event_uses_serial_replay_for_eviction_batches(mo
     assert [subset["keep_indices"].tolist() for subset in measured["subsets"]] == [[0, 1], [0, 2]]
 
 
+def test_measure_counterfactual_event_uses_fifo_replay_probe(monkeypatch):
+    import ovggt.training.frontend_oracle_collector as collector
+
+    frames = [
+        {"img": torch.zeros(1, 3, 2, 2)},
+        {
+            "img": torch.zeros(1, 3, 2, 2),
+            "depthmap": torch.zeros(1, 2, 2),
+            "pts3d": torch.zeros(1, 2, 2, 3),
+            "valid_mask": torch.ones(1, 2, 2, dtype=torch.bool),
+        },
+    ]
+    event = {
+        "event_id": "fifo-event",
+        "event_type": "fifo_topk",
+        "layer_id": 0,
+        "frame_id": 0,
+        "batch_index": 0,
+        "demoted_slot": 1,
+        "candidate_subsets": [
+            {"keep_indices": torch.tensor([0, 2])},
+        ],
+    }
+    calls = []
+
+    class CacheState:
+        k = torch.empty(1, 1, 3, 1)
+
+    def fake_run_frontend(model, replay_frames, probe, cache_results, fifo_probe=None, **kwargs):
+        active_probe = fifo_probe or probe
+        calls.append(type(active_probe).__name__)
+        assert probe is None
+        assert type(active_probe).__name__ == "ReplayFifoTopKKeepSetProbe"
+        keep = active_probe.on_fifo_topk_candidate(
+            cache_state=CacheState(),
+            demoted_slot=1,
+            keep_count=1,
+            layer_id=0,
+            frame_id=0,
+            batch_index=0,
+            demoted_indices_by_batch={0: torch.tensor([1, 2])},
+        )
+        assert torch.equal(keep.cpu(), torch.tensor([0, 2]))
+        return SimpleNamespace(
+            ress=[
+                {},
+                {
+                    "depth": torch.zeros(1, 2, 2, 1),
+                    "pts3d_in_other_view": torch.zeros(1, 2, 2, 3),
+                },
+            ]
+        )
+
+    monkeypatch.setattr(collector, "_run_frontend_with_probe", fake_run_frontend)
+
+    measured = collector.measure_counterfactual_event(
+        model=object(),
+        frames=frames,
+        event=event,
+        future_frames=frames[1:],
+        subset_replay_batch_size=1,
+    )
+
+    assert calls == ["ReplayFifoTopKKeepSetProbe"]
+    assert measured is not None
+    assert [subset["keep_indices"].tolist() for subset in measured["subsets"]] == [[0, 2]]
+
+
 def test_measure_counterfactual_event_falls_back_to_serial_when_batched_replay_misses(monkeypatch):
     import ovggt.training.frontend_oracle_collector as collector
 
@@ -1494,6 +1596,47 @@ class TestTask6Wiring:
 
         assert probe_max_events == [5, 5, 5]
 
+    def test_collector_uses_event_type_specific_layer_caps(self):
+        import ovggt.training.frontend_oracle_collector as mod
+
+        observed = {}
+
+        class FakeEvictionProbe:
+            def __init__(self, **kwargs):
+                self.events = []
+                observed["eviction"] = kwargs.get("layers_per_frame")
+
+        class FakeDedupProbe:
+            def __init__(self, **kwargs):
+                self.events = []
+                observed["dedup"] = kwargs.get("layers_per_frame")
+
+        class FakeFifoProbe:
+            def __init__(self, **kwargs):
+                self.events = []
+                observed["fifo"] = kwargs.get("layers_per_frame")
+
+        with _mock.patch.object(mod, "CounterfactualEvictionProbe", FakeEvictionProbe), \
+             _mock.patch.object(mod, "CounterfactualDedupProbe", FakeDedupProbe), \
+             _mock.patch.object(mod, "CounterfactualFifoTopKProbe", FakeFifoProbe), \
+             _mock.patch.object(mod, "_run_frontend_with_probe"), \
+             _mock.patch.object(mod, "select_oracle_events", return_value=[]):
+
+            collect_oracle_events_from_sequence(
+                model=None,
+                frames=[{"f": i} for i in range(12)],
+                device=torch.device("cpu"),
+                max_events=5,
+                num_samples=2,
+                oracle_window=4,
+                layers_per_frame=2,
+                eviction_layers_per_frame=2,
+                dedup_layers_per_frame=0,
+                fifo_layers_per_frame=4,
+            )
+
+        assert observed == {"eviction": 2, "dedup": 0, "fifo": 4}
+
     def test_default_policy_is_stratified_round_robin(self):
         """When event_selection_policy is not passed, default should be stratified_round_robin."""
         import ovggt.training.frontend_oracle_collector as mod
@@ -1851,6 +1994,23 @@ def test_collector_respects_oracle_anchor_interval():
     assert call_kwargs["max_anchors"] == 2
 
 
+def test_probe_diagnostics_reports_fifo_absence_reason():
+    import ovggt.training.frontend_oracle_collector as collector
+
+    diag = collector._build_probe_diagnostics(
+        eviction_events=[],
+        dedup_events=[{"event_type": "dedup", "frame_id": 0, "layer_id": 0}],
+        fifo_events=[],
+        candidate_events=[],
+        filtered_total=0,
+        keyframe_event_counts={"NOOP": 20, "NEW_ANCHOR": 4},
+    )
+
+    assert diag["raw_event_type_counts"]["dedup"] == 1
+    assert diag["keyframe_event_counts"]["NOOP"] == 20
+    assert diag["fifo_swap_count"] == 0
+
+
 def test_random_bucket_layer_schedule_covers_all_buckets():
     """random_bucket layer schedule should produce candidates across all layer buckets."""
     from ovggt.training.frontend_oracle_collector import should_record_oracle_layer_with_schedule
@@ -1937,3 +2097,32 @@ def test_frame_bucket_selection_prefers_later_frames():
     assert len(late_frames) > 0, (
         f"Expected some late-frame events (frame >= 9), got frames: {frames}"
     )
+
+
+def test_quota_stratified_rotates_frame_buckets_by_seed():
+    import ovggt.training.frontend_oracle_collector as collector
+
+    candidates = []
+    for frame in [0, 1, 2, 3, 8, 12, 18]:
+        for layer in [0, 6, 12, 18]:
+            candidates.append({
+                "event_type": "dedup",
+                "frame_id": frame,
+                "layer_id": layer,
+                "voxel_group_id": frame * 100 + layer,
+            })
+
+    selected = collector.select_oracle_events(
+        candidates,
+        max_events=8,
+        max_events_per_frame=2,
+        policy="quota_stratified",
+        layer_bucket_width=6,
+        event_type_quotas={"dedup": 8},
+        frame_buckets=[(0, 3), (4, 8), (9, 15), (16, 23)],
+        selection_seed=17,
+    )
+
+    selected_frames = {e["frame_id"] for e in selected}
+    assert any(f >= 8 for f in selected_frames)
+    assert len({e["layer_id"] // 6 for e in selected}) >= 3

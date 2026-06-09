@@ -148,6 +148,7 @@ def test_train_one_epoch_produces_valid_checkpoint(tmp_path):
         "scorer.0.weight", "scorer.0.bias",
         "scorer.1.weight", "scorer.1.bias",
         "scorer.3.weight", "scorer.3.bias",
+        "scorer.5.weight", "scorer.5.bias",
     }
     assert set(token_scorer_state.keys()) == expected_scorer_keys, (
         f"token_scorer keys mismatch: {sorted(token_scorer_state.keys())}"

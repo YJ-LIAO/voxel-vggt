@@ -92,6 +92,24 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="If >0, collect only a rotating stratified subset of layers per frame.",
     )
     parser.add_argument(
+        "--eviction-layers-per-frame",
+        type=int,
+        default=None,
+        help="Override layers_per_frame for eviction probe only.",
+    )
+    parser.add_argument(
+        "--dedup-layers-per-frame",
+        type=int,
+        default=None,
+        help="Override layers_per_frame for dedup probe only.",
+    )
+    parser.add_argument(
+        "--fifo-layers-per-frame",
+        type=int,
+        default=None,
+        help="Override layers_per_frame for FIFO Top-K probe only.",
+    )
+    parser.add_argument(
         "--max-events-per-sequence",
         type=int,
         default=0,
@@ -218,6 +236,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=None,
         help="JSON list of frame bucket ranges for quota selection, e.g. '[[0,3],[4,8],[9,23]]'.",
     )
+    parser.add_argument(
+        "--selection-seed",
+        type=int,
+        default=0,
+        help="Deterministic seed for rotating quota-stratified selection groups.",
+    )
     return parser.parse_args(argv)
 
 
@@ -238,6 +262,9 @@ def main() -> None:
         "num_views": "num_views",
         "subset_replay_batch_size": "subset_replay_batch_size",
         "layers_per_frame": "layers_per_frame",
+        "eviction_layers_per_frame": "eviction_layers_per_frame",
+        "dedup_layers_per_frame": "dedup_layers_per_frame",
+        "fifo_layers_per_frame": "fifo_layers_per_frame",
         "max_events_per_sequence": "max_events_per_sequence",
         "flush_every_events": "flush_every_events",
         "flush_every_batches": "flush_every_batches",
@@ -273,6 +300,7 @@ def main() -> None:
         "oracle_layer_buckets": "oracle_layer_buckets",
         "oracle_layer_schedule_seed": "oracle_layer_schedule_seed",
         "frame_buckets": "frame_buckets",
+        "selection_seed": "selection_seed",
     }
     _explicit = list(sys.argv[1:])
     for yaml_key, arg_dest in _YAML_TO_ARG.items():
@@ -312,6 +340,9 @@ def main() -> None:
         log_every_subsets=int(args.log_every_subsets),
         subset_replay_batch_size=int(args.subset_replay_batch_size),
         layers_per_frame=int(args.layers_per_frame),
+        eviction_layers_per_frame=int(args.eviction_layers_per_frame) if args.eviction_layers_per_frame is not None else None,
+        dedup_layers_per_frame=int(args.dedup_layers_per_frame) if args.dedup_layers_per_frame is not None else None,
+        fifo_layers_per_frame=int(args.fifo_layers_per_frame) if args.fifo_layers_per_frame is not None else None,
         max_events_per_sequence=int(args.max_events_per_sequence),
         max_events_per_frame=int(args.max_events_per_frame),
         max_candidate_events_per_sequence=int(args.max_candidate_events_per_sequence),
@@ -342,6 +373,7 @@ def main() -> None:
         oracle_layer_buckets=args.oracle_layer_buckets,
         oracle_layer_schedule_seed=int(args.oracle_layer_schedule_seed),
         frame_buckets=args.frame_buckets,
+        selection_seed=int(args.selection_seed),
     )
     shard = collect_oracle_shard_from_config(collector_cfg)
     shard["collector_config"] = asdict(collector_cfg)

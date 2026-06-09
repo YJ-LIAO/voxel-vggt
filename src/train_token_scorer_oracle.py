@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
+import sys
 from pathlib import Path
 from typing import Sequence
 
@@ -46,12 +46,6 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="Strategy for train/val split: event_id_hash or sequence_id",
     )
     parser.add_argument("--split-seed", type=int, help="Seed for deterministic train/val split")
-    parser.add_argument(
-        "--stress-profile-weights",
-        type=str,
-        default=None,
-        help="JSON mapping event type to sampling weight, e.g. '{\"dedup\":2,\"eviction\":1}'",
-    )
     args = parser.parse_args(argv)
 
     defaults = {
@@ -70,7 +64,6 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "val_fraction": 0.1,
         "split_key": "event_id_hash",
         "split_seed": 0,
-        "stress_profile_weights": None,
     }
     values = dict(defaults)
     if args.config:
@@ -185,6 +178,7 @@ def train_token_scorer_oracle(
         num_layers=num_layers,
     ).to(device)
     optimizer = torch.optim.AdamW(scorer.parameters(), lr=lr)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=max(epochs, 1))
 
     step = 0
     validation_metrics = {"count": 0}
@@ -200,8 +194,9 @@ def train_token_scorer_oracle(
             )
             optimizer.zero_grad(set_to_none=True)
             loss.backward()
+            torch.nn.utils.clip_grad_norm_(scorer.parameters(), max_norm=1.0)
             optimizer.step()
-            _add_metric_sums(epoch_metrics, float(loss.detach().cpu()), details)
+            _add_metric_sums(epoch_metrics, float(loss.detach().cpu()), details, batch_size=len(batch["event_id"]))
             if step % 50 == 0:
                 print(
                     format_training_log_line(
@@ -222,12 +217,23 @@ def train_token_scorer_oracle(
                 regression_weight=regression_weight,
             )
             print(format_validation_summary_line(epoch=epoch, metrics=validation_metrics), flush=True)
+        scheduler.step()
 
     output = Path(output)
     output.parent.mkdir(parents=True, exist_ok=True)
     projection_state = load_score_state_projection_state(score_state_proj_checkpoint)
     if not projection_state:
         projection_state = load_score_state_projection_state_from_oracle_shards(oracle_shards)
+    if not projection_state:
+        print(
+            "WARNING: score_state_projection_state is EMPTY. The saved checkpoint "
+            "will NOT contain score_state_projs weights. At inference time, the "
+            "OVGGT model will use randomly-initialized projections, producing "
+            "completely different scorer inputs than training. To fix this, "
+            "provide --score-state-proj-checkpoint pointing to an OVGGT checkpoint "
+            "that contains aggregator.score_state_projs.* weights.",
+            file=sys.stderr,
+        )
     deploy_state = build_ovggt_token_scorer_state_dict(
         scorer_state=scorer.state_dict(),
         num_layers=num_layers,
@@ -270,6 +276,7 @@ def format_training_log_line(epoch: int, step: int, loss: float, details: dict) 
 
 def format_epoch_summary_line(epoch: int, metrics: dict) -> str:
     count = max(int(metrics["count"]), 1)
+    batches = int(metrics["batches"])
     details = {
         "pairwise": metrics["pairwise"] / count,
         "regression": metrics["regression"] / count,
@@ -277,7 +284,7 @@ def format_epoch_summary_line(epoch: int, metrics: dict) -> str:
         "mean_score_diff": metrics["mean_score_diff"] / count,
     }
     return (
-        f"epoch_summary={epoch} batches={count} "
+        f"epoch_summary={epoch} batches={batches} samples={count} "
         f"loss={metrics['loss'] / count:.6f} "
         f"pairwise={details['pairwise']:.6f} "
         f"regression={details['regression']:.6f} "
@@ -361,6 +368,7 @@ def _evaluate_token_scorer(
 def _empty_metric_sums() -> dict:
     return {
         "count": 0,
+        "batches": 0,
         "loss": 0.0,
         "pairwise": 0.0,
         "regression": 0.0,
@@ -369,11 +377,12 @@ def _empty_metric_sums() -> dict:
     }
 
 
-def _add_metric_sums(metrics: dict, loss: float, details: dict) -> None:
-    metrics["count"] += 1
-    metrics["loss"] += float(loss)
+def _add_metric_sums(metrics: dict, loss: float, details: dict, batch_size: int) -> None:
+    metrics["count"] += batch_size
+    metrics["batches"] += 1
+    metrics["loss"] += float(loss) * batch_size
     for key in ("pairwise", "regression", "rank_acc", "mean_score_diff"):
-        metrics[key] += float(details[key])
+        metrics[key] += float(details[key]) * batch_size
 
 
 def build_ovggt_token_scorer_state_dict(
@@ -419,38 +428,6 @@ def load_score_state_projection_state_from_oracle_shards(shard_paths: Sequence[s
                     if key.startswith("aggregator.score_state_projs.")
                 }
     return {}
-
-
-def _stable_bucket(value: str, seed: int = 0, buckets: int = 10000) -> int:
-    digest = hashlib.md5(f"{seed}:{value}".encode("utf-8")).hexdigest()
-    return int(digest, 16) % buckets
-
-
-def split_oracle_pair_samples(
-    samples: list[dict],
-    val_fraction: float = 0.1,
-    split_key: str = "event_id_hash",
-    seed: int = 0,
-) -> tuple[list[dict], list[dict]]:
-    """Split pair samples before DataLoader construction.
-
-    Early calibration uses split_key="event_id_hash" so pair samples from the
-    same oracle event never appear in both splits. Full production uses
-    split_key="sequence_id" so scenes/sequences do not leak.
-    """
-    threshold = int(float(val_fraction) * 10000)
-    train, val = [], []
-    for sample in samples:
-        if split_key == "sequence_id":
-            prov = sample.get("sequence_provenance") or {}
-            key = str(prov.get("sequence_id") or sample.get("event_id") or "")
-        elif split_key == "event_id_hash":
-            key = str(sample.get("event_id") or "")
-        else:
-            raise ValueError(f"Unsupported split_key={split_key}")
-        target = val if _stable_bucket(key, seed=seed) < threshold else train
-        target.append(sample)
-    return train, val
 
 
 def summarize_metrics_by_event_type(rows: list[dict]) -> dict[str, dict]:

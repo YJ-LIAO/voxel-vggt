@@ -43,42 +43,41 @@ def _make_fake_oracle_shard(path, num_events=30):
 
 
 def test_event_hash_split_has_no_event_id_leakage():
-    from train_token_scorer_oracle import split_oracle_pair_samples
+    from ovggt.training.token_oracle_dataset import split_oracle_events
 
-    samples = []
+    events = []
     for idx in range(50):
         event_id = f"event_{idx:03d}"
-        samples.append(_sample(event_id, sequence_id=f"seq_{idx % 5}"))
-        samples.append(_sample(event_id, sequence_id=f"seq_{idx % 5}"))
+        events.append(_sample(event_id, sequence_id=f"seq_{idx % 5}"))
 
-    train, val = split_oracle_pair_samples(
-        samples,
+    train, val = split_oracle_events(
+        events,
         val_fraction=0.2,
         split_key="event_id_hash",
         seed=0,
     )
-    train_ids = {s["event_id"] for s in train}
-    val_ids = {s["event_id"] for s in val}
+    train_ids = {e["event_id"] for e in train}
+    val_ids = {e["event_id"] for e in val}
     assert train_ids
     assert val_ids
     assert train_ids.isdisjoint(val_ids)
 
 
 def test_sequence_split_has_no_sequence_leakage():
-    from train_token_scorer_oracle import split_oracle_pair_samples
+    from ovggt.training.token_oracle_dataset import split_oracle_events
 
-    samples = [
+    events = [
         _sample(f"event_{idx:03d}", sequence_id=f"seq_{idx % 10}")
         for idx in range(100)
     ]
-    train, val = split_oracle_pair_samples(
-        samples,
+    train, val = split_oracle_events(
+        events,
         val_fraction=0.2,
         split_key="sequence_id",
         seed=0,
     )
-    train_seq = {s["sequence_provenance"]["sequence_id"] for s in train}
-    val_seq = {s["sequence_provenance"]["sequence_id"] for s in val}
+    train_seq = {e["sequence_provenance"]["sequence_id"] for e in train}
+    val_seq = {e["sequence_provenance"]["sequence_id"] for e in val}
     assert train_seq
     assert val_seq
     assert train_seq.isdisjoint(val_seq)

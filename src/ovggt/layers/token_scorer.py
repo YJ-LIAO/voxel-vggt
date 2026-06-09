@@ -46,6 +46,7 @@ class TokenScorer(nn.Module):
         metadata_dim: int = TOKEN_METADATA_FEATURE_DIM,
         hidden_dim: Optional[int] = None,
         num_layers: int = 24,
+        depth: int = 2,
     ) -> None:
         super().__init__()
         if score_state_dim is None:
@@ -56,12 +57,19 @@ class TokenScorer(nn.Module):
         self.score_state_dim = int(score_state_dim)
         self.metadata_dim = int(metadata_dim)
         self.layer_embed = nn.Embedding(max(int(num_layers), 1), self.score_state_dim)
-        self.scorer = nn.Sequential(
-            nn.LayerNorm(self.score_state_dim + self.metadata_dim + self.score_state_dim),
-            nn.Linear(self.score_state_dim + self.metadata_dim + self.score_state_dim, hidden_dim),
+        input_dim = self.score_state_dim + self.metadata_dim + self.score_state_dim
+        layers = [
+            nn.LayerNorm(input_dim),
+            nn.Linear(input_dim, hidden_dim),
             nn.GELU(),
-            nn.Linear(hidden_dim, 1),
-        )
+        ]
+        for _ in range(max(int(depth) - 1, 0)):
+            layers.extend([
+                nn.Linear(hidden_dim, hidden_dim),
+                nn.GELU(),
+            ])
+        layers.append(nn.Linear(hidden_dim, 1))
+        self.scorer = nn.Sequential(*layers)
 
     def forward(
         self,

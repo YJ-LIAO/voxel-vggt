@@ -265,7 +265,10 @@ def _select_best_metric(
                 v = entry.get("rank_acc") if isinstance(entry, dict) else entry
                 if v is not None:
                     vals.append(float(v))
-        val = sum(vals) / len(vals) if vals else None
+        if len(vals) >= 2:
+            val = min(vals)  # Use min instead of mean to prevent gaming
+        else:
+            val = vals[0] if vals else None
     elif metric_name == "count.accuracy":
         val = count_metrics.get("accuracy")
     else:
@@ -362,6 +365,7 @@ def _save_joint_checkpoint(
         "score_state_dim": score_state_dim,
         "metadata_dim": metadata_dim,
         "hidden_dim": hidden_dim,
+        "count_head_hidden_dim": hidden_dim,
         "num_layers": num_layers,
         "count_candidates": count_candidates,
         "count_head_trained": bool(count_head_trained),
@@ -595,13 +599,14 @@ def _evaluate_count_head(
 
     n = max(total_samples, 1)
     majority_correct = target_dist.get(majority_class_idx, 0)
+    majority_accuracy = majority_correct / n if n > 0 else 0.0
 
     return {
         "count": total_samples,
         "loss": total_loss / n,
         "accuracy": total_correct / n,
         "mean_abs_count_error": total_abs_error / n,
-        "majority_accuracy": majority_total / n if n > 0 else 0.0,
+        "majority_accuracy": majority_accuracy,
         "target_distribution": {str(k): v for k, v in target_dist.items()},
         "prediction_distribution": {str(k): v for k, v in pred_dist.items()},
     }
@@ -775,6 +780,10 @@ def train_joint_retention(
     epochs_without_improvement = 0
     final_epoch = 0
 
+    # Initialize validation metrics before the loop so epochs=0 doesn't cause NameError
+    token_validation_metrics = {}
+    count_validation_metrics = {}
+
     # Projection state (loaded once)
     projection_state = load_score_state_projection_state(score_state_proj_checkpoint)
     if not projection_state:
@@ -787,6 +796,7 @@ def train_joint_retention(
         "score_state_dim": score_state_dim,
         "metadata_dim": metadata_dim,
         "hidden_dim": hidden_dim,
+        "count_head_hidden_dim": hidden_dim,
         "num_layers": num_layers,
         "count_candidates": count_candidates,
         "count_head_arch": count_head_arch,
@@ -829,7 +839,7 @@ def train_joint_retention(
         if has_count_samples and count_repeat_factor > 0:
             count_iter = iter(count_loader)
             count_steps_this_epoch = 0
-            max_count_steps = len(count_loader) * max(1, int(count_repeat_factor))
+            max_count_steps = max(1, round(len(count_loader) * count_repeat_factor))
 
         for token_batch in token_loader:
             token_batch = _move_batch_to_device(token_batch, torch_device)
@@ -863,6 +873,7 @@ def train_joint_retention(
                         count_batch = next(count_iter)
                     else:
                         count_batch = None
+                        count_steps_this_epoch = max_count_steps  # prevent repeated StopIteration
 
                 if count_batch is not None:
                     count_batch = _move_batch_to_device(count_batch, torch_device)
@@ -915,6 +926,13 @@ def train_joint_retention(
                 token_head_grad_norm=tok_grad,
                 count_head_grad_norm=cnt_grad,
             )
+
+            # Gradient imbalance warning
+            if abs(tok_grad - cnt_grad) / max(enc_grad, 1e-8) > 5.0:
+                print(
+                    f"WARNING: large gradient imbalance token_grad={tok_grad:.4f} count_grad={cnt_grad:.4f}",
+                    flush=True,
+                )
 
             if count_loss_val is not None:
                 count_head_trained = True
@@ -1105,7 +1123,7 @@ def train_joint_retention(
                 "final_epoch": final_epoch,
                 "has_validation": False,
                 "best_selection_reason": "no_validation",
-                "best_validation_metrics": {"token": {}, "count": {}},
+                "best_validation_metrics": copy.deepcopy(current_validation_metrics),
             },
             deploy_count_head=deploy_count_head,
             deploy_count_head_min_delta=deploy_count_head_min_delta,

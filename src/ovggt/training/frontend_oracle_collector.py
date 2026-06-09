@@ -100,6 +100,9 @@ class FrontendOracleCollectorConfig:
     dataloader_timeout: int = 600          # seconds; 0 disables timeout6
     # --- Phase 1 sampling-policy parameters ---
     layers_per_frame: int = 2                              # was 0; Decision 4
+    eviction_layers_per_frame: int | None = None
+    dedup_layers_per_frame: int | None = None
+    fifo_layers_per_frame: int | None = None
     max_events_per_sequence: int = 16                      # was 0; Decision 3
     max_events_per_frame: int = 6                          # Decision 3
     max_candidate_events_per_sequence: int = 256           # Decision 3
@@ -135,6 +138,7 @@ class FrontendOracleCollectorConfig:
     oracle_layer_buckets: str | Sequence[Sequence[int]] | None = None
     oracle_layer_schedule_seed: int = 0
     frame_buckets: str | Sequence[Sequence[int]] | None = None
+    selection_seed: int = 0
 
 
 def default_oracle_log(message: str) -> None:
@@ -885,6 +889,40 @@ class ReplayKeepSetProbe:
         return self.keep_indices.to(device=cache_state.k.device if cache_state.k is not None else "cpu")
 
 
+class ReplayFifoTopKKeepSetProbe:
+    """Forces FIFO demotion protection to use a sampled full-cache keep set."""
+
+    def __init__(self, target_event: dict, keep_indices: torch.Tensor | Iterable[int]) -> None:
+        self.target_layer_id = int(target_event["layer_id"])
+        self.target_frame_id = int(target_event["frame_id"])
+        self.target_batch_index = int(target_event.get("batch_index", 0))
+        self.target_demoted_slot = int(target_event.get("demoted_slot", 1))
+        self.keep_indices = torch.as_tensor(keep_indices, dtype=torch.long)
+        self.applied = False
+
+    def on_fifo_topk_candidate(
+        self,
+        cache_state,
+        demoted_slot: int,
+        keep_count: int,
+        layer_id: int,
+        frame_id: int,
+        batch_index: int = 0,
+        demoted_indices_by_batch=None,
+    ):
+        if self.applied:
+            return None
+        if int(layer_id) != self.target_layer_id or int(frame_id) != self.target_frame_id:
+            return None
+        if int(batch_index) != self.target_batch_index:
+            return None
+        if int(demoted_slot) != self.target_demoted_slot:
+            return None
+        self.applied = True
+        device = cache_state.k.device if getattr(cache_state, "k", None) is not None else "cpu"
+        return self.keep_indices.to(device=device)
+
+
 class MultiReplayKeepSetProbe:
     """Applies one sampled keep set per replicated batch item during replay."""
 
@@ -1163,6 +1201,14 @@ def _frame_bucket_id(frame_id: int, frame_buckets: Sequence[Sequence[int]] | str
         if int(lo) <= frame_id <= int(hi):
             return idx
     return len(ranges)
+
+
+def _rotate_sorted_keys(keys, selection_seed: int = 0) -> list:
+    ordered = sorted(keys)
+    if not ordered:
+        return ordered
+    offset = int(selection_seed) % len(ordered)
+    return ordered[offset:] + ordered[:offset]
 
 
 def _oracle_anchor_kwargs(
@@ -1561,6 +1607,7 @@ def _select_oracle_events_quota_stratified(
     event_type_quotas: dict[str, int],
     quota_fill_remaining: bool = False,
     frame_buckets: Sequence[Sequence[int]] | str | None = None,
+    selection_seed: int = 0,
 ) -> list[dict]:
     """Quota-first stratified selection: fill scarce event types before abundant ones."""
     if not candidate_events or max_events <= 0:
@@ -1591,7 +1638,8 @@ def _select_oracle_events_quota_stratified(
             bucket = lid // layer_bucket_width
             key = (_frame_bucket_id(fid, frame_buckets), bucket)
             type_groups_dict.setdefault(key, []).append(event)
-        type_groups = [list(type_groups_dict[k]) for k in sorted(type_groups_dict.keys())]
+        type_keys = _rotate_sorted_keys(type_groups_dict.keys(), selection_seed)
+        type_groups = [list(type_groups_dict[k]) for k in type_keys]
         type_selected_events, per_frame_counts = _round_robin_select(
             type_groups, max_events, max_events_per_frame, per_frame_counts,
             budget=type_budget,
@@ -1611,7 +1659,8 @@ def _select_oracle_events_quota_stratified(
                 bucket = lid // layer_bucket_width
                 key = (et, _frame_bucket_id(fid, frame_buckets), bucket)
                 fill_groups.setdefault(key, []).append(event)
-            fill_group_queues = [list(fill_groups[k]) for k in sorted(fill_groups.keys())]
+            fill_keys = _rotate_sorted_keys(fill_groups.keys(), selection_seed)
+            fill_group_queues = [list(fill_groups[k]) for k in fill_keys]
             fill_selected, per_frame_counts = _round_robin_select(
                 fill_group_queues, max_events, max_events_per_frame, per_frame_counts,
                 budget=remaining,
@@ -1629,6 +1678,7 @@ def select_oracle_events(
     event_type_quotas: dict[str, int] | None = None,
     quota_fill_remaining: bool = False,
     frame_buckets: Sequence[Sequence[int]] | str | None = None,
+    selection_seed: int = 0,
 ) -> list[dict]:
     if policy == "quota_stratified":
         if event_type_quotas is None:
@@ -1642,6 +1692,7 @@ def select_oracle_events(
                 event_type_quotas=event_type_quotas,
                 quota_fill_remaining=quota_fill_remaining,
                 frame_buckets=frame_buckets,
+                selection_seed=selection_seed,
             )
     if policy == "first_n":
         return candidate_events[:max_events]
@@ -1667,6 +1718,9 @@ def collect_oracle_shard_from_config(collector_cfg: FrontendOracleCollectorConfi
         f"high_budget_teacher={collector_cfg.high_budget_teacher} "
         f"subset_replay_batch_size={collector_cfg.subset_replay_batch_size} "
         f"layers_per_frame={collector_cfg.layers_per_frame} "
+        f"eviction_layers_per_frame={collector_cfg.eviction_layers_per_frame} "
+        f"dedup_layers_per_frame={collector_cfg.dedup_layers_per_frame} "
+        f"fifo_layers_per_frame={collector_cfg.fifo_layers_per_frame} "
         f"max_events_per_sequence={collector_cfg.max_events_per_sequence} "
         f"max_candidate_events_per_sequence={collector_cfg.max_candidate_events_per_sequence} "
         f"max_events_per_frame={collector_cfg.max_events_per_frame} "
@@ -1755,6 +1809,9 @@ def collect_oracle_shard_from_config(collector_cfg: FrontendOracleCollectorConfi
         log_every_subsets=collector_cfg.log_every_subsets,
         subset_replay_batch_size=collector_cfg.subset_replay_batch_size,
         layers_per_frame=collector_cfg.layers_per_frame,
+        eviction_layers_per_frame=collector_cfg.eviction_layers_per_frame,
+        dedup_layers_per_frame=collector_cfg.dedup_layers_per_frame,
+        fifo_layers_per_frame=collector_cfg.fifo_layers_per_frame,
         max_events_per_sequence=collector_cfg.max_events_per_sequence,
         num_layers=num_layers,
         max_fetch_errors=collector_cfg.max_fetch_errors,
@@ -1778,6 +1835,7 @@ def collect_oracle_shard_from_config(collector_cfg: FrontendOracleCollectorConfi
         oracle_layer_buckets=oracle_layer_buckets,
         oracle_layer_schedule_seed=collector_cfg.oracle_layer_schedule_seed,
         frame_buckets=frame_buckets,
+        selection_seed=collector_cfg.selection_seed,
     )
     shard = dict(base_shard)
     shard["events"] = events
@@ -1808,6 +1866,9 @@ def collect_oracle_events_from_loader(
     log_every_subsets: int = 1,
     subset_replay_batch_size: int = 1,
     layers_per_frame: int = 0,
+    eviction_layers_per_frame: int | None = None,
+    dedup_layers_per_frame: int | None = None,
+    fifo_layers_per_frame: int | None = None,
     max_events_per_sequence: int = 0,
     num_layers: int | None = None,
     max_fetch_errors: int = 256,
@@ -1831,6 +1892,7 @@ def collect_oracle_events_from_loader(
     oracle_layer_buckets: Sequence[Sequence[int]] | str | None = None,
     oracle_layer_schedule_seed: int = 0,
     frame_buckets: Sequence[Sequence[int]] | str | None = None,
+    selection_seed: int = 0,
 ) -> list[dict]:
     events: list[dict] = []
     max_batches_int = int(max_batches)
@@ -1914,6 +1976,9 @@ def collect_oracle_events_from_loader(
             log_every_subsets=log_every_subsets,
             subset_replay_batch_size=subset_replay_batch_size,
             layers_per_frame=layers_per_frame,
+            eviction_layers_per_frame=eviction_layers_per_frame,
+            dedup_layers_per_frame=dedup_layers_per_frame,
+            fifo_layers_per_frame=fifo_layers_per_frame,
             num_layers=num_layers,
             on_event_collected=on_event_collected,
             max_candidate_events_per_sequence=max_candidate_events_per_sequence,
@@ -1935,6 +2000,7 @@ def collect_oracle_events_from_loader(
             oracle_layer_buckets=oracle_layer_buckets,
             oracle_layer_schedule_seed=oracle_layer_schedule_seed,
             frame_buckets=frame_buckets,
+            selection_seed=int(selection_seed) + batch_idx * 1009,
         )
         for event in batch_events:
             if not any(event is collected for collected in collected_batch_events):
@@ -1960,6 +2026,7 @@ def _build_probe_diagnostics(
     fifo_events: list[dict],
     candidate_events: list[dict],
     filtered_total: int | None = None,
+    keyframe_event_counts: dict[str, int] | None = None,
 ) -> dict:
     """Build histogram diagnostics from probe events for probe-only mode."""
     def _histogram(items: list[dict], key: str, transform=None) -> dict[str, int]:
@@ -1975,6 +2042,7 @@ def _build_probe_diagnostics(
     for e in all_raw:
         et = e.get("event_type", "eviction")
         raw_et[et] = raw_et.get(et, 0) + 1
+    keyframe_counts = dict(sorted((keyframe_event_counts or {}).items()))
 
     return {
         "raw_event_type_counts": dict(sorted(raw_et.items())),
@@ -1986,7 +2054,28 @@ def _build_probe_diagnostics(
         "raw_total": len(all_raw),
         "filtered_total": filtered_total if filtered_total is not None else len(candidate_events),
         "selected_total": len(candidate_events),
+        "keyframe_event_counts": keyframe_counts,
+        "fifo_swap_count": sum(
+            int(count)
+            for event_type, count in keyframe_counts.items()
+            if "FIFO_SWAP" in str(event_type)
+        ),
     }
+
+
+def _keyframe_event_counts_from_outputs(outputs) -> dict[str, int] | None:
+    schedule = getattr(outputs, "keyframe_schedule", None)
+    if schedule is None:
+        return None
+    counts: dict[str, int] = {}
+    for item in schedule:
+        if isinstance(item, dict):
+            event_type = item.get("event_type", "unknown")
+        else:
+            event_type = getattr(item, "event_type", "unknown")
+        event_type = str(event_type)
+        counts[event_type] = counts.get(event_type, 0) + 1
+    return dict(sorted(counts.items()))
 
 
 @torch.inference_mode()
@@ -2005,6 +2094,9 @@ def collect_oracle_events_from_sequence(
     log_every_subsets: int = 1,
     subset_replay_batch_size: int = 1,
     layers_per_frame: int = 0,
+    eviction_layers_per_frame: int | None = None,
+    dedup_layers_per_frame: int | None = None,
+    fifo_layers_per_frame: int | None = None,
     num_layers: int | None = None,
     on_event_collected: Callable[[dict], None] | None = None,
     max_candidate_events_per_sequence: int | None = None,
@@ -2026,6 +2118,7 @@ def collect_oracle_events_from_sequence(
     oracle_layer_buckets: Sequence[Sequence[int]] | str | None = None,
     oracle_layer_schedule_seed: int = 0,
     frame_buckets: Sequence[Sequence[int]] | str | None = None,
+    selection_seed: int = 0,
 ) -> list[dict]:
     if max_events <= 0:
         return []
@@ -2033,6 +2126,9 @@ def collect_oracle_events_from_sequence(
     candidate_cap = int(max_candidate_events_per_sequence or max_events)
     if log_fn is not None:
         log_fn(f"{event_prefix}: running probe over {len(frames)} frames")
+    eviction_lpf = layers_per_frame if eviction_layers_per_frame is None else int(eviction_layers_per_frame)
+    dedup_lpf = layers_per_frame if dedup_layers_per_frame is None else int(dedup_layers_per_frame)
+    fifo_lpf = layers_per_frame if fifo_layers_per_frame is None else int(fifo_layers_per_frame)
     probe = CounterfactualEvictionProbe(
         num_samples=num_samples,
         oracle_window=oracle_window,
@@ -2040,7 +2136,7 @@ def collect_oracle_events_from_sequence(
         event_prefix=event_prefix,
         max_events=candidate_cap,
         sequence_provenance=sequence_provenance,
-        layers_per_frame=layers_per_frame,
+        layers_per_frame=eviction_lpf,
         num_layers=num_layers,
         layer_schedule=oracle_layer_schedule,
         layer_buckets=oracle_layer_buckets,
@@ -2054,7 +2150,7 @@ def collect_oracle_events_from_sequence(
         event_prefix=f"{event_prefix}_dedup",
         max_events=candidate_cap,
         sequence_provenance=sequence_provenance,
-        layers_per_frame=layers_per_frame,
+        layers_per_frame=dedup_lpf,
         num_layers=num_layers,
         voxel_size=0.25,
         max_subsets_per_dedup_event=max_subsets_per_dedup_event,
@@ -2069,7 +2165,7 @@ def collect_oracle_events_from_sequence(
         event_prefix=f"{event_prefix}_fifo",
         max_events=candidate_cap,
         sequence_provenance=sequence_provenance,
-        layers_per_frame=layers_per_frame,
+        layers_per_frame=fifo_lpf,
         num_layers=num_layers,
         count_candidates=fifo_count_candidates,
         max_subsets_per_fifo_event=max_subsets_per_fifo_event,
@@ -2078,12 +2174,13 @@ def collect_oracle_events_from_sequence(
         layer_schedule_seed=oracle_layer_schedule_seed,
     )
     probe_started = time.monotonic()
-    _run_frontend_with_probe(
+    probe_outputs = _run_frontend_with_probe(
         model, frames, probe, cache_results=False,
         dedup_probe=dedup_probe, fifo_probe=fifo_probe,
         **_oracle_anchor_kwargs(oracle_anchor_interval, oracle_max_anchors),
     )
     probe_elapsed = time.monotonic() - probe_started
+    keyframe_event_counts = _keyframe_event_counts_from_outputs(probe_outputs)
     candidate_events = [
         event
         for event in probe.events
@@ -2115,6 +2212,7 @@ def collect_oracle_events_from_sequence(
         event_type_quotas=event_type_quotas,
         quota_fill_remaining=quota_fill_remaining,
         frame_buckets=frame_buckets,
+        selection_seed=selection_seed,
     )
     if log_fn is not None:
         log_fn(
@@ -2122,6 +2220,18 @@ def collect_oracle_events_from_sequence(
             f"{len(dedup_probe.events)} dedup, {len(fifo_probe.events)} fifo candidates, "
             f"{len(candidate_events)} total have future frames"
         )
+        if keyframe_event_counts is None:
+            log_fn(f"{event_prefix}: keyframe_schedule unavailable; cannot diagnose FIFO_SWAP count")
+        else:
+            fifo_swap_count = sum(
+                int(count)
+                for event_type, count in keyframe_event_counts.items()
+                if "FIFO_SWAP" in str(event_type)
+            )
+            log_fn(
+                f"{event_prefix}: keyframe events {json.dumps(keyframe_event_counts, sort_keys=True)} "
+                f"fifo_swap_count={fifo_swap_count}"
+            )
         log_fn(
             "timing phase=probe "
             f"event_prefix={event_prefix} frames={len(frames)} "
@@ -2137,6 +2247,7 @@ def collect_oracle_events_from_sequence(
             fifo_events=fifo_probe.events,
             candidate_events=candidate_events,
             filtered_total=filtered_event_count,
+            keyframe_event_counts=keyframe_event_counts,
         )
         if log_fn is not None:
             log_fn(
@@ -2303,6 +2414,15 @@ def _copy_subset_metadata(subset: dict) -> dict:
     return copied
 
 
+def _make_replay_probe_for_event(event: dict, keep_indices: torch.Tensor):
+    event_type = str(event.get("event_type", "eviction"))
+    if event_type == "dedup":
+        return ReplayDedupKeepSetProbe(event, keep_indices), "dedup_replay_probe"
+    if event_type == "fifo_topk":
+        return ReplayFifoTopKKeepSetProbe(event, keep_indices), "fifo_probe"
+    return ReplayKeepSetProbe(event, keep_indices), "eviction_probe"
+
+
 @torch.inference_mode()
 def measure_counterfactual_event(
     model,
@@ -2369,19 +2489,23 @@ def measure_counterfactual_event(
                 log_fn(
                     f"{event.get('event_id', '<unknown>')}: replay subset "
                     f"{subset_idx + 1}/{len(subsets)} frames=0:{stop}"
-                )
+            )
             keep_indices = torch.as_tensor(subset["keep_indices"], dtype=torch.long)
-            if event_type == "dedup":
-                replay_probe = ReplayDedupKeepSetProbe(event, keep_indices)
-                replay_started = time.monotonic()
+            replay_probe, probe_role = _make_replay_probe_for_event(event, keep_indices)
+            replay_started = time.monotonic()
+            if probe_role == "dedup_replay_probe":
                 outputs = _run_frontend_with_probe(
                     model, frames[:stop], None, cache_results=True,
                     dedup_replay_probe=replay_probe,
                     **_oracle_anchor_kwargs(oracle_anchor_interval, oracle_max_anchors),
                 )
+            elif probe_role == "fifo_probe":
+                outputs = _run_frontend_with_probe(
+                    model, frames[:stop], None, cache_results=True,
+                    fifo_probe=replay_probe,
+                    **_oracle_anchor_kwargs(oracle_anchor_interval, oracle_max_anchors),
+                )
             else:
-                replay_probe = ReplayKeepSetProbe(event, keep_indices)
-                replay_started = time.monotonic()
                 outputs = _run_frontend_with_probe(
                     model, frames[:stop], replay_probe, cache_results=True,
                     **_oracle_anchor_kwargs(oracle_anchor_interval, oracle_max_anchors),
@@ -2592,15 +2716,20 @@ def measure_counterfactual_subset_serial(
                 f"{subset_idx + 1}/{total} frames=0:{stop}"
             )
         keep_indices = torch.as_tensor(subset["keep_indices"], dtype=torch.long)
-        if event_type == "dedup":
-            replay_probe = ReplayDedupKeepSetProbe(event, keep_indices)
+        replay_probe, probe_role = _make_replay_probe_for_event(event, keep_indices)
+        if probe_role == "dedup_replay_probe":
             outputs = _run_frontend_with_probe(
                 model, frames[:stop], None, cache_results=True,
                 dedup_replay_probe=replay_probe,
                 **_oracle_anchor_kwargs(oracle_anchor_interval, oracle_max_anchors),
             )
+        elif probe_role == "fifo_probe":
+            outputs = _run_frontend_with_probe(
+                model, frames[:stop], None, cache_results=True,
+                fifo_probe=replay_probe,
+                **_oracle_anchor_kwargs(oracle_anchor_interval, oracle_max_anchors),
+            )
         else:
-            replay_probe = ReplayKeepSetProbe(event, keep_indices)
             outputs = _run_frontend_with_probe(
                 model, frames[:stop], replay_probe, cache_results=True,
                 **_oracle_anchor_kwargs(oracle_anchor_interval, oracle_max_anchors),

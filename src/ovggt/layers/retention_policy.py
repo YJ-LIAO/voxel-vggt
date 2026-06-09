@@ -328,12 +328,28 @@ def build_token_scorer_state_from_joint(
     """Export token scorer weights from a ``JointRetentionPolicy``.
 
     Maps the shared encoder + ranking head into the flat key layout expected
-    by ``TokenScorer`` at runtime:
+    by ``TokenScorer(depth=2)`` at runtime:
+
+    ``TokenScorer(depth=2)`` Sequential layout::
+
+        [0] LayerNorm(input_dim)
+        [1] Linear(input_dim, hidden_dim)
+        [2] GELU
+        [3] Linear(hidden_dim, hidden_dim)   # extra hidden layer
+        [4] GELU
+        [5] Linear(hidden_dim, 1)            # output layer
+
+    Key mapping:
 
     - ``encoder.layer_embed.weight``  -> ``layer_embed.weight``
     - ``encoder.norm.weight/bias``    -> ``scorer.0.weight/bias``  (LayerNorm)
     - ``encoder.proj.weight/bias``    -> ``scorer.1.weight/bias``  (Linear)
-    - ``token_head.out.weight/bias``  -> ``scorer.3.weight/bias``  (Linear, skips GELU at index 2)
+    - identity matrix                 -> ``scorer.3.weight/bias``  (hidden Linear, passthrough)
+    - ``token_head.out.weight/bias``  -> ``scorer.5.weight/bias``  (output Linear)
+
+    The joint model has no hidden layer (it uses depth=1 effectively), so
+    ``scorer.3`` is initialised as an identity transform (eye weights, zero
+    bias) that passes activations through unchanged.
 
     Parameters
     ----------
@@ -355,14 +371,21 @@ def build_token_scorer_state_from_joint(
             f"runtime expected_hidden_dim={expected_hidden_dim}. "
             f"Export would produce incompatible checkpoint."
         )
+    # Identity passthrough for the hidden layer at scorer.3 (depth=2).
+    # After GELU, an identity Linear followed by another GELU is not exactly
+    # a no-op, but this is the best we can do without a trained hidden layer.
+    hidden_passthrough_weight = torch.eye(actual_hidden)
+    hidden_passthrough_bias = torch.zeros(actual_hidden)
     return {
         "layer_embed.weight": joint.encoder.layer_embed.weight.detach().cpu().clone(),
         "scorer.0.weight": joint.encoder.norm.weight.detach().cpu().clone(),
         "scorer.0.bias": joint.encoder.norm.bias.detach().cpu().clone(),
         "scorer.1.weight": joint.encoder.proj.weight.detach().cpu().clone(),
         "scorer.1.bias": joint.encoder.proj.bias.detach().cpu().clone(),
-        "scorer.3.weight": joint.token_head.out.weight.detach().cpu().clone(),
-        "scorer.3.bias": joint.token_head.out.bias.detach().cpu().clone(),
+        "scorer.3.weight": hidden_passthrough_weight,
+        "scorer.3.bias": hidden_passthrough_bias,
+        "scorer.5.weight": joint.token_head.out.weight.detach().cpu().clone(),
+        "scorer.5.bias": joint.token_head.out.bias.detach().cpu().clone(),
     }
 
 

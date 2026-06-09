@@ -239,9 +239,11 @@ class CounterfactualOracleDataset(Dataset):
                             continue
                         candidate_pairs.append((better_subset, worse_subset))
         else:
-            # Default "any" mode: all pairwise combinations
-            for better_subset in subsets:
-                for worse_subset in subsets:
+            # Default "any" mode: all pairwise combinations (skip self-pairs)
+            for i, better_subset in enumerate(subsets):
+                for j, worse_subset in enumerate(subsets):
+                    if i == j:
+                        continue
                     candidate_pairs.append((better_subset, worse_subset))
 
         # Phase 1: filter to valid pairs (margin > 0 and >= min_loss_gap)
@@ -732,12 +734,16 @@ def token_oracle_ranking_loss(
     )
     loss = pairwise + regression_weight * regression
     score_diff = better_score - worse_score
-    return loss, {
+    details = {
         "pairwise": float(pairwise.detach().cpu().item()),
         "regression": float(regression.detach().cpu().item()),
         "rank_acc": float((score_diff > 0).to(dtype=torch.float32).mean().detach().cpu().item()),
         "mean_score_diff": float(score_diff.mean().detach().cpu().item()),
     }
+    if score_mode == "delta_mean":
+        delta_fallback_count = int(((better_only_count == 0) | (worse_only_count == 0)).sum().item())
+        details["delta_fallback_count"] = delta_fallback_count
+    return loss, details
 
 
 def _subset_score(

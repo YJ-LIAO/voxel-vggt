@@ -1,21 +1,21 @@
 # Counterfactual-retention TokenScorer training.
+#
+# Phase 2 diverse shards: fifo_topk + dedup + eviction across 501 sequences.
 
 oracle_shards:
-  - /path/to/mount/lyj/voxel-vggt/checkpoints/token_oracle/oracle_shard_000.pt
+  - /path/to/mount/lyj/voxel-vggt/checkpoints/token_oracle_phase2/phase2_diverse_shard_gpu0_s0.pt
+  - /path/to/mount/lyj/voxel-vggt/checkpoints/token_oracle_phase2/phase2_diverse_shard_gpu1_s1.pt
+  - /path/to/mount/lyj/voxel-vggt/checkpoints/token_oracle_phase2/phase2_diverse_shard_gpu2_s2.pt
+  - /path/to/mount/lyj/voxel-vggt/checkpoints/token_oracle_phase2/phase2_diverse_shard_gpu3_s3.pt
 
-output: /path/to/mount/lyj/voxel-vggt/checkpoints/token_scorer_oracle/token_scorer.pt
+output: /path/to/mount/lyj/voxel-vggt/checkpoints/token_scorer_oracle/token_scorer_phase2.pt
 score_state_proj_checkpoint: null
 
 score_state_dim: 128
 hidden_dim: 256
 num_layers: 24
 batch_size: 64
-epochs: 5
+epochs: 10
 lr: 1e-4
 regression_weight: 0.1
 min_loss_gap: 0.01
-
-task_weights:
-  camera: 20.0
-  depth: 20.0
-  point_map: 10.0

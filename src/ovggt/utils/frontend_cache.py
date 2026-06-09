@@ -464,8 +464,9 @@ class LayerCacheState:
             demoted_indices_by_batch[b_idx] = indices
 
         # 2. Fire probe BEFORE any metadata mutation (even if keep_count=0)
+        keep_indices_override = None
         if fifo_probe is not None:
-            fifo_probe.on_fifo_topk_candidate(
+            keep_indices_override = fifo_probe.on_fifo_topk_candidate(
                 cache_state=self,
                 demoted_slot=demoted_slot,
                 keep_count=keep_count,
@@ -474,6 +475,29 @@ class LayerCacheState:
                 batch_index=batch_index,
                 demoted_indices_by_batch=demoted_indices_by_batch,
             )
+
+        if keep_indices_override is not None:
+            keep_indices_override = torch.as_tensor(
+                keep_indices_override,
+                dtype=torch.long,
+                device=self.metadata.anchor_slot.device,
+            ).reshape(-1)
+            if keep_indices_override.numel() == 0:
+                return
+            max_idx = self.num_tokens() - 1
+            if max_idx >= 0:
+                keep_indices_override = keep_indices_override.clamp(0, max_idx)
+                keep_indices_override = torch.unique(keep_indices_override, sorted=True)
+            for b_idx, indices in demoted_indices_by_batch.items():
+                if indices.numel() <= 0:
+                    continue
+                keep_mask = torch.isin(indices, keep_indices_override)
+                top_indices = indices[keep_mask]
+                if top_indices.numel() > 0:
+                    self.metadata.anchor_slot[b_idx, top_indices] = 0
+            self._cached_protected_count = self._compute_protected_count_raw()
+            self.protected_count = self._cached_protected_count
+            return
 
         # 3. Now guard: if keep_count <= 0, skip token reassignment
         if keep_count <= 0:

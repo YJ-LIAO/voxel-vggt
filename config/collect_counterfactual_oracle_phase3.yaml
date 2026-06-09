@@ -1,12 +1,13 @@
-# Counterfactual eviction oracle collection.
+# Phase 3: Sequence-balanced high-margin oracle collection.
 #
-# The dataset/checkpoint defaults come from train_frontend_finetune.yaml. This
-# file documents the production command defaults used by
-# tools/collect_counterfactual_oracle.py.
+# Changes from Phase 2:
+# - eviction quota 4->8 (Phase 2 only produced 177 eviction per shard, vs 1024 fifo_topk)
+# - max_events_per_sequence 16->24 (more events per sequence for better balance)
+# - dedup_layers_per_frame 0->2 (sample dedup at more layers for margin diversity)
 
 frontend_config: /path/to/mount/lyj/voxel-vggt/config/train_frontend_finetune.yaml
 dataset_key: train_dataset
-output: /path/to/mount/lyj/voxel-vggt/checkpoints/token_oracle/oracle_shard_000.pt
+output: /path/to/mount/lyj/voxel-vggt/checkpoints/token_oracle_phase3/phase3_shard_gpu0_s0.pt
 
 device: cuda
 batch_size: 1
@@ -19,15 +20,15 @@ max_subsets_per_dedup_event: 8
 max_subsets_per_eviction_event: 8
 max_subsets_per_fifo_event: 8
 max_candidate_events_per_sequence: 256
-max_events_per_sequence: 16
-max_events_per_frame: 6
+max_events_per_sequence: 24
+max_events_per_frame: 8
 layers_per_frame: 2
 eviction_layers_per_frame: 2
-dedup_layers_per_frame: 0
+dedup_layers_per_frame: 2
 fifo_layers_per_frame: 4
 event_selection_policy: quota_stratified
 event_type_quotas:
-  eviction: 4
+  eviction: 8
   dedup: 8
   fifo_topk: 8
 quota_fill_remaining: true
@@ -47,10 +48,9 @@ oracle_layer_schedule_seed: 0
 frame_buckets: [[0, 3], [4, 8], [9, 15], [16, 23]]
 selection_seed: 0
 
-# Fifo topk profile settings (used when oracle_profile=fifo_topk)
 fifo_keep_topk_override: 80
 fifo_count_candidates_for_oracle: [0, 8, 16, 32, 64, 128]
-frontend_per_layer_budget_override: 2500  # per-layer
+frontend_per_layer_budget_override: 2500
 
 student_checkpoint: null
 teacher_checkpoint: null
