@@ -279,8 +279,6 @@ def _print_score_projection_state(shard_paths: Sequence[str | Path]) -> None:
                             if k.startswith("aggregator.score_state_projs.")}
                 key_count = len(filtered)
                 has_projection = key_count > 0
-            # Also count top-level keys for diagnostic
-            total_keys = len(shard.keys()) if isinstance(shard, dict) else 0
         print(
             f"  shard={shard_path} "
             f"has_projection={has_projection} "
