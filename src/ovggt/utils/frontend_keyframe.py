@@ -154,8 +154,16 @@ class FrontendKeyframeManager:
             )
             event_type = KeyframeEventType.PROMOTE_KEYFRAME
             demoted_slot = None
+            demoted_record = None
         else:
             demoted_slot = 1
+            # Capture the demoted (oldest) keyframe's pose BEFORE history_slots is
+            # renumbered, so we can retain its transform for tokens still referencing
+            # it (e.g. tokens rescued by protect_topk_on_demotion_). Without this,
+            # FIFO_SWAP drops the demoted keyframe from slot_to_active, and any token
+            # whose slot_id still points to it falls back to an identity transform in
+            # _project_slot_local_xyz_to_active (P5: identity-fallback projection bug).
+            demoted_record = dict(self.history_slots[0]) if self.history_slots else None
             remaining_slots = self.history_slots[1:]
             reorder_indices = torch.tensor(
                 [0] + [slot["anchor_slot"] for slot in remaining_slots] + [-1],
@@ -186,6 +194,16 @@ class FrontendKeyframeManager:
         self.latest_anchor_depth = depth.clone()
         self.latest_anchor_pose = pose_abs_enc.clone()
 
+        slot_pose_updates = self._build_slot_pose_updates(current_local_to_world)
+        # P5 fix: retain the demoted keyframe's transform, recomputed for the new
+        # active frame, so tokens still referencing it (slot_id == demoted keyframe)
+        # project correctly instead of falling back to identity.
+        if demoted_record is not None:
+            demoted_kf_id = int(demoted_record["keyframe_id"])
+            demoted_l2w = demoted_record["local_to_world"]
+            world_to_active = closed_form_inverse_se3(current_local_to_world.unsqueeze(0))[0]
+            slot_pose_updates[demoted_kf_id] = world_to_active @ demoted_l2w
+
         return KeyframeEvent(
             event_type=event_type,
             frame_idx=frame_idx,
@@ -194,7 +212,7 @@ class FrontendKeyframeManager:
             reorder_indices=reorder_indices,
             demoted_slot=demoted_slot,
             num_anchor_frames=self.get_num_anchor_frames(),
-            slot_pose_updates=self._build_slot_pose_updates(current_local_to_world),
+            slot_pose_updates=slot_pose_updates,
             local_to_world=current_local_to_world,
             active_pose_encoding=pose_abs_enc.clone(),
         )

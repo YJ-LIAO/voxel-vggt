@@ -838,6 +838,13 @@ class OVGGT(nn.Module, PyTorchModelHubMixin):
                                 current_frame_id=i,
                                 fifo_probe=getattr(self, "_oracle_fifo_probe", None),
                                 batch_index=b,
+                                cache_budget=self.per_layer_budget,
+                                max_protected=(
+                                    int(self.frontend_cache_config.max_protected_ratio
+                                        * self.per_layer_budget)
+                                    if self.frontend_cache_config.max_protected_ratio < 1.0
+                                    else None
+                                ),
                             )
                     cache_states[b][layer_idx].apply_keyframe_event_(events[b])
                     if (

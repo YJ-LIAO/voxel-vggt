@@ -17,6 +17,23 @@ _SCORER_FRAME_AGE_SCALE = 128.0
 _SCORER_ID_SCALE = 64.0
 
 
+def voxel_hash_collision_free(voxels: Tensor) -> Tensor:
+    """Collision-free hash of integer voxel coordinates to 1D ids.
+
+    P4 fix: the previous `x + 1000y + 1000000z` linear hash collides for
+    |voxel| >= 1000 (scene scale >= 100m at voxel_size=0.1). This offset-based
+    scheme is collision-free over the full int64 range: each coord is shifted to
+    non-negative and packed into disjoint bit ranges. With 21 bits per axis it
+    covers ±~1M voxels per axis (~100km at voxel_size=0.1), far beyond any scene.
+    """
+    voxels = voxels.to(torch.long)
+    OFFSET = 1 << 20  # shift negatives into non-negative range (±1M range)
+    shifted = voxels + OFFSET
+    packed = (shifted[:, 0] << 42) | (shifted[:, 1] << 21) | shifted[:, 2]
+    # pack into int64 stays unique because each 21-bit field is disjoint.
+    return packed
+
+
 class TokenKind(IntEnum):
     CAMERA = 0
     REGISTER = 1
@@ -40,6 +57,10 @@ class FrontendCacheConfig:
     budget_allocation: Literal["dynamic", "uniform"] = "dynamic"
     learned_fifo_keep_count: bool = False
     fifo_count_candidates: tuple = (0, 8, 16, 32, 64, 128)
+    # P1 fix: cap the FIFO-protected slot-0 tokens so they cannot accumulate
+    # unboundedly across swaps. max_protected_ratio * cache_budget = ceiling on
+    # slot-0 count. Default 1.0 disables the cap (backward compatible).
+    max_protected_ratio: float = 1.0
 
 
 @dataclass
@@ -437,7 +458,9 @@ class LayerCacheState:
     def protect_topk_on_demotion_(self, demoted_slot: int, keep_count: int,
                                     token_scorer=None, layer_id: int = 0,
                                     current_frame_id: int | None = None,
-                                    fifo_probe=None, batch_index: int = 0) -> None:
+                                    fifo_probe=None, batch_index: int = 0,
+                                    cache_budget: int | None = None,
+                                    max_protected: int | None = None) -> None:
         """Before FIFO_SWAP demotion, reassign top-K tokens from the demoted
         anchor to slot 0 (global anchor) so they survive eviction.
 
@@ -448,6 +471,11 @@ class LayerCacheState:
         the original demoted-slot token set.  keep_count=0 is recorded by the
         probe while never mutating anchor_slot.  keep_count >= demoted_token_count
         protects all demoted-slot tokens.
+
+        v4 (P1 fix): if max_protected is provided, cap keep_count so the slot-0
+        (FIFO-protected) token count never exceeds it. Without this cap, slot 0
+        accumulates fifo_keep_topk tokens per swap indefinitely and can starve
+        eviction (P1: permanent protection accumulation).
         """
         if self.metadata is None or self.num_tokens() == 0:
             return
@@ -502,6 +530,21 @@ class LayerCacheState:
         # 3. Now guard: if keep_count <= 0, skip token reassignment
         if keep_count <= 0:
             return
+
+        # 3.5 (P1 fix): cap keep_count so the FIFO-protected slot-0 token count
+        # does not exceed max_protected. slot 0 is the permanently-protected region
+        # that accumulates fifo_keep_topk tokens per swap; without a cap it grows
+        # unboundedly and starves eviction.
+        if max_protected is not None and self.metadata is not None:
+            try:
+                slot0_count = int((self.metadata.anchor_slot[0] == 0).sum().item())
+            except Exception:
+                slot0_count = 0
+            available = max(0, int(max_protected) - slot0_count)
+            if keep_count > available:
+                keep_count = available
+            if keep_count <= 0:
+                return
 
         # 4. Per batch: clamp count and protect tokens
         for b_idx, indices in demoted_indices_by_batch.items():
@@ -932,7 +975,7 @@ class LayerCacheState:
             protected_scores = scores[protected_patch_indices]
 
             # Map voxel key → best protected score using scatter
-            voxel_hash = (protected_voxels * torch.tensor([1, 1000, 1000000], device=device, dtype=torch.long)).sum(-1)
+            voxel_hash = voxel_hash_collision_free(protected_voxels)
             unique_vhash, inv = torch.unique(voxel_hash, return_inverse=True)
             num_v = unique_vhash.shape[0]
             # Initialize with -inf so any real score wins
@@ -940,7 +983,7 @@ class LayerCacheState:
             best_protected.scatter_reduce_(0, inv, protected_scores, reduce='amax', include_self=True)
 
             # For each current token, check if it conflicts with a protected voxel
-            current_voxel_hash = (current_patch_voxels * torch.tensor([1, 1000, 1000000], device=device, dtype=torch.long)).sum(-1)
+            current_voxel_hash = voxel_hash_collision_free(current_patch_voxels)
             protected_conflict_mask = torch.zeros(current_patch_indices.shape[0], dtype=torch.bool, device=device)
             discard_current_mask = torch.zeros(current_patch_indices.shape[0], dtype=torch.bool, device=device)
 
@@ -1109,6 +1152,31 @@ class LayerCacheState:
             )
 
         importance_scores, num_new_tokens = self._current_frame_importance(pending_update.frame_id)
+
+        # P6 invariant guard (protects the P3-verified ordering): eviction()'s hybrid
+        # path assumes the LAST num_new_tokens candidate positions are the current-frame
+        # tokens. append_ -> reorder_by_anchor_slots_ -> apply_voxel_dedup_ preserves
+        # this by always returning survivors in ascending positional order. If a future
+        # refactor breaks that ordering, this assert catches it before silent eviction
+        # misalignment. Only checked when hybrid scoring will be used.
+        if (importance_scores is not None and num_new_tokens > 0
+                and self.metadata is not None and self.k is not None):
+            total_tokens = self.k.shape[2]
+            num_candidates = total_tokens - self.protected_count
+            num_old_candidates = num_candidates - num_new_tokens
+            if num_old_candidates >= 0 and num_new_tokens > 0:
+                tail_start = self.protected_count + num_old_candidates
+                tail_frame_ids = self.metadata.frame_id[0, tail_start:total_tokens]
+                expected_frame = int(pending_update.frame_id)
+                if not bool((tail_frame_ids == expected_frame).all().item()):
+                    n_mismatch = int((tail_frame_ids != expected_frame).sum().item())
+                    raise AssertionError(
+                        f"P6 invariant violated: candidate tail (positions {tail_start}:"
+                        f"{total_tokens}) should all be frame {expected_frame} but "
+                        f"{n_mismatch}/{num_new_tokens} differ. Eviction would misalign "
+                        f"importance scores. Check reorder/dedup ordering."
+                    )
+
         final_k, final_v, avg_score, kept_indices = attn_module.eviction(
             self.k,
             self.v,
