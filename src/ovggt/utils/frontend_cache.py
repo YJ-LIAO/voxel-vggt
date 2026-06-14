@@ -61,6 +61,23 @@ class FrontendCacheConfig:
     # unboundedly across swaps. max_protected_ratio * cache_budget = ceiling on
     # slot-0 count. Default 1.0 disables the cap (backward compatible).
     max_protected_ratio: float = 1.0
+    # P1 v2 (mechanism C): FIFO rescued-token pool capacity as a ratio of
+    # per_layer_budget. Caps the non-global rescued slot-0 tokens; when a
+    # FIFO_SWAP would exceed it, the oldest keyframe's rescued tokens are
+    # revoked (by keyframe_id, argsort-stable) before protecting new ones.
+    # 0.0 = disabled (backward compat, falls back to v1 max_protected behavior).
+    fifo_protected_ring_ratio: float = 0.0
+
+    def __post_init__(self):
+        # pass-5 #4: ring and v1 max_protected are mutually exclusive — both
+        # clamp the same keep_count in sequence, which is confusing. Enforce at
+        # config construction so a conflicting setup fails fast.
+        if self.fifo_protected_ring_ratio > 0.0 and self.max_protected_ratio < 1.0:
+            raise ValueError(
+                "fifo_protected_ring_ratio 和 max_protected_ratio 互斥 (两者顺序作用同一 keep_count 会混淆)。"
+                "启用 ring 时保持 max_protected_ratio=1.0 (默认, cap 禁用)。"
+            )
+
 
 
 @dataclass
@@ -195,6 +212,10 @@ class LayerCacheState:
     slot_to_active: Optional[Dict[int, Tensor]] = None
     needs_reorder_: bool = False
     _cached_protected_count: int = 0  # cache for _compute_protected_count, updated at mutation points
+    # pass-2 #6: declared field (not a runtime attribute) — set by ring revoke
+    # in protect_topk_on_demotion_, read+reset by commit_pending_update_ to force
+    # a reorder that relocates revoked tokens out of the protected region.
+    _needs_reorder_after_revoke: bool = False
 
     def as_past_key_values(self):
         if self.k is None or self.v is None:
@@ -460,7 +481,9 @@ class LayerCacheState:
                                     current_frame_id: int | None = None,
                                     fifo_probe=None, batch_index: int = 0,
                                     cache_budget: int | None = None,
-                                    max_protected: int | None = None) -> None:
+                                    max_protected: int | None = None,
+                                    fifo_ring_capacity: int | None = None,
+                                    global_anchor_keyframe_id: int | None = None) -> None:
         """Before FIFO_SWAP demotion, reassign top-K tokens from the demoted
         anchor to slot 0 (global anchor) so they survive eviction.
 
@@ -491,6 +514,43 @@ class LayerCacheState:
             indices = torch.nonzero(slot_mask, as_tuple=False).squeeze(-1)
             demoted_indices_by_batch[b_idx] = indices
 
+        # 2.5 (P1 mechanism C): if the FIFO rescued pool is enabled and the new
+        # protection would exceed its capacity, compute a revoke plan for the
+        # oldest non-global rescued tokens. The plan is computed here (before the
+        # probe) but applied after (step 3.5), so the probe still observes the
+        # original demoted-slot candidate set and the override early-return cannot
+        # bypass the revoke.
+        revoke_by_batch: dict[int, Tensor] = {}
+        keep_count_by_batch: dict[int, int] = {}
+        if fifo_ring_capacity is not None and fifo_ring_capacity > 0:
+            gaid = int(global_anchor_keyframe_id) if global_anchor_keyframe_id is not None else -1
+            for b_idx in range(self.metadata.anchor_slot.shape[0]):
+                requested_keep_count = int(keep_count)  # batch-local; don't reuse a clamped value across batches
+                slot0_mask = self.metadata.anchor_slot[b_idx] == 0
+                slot0_indices = torch.nonzero(slot0_mask, as_tuple=False).squeeze(-1)
+                slot0_kf_ids = self.metadata.keyframe_id[b_idx, slot0_indices]
+                rotatable = slot0_kf_ids != gaid  # global anchor never rotates
+                rot_idx = slot0_indices[rotatable]
+                rot_kf = slot0_kf_ids[rotatable]
+                if rot_idx.numel() + requested_keep_count <= fifo_ring_capacity:
+                    keep_count_by_batch[b_idx] = requested_keep_count
+                    continue  # under cap, no revoke needed
+                overflow = (rot_idx.numel() + requested_keep_count) - fifo_ring_capacity
+                k = 0
+                if rot_idx.numel() > 0:
+                    k = min(overflow, rot_idx.numel())
+                    # deterministic tie-break: oldest keyframe first (argsort ascending),
+                    # same keyframe_id broken by original position (stable sort).
+                    order = torch.argsort(rot_kf, stable=True)
+                    revoke_by_batch[b_idx] = rot_idx[order[:k]]
+                # pass-3 #1: clamp keep_count to the room remaining after revoke,
+                # regardless of whether revoke fully covered the overflow.
+                remaining_after_revoke = rot_idx.numel() - k
+                keep_count_by_batch[b_idx] = min(
+                    requested_keep_count,
+                    max(0, fifo_ring_capacity - remaining_after_revoke),
+                )
+
         # 2. Fire probe BEFORE any metadata mutation (even if keep_count=0)
         keep_indices_override = None
         if fifo_probe is not None:
@@ -503,6 +563,17 @@ class LayerCacheState:
                 batch_index=batch_index,
                 demoted_indices_by_batch=demoted_indices_by_batch,
             )
+
+        # 3.5 (P1 mechanism C): apply the revoke plan regardless of whether the
+        # probe overrode the keep set — the override early-return must not bypass
+        # the pool-capacity revoke.
+        for b_idx, revoke_indices in revoke_by_batch.items():
+            if revoke_indices.numel() > 0:
+                self.metadata.anchor_slot[b_idx, revoke_indices] = -1
+                self._needs_reorder_after_revoke = True
+        if revoke_by_batch:
+            self._cached_protected_count = self._compute_protected_count_raw()
+            self.protected_count = self._cached_protected_count
 
         if keep_indices_override is not None:
             keep_indices_override = torch.as_tensor(
@@ -548,7 +619,10 @@ class LayerCacheState:
 
         # 4. Per batch: clamp count and protect tokens
         for b_idx, indices in demoted_indices_by_batch.items():
-            effective_keep_count = min(max(int(keep_count), 0), int(indices.numel()))
+            # pass-5 #1: honor the per-batch keep_count clamped by the ring (step 2.5).
+            # B=1 (frontend) collapses to the single value; B>1 keeps batches independent.
+            batch_keep = keep_count_by_batch.get(b_idx, keep_count) if keep_count_by_batch else keep_count
+            effective_keep_count = min(max(int(batch_keep), 0), int(indices.numel()))
             if effective_keep_count <= 0:
                 continue
             if effective_keep_count == int(indices.numel()):
@@ -1106,8 +1180,12 @@ class LayerCacheState:
                 metadata_current = metadata_current.index_select(top_indices)
 
         self.append_(k_current, v_current, metadata_current, score_state_new=score_state_current)
-        if metadata_current.has_anchor_tokens():
+        # pass-1 #3: force reorder when the ring revoked tokens (their anchor_slot
+        # changed but they're still positioned in the protected region), so the
+        # subsequent eviction binary split is correct.
+        if metadata_current.has_anchor_tokens() or self._needs_reorder_after_revoke:
             self.reorder_by_anchor_slots_()
+            self._needs_reorder_after_revoke = False
         self.apply_voxel_dedup_(config, current_frame_id=pending_update.frame_id,
                                 token_scorer=token_scorer, layer_id=layer_id,
                                 dedup_probe=dedup_probe, batch_index=batch_index,

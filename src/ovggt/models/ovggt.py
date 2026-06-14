@@ -845,6 +845,17 @@ class OVGGT(nn.Module, PyTorchModelHubMixin):
                                     if self.frontend_cache_config.max_protected_ratio < 1.0
                                     else None
                                 ),
+                                fifo_ring_capacity=(
+                                    int(self.frontend_cache_config.fifo_protected_ring_ratio
+                                        * self.per_layer_budget)
+                                    if self.frontend_cache_config.fifo_protected_ring_ratio > 0.0
+                                    else None
+                                ),
+                                global_anchor_keyframe_id=(
+                                    keyframe_managers[b].global_anchor["keyframe_id"]
+                                    if keyframe_managers[b].global_anchor is not None
+                                    else 0
+                                ),
                             )
                     cache_states[b][layer_idx].apply_keyframe_event_(events[b])
                     if (
