@@ -811,7 +811,7 @@ class LayerCacheState:
 
         # ========== 阶段2.5：计算 policy_keep_indices（在 probe callback 之前） ==========
         if B == 1:
-            policy_keep_indices = self._dedup_single_batch(
+            policy_keep_indices, merge_plan_b0 = self._dedup_single_batch(
                 b_idx=0,
                 protected_patch_mask=protected_patch_mask[0],
                 current_patch_mask=current_patch_mask[0],
@@ -857,6 +857,8 @@ class LayerCacheState:
                 return
 
         if B == 1:
+            if merge_plan_b0 is not None:
+                self._apply_intra_merge_(0, merge_plan_b0)
             self._gather_single_batch_(policy_keep_indices)
             return
 
@@ -864,7 +866,7 @@ class LayerCacheState:
         kept_per_batch = []
 
         for b_idx in range(B):
-            keep_mask_b = self._dedup_single_batch(
+            keep_mask_b, merge_plan_b = self._dedup_single_batch(
                 b_idx=b_idx,
                 protected_patch_mask=protected_patch_mask[b_idx],
                 current_patch_mask=current_patch_mask[b_idx],
@@ -873,6 +875,8 @@ class LayerCacheState:
                 total_tokens=N,
                 projected_xyz=projected_xyz[b_idx],
             )
+            if merge_plan_b is not None:
+                self._apply_intra_merge_(b_idx, merge_plan_b)
             kept_per_batch.append(keep_mask_b)
 
         # ========== 阶段4：使用gather_per_batch_处理不同数量的token ==========
@@ -1115,6 +1119,7 @@ class LayerCacheState:
             discard_current_mask = torch.zeros_like(current_group_ids, dtype=torch.bool)
 
         # 帧内去重：保留每个体素中评分最高的token
+        merge_plan = None
         if config.intra_frame_dedup_enabled:
             # Only exclude tokens that were actually discarded, not all conflicting ones
             survivor_mask = ~discard_current_mask if protected_patch_indices.numel() > 0 else torch.ones(current_patch_indices.shape[0], dtype=torch.bool, device=device)
@@ -1138,7 +1143,78 @@ class LayerCacheState:
                 if duplicate_indices.numel() > 0:
                     keep_mask[duplicate_indices] = False
 
-        return torch.nonzero(keep_mask, as_tuple=False).squeeze(-1)
+                # soft-merge plan: for each multi-member voxel group, record the
+                # representative (highest-score survivor) + all members + softmax
+                # weights, so apply_voxel_dedup_ can weighted-avg their K/V before
+                # gather. Token COUNT is unchanged (= unique voxels); only VALUES differ.
+                if config.intra_dedup_mode == "merge" and ordered_group_ids.numel() > 1:
+                    group_starts = torch.nonzero(keep_first, as_tuple=False).squeeze(-1)  # [Gt]
+                    Gt = group_starts.numel()
+                    ends = torch.cat([group_starts[1:],
+                                      torch.tensor([ordered_group_ids.numel()], device=device, dtype=group_starts.dtype)])
+                    counts = ends - group_starts  # [Gt] members per group
+                    multi = counts > 1
+                    if multi.any():
+                        ms = group_starts[multi]               # [G] start pos per multi group
+                        mc = counts[multi]                     # [G] member count per multi group
+                        G = mc.numel()
+                        rep_indices = survivor_indices[final_order[ms]]  # [G] global token idx
+                        maxc = int(mc.max().item())
+                        offs = torch.arange(maxc, device=device).unsqueeze(0)      # [1, maxc]
+                        pos = ms.unsqueeze(1) + offs                              # [G, maxc]
+                        mmask = offs < mc.unsqueeze(1)                           # [G, maxc]
+                        pos_flat = pos[mmask]                                     # [M] final_order positions
+                        member_indices = survivor_indices[final_order[pos_flat]]  # [M] global
+                        member_scores = survivor_scores[final_order[pos_flat]]    # [M]
+                        member_rep_map = torch.repeat_interleave(
+                            torch.arange(G, device=device), mc)                   # [M] -> [0,G)
+                        # per-group softmax weights (numerically stable)
+                        max_pg = torch.full((G,), float('-inf'), device=device)
+                        max_pg.scatter_reduce_(0, member_rep_map, member_scores,
+                                               reduce='amax', include_self=True)
+                        ex = torch.exp(member_scores - max_pg[member_rep_map])
+                        sx = torch.zeros(G, device=device).index_add_(0, member_rep_map, ex)
+                        member_weights = ex / sx[member_rep_map].clamp(min=1e-12)
+                        merge_plan = {"rep_indices": rep_indices, "member_indices": member_indices,
+                                      "member_weights": member_weights, "member_rep_map": member_rep_map}
+
+        return torch.nonzero(keep_mask, as_tuple=False).squeeze(-1), merge_plan
+
+    def _apply_intra_merge_(self, b_idx: int, plan: dict) -> None:
+        """Apply a soft-merge plan (from _dedup_single_batch, merge mode): for each
+        multi-member voxel group, write the importance-weighted average of the members'
+        K/V (+ score_state, importance, depth_conf) into the representative slot.
+        Token count is unchanged (gather afterwards drops the non-rep members; the rep
+        slot already holds the merged value). Call BEFORE _gather_single_batch_."""
+        rep = plan["rep_indices"]            # [G]
+        memb = plan["member_indices"]         # [M]
+        w = plan["member_weights"]            # [M]
+        rep_of = plan["member_rep_map"]       # [M] in [0, G)
+        _, H, _, D = self.k.shape
+        for kv in (self.k, self.v):
+            contrib = kv[b_idx, :, memb, :] * w.view(1, -1, 1)            # [H, M, D]
+            acc = torch.zeros(H, rep.shape[0], D, device=kv.device, dtype=kv.dtype)  # [H, G, D]
+            acc.index_add_(dim=1, index=rep_of, source=contrib)           # Σ_members w·kv -> rep slot
+            kv[b_idx, :, rep, :] = acc
+        # importance / depth_conf: importance-weighted average (1D)
+        for field in ("importance", "depth_conf"):
+            val = getattr(self.metadata, field)[b_idx, memb] * w           # [M]
+            acc1 = torch.zeros(rep.shape[0], device=val.device, dtype=val.dtype)
+            acc1.index_add_(0, rep_of, val)
+            getattr(self.metadata, field)[b_idx, rep] = acc1
+        # slot_local_xyz [B, N, 3]: unweighted MEAN per group (3D, not weighted)
+        xyz = self.metadata.slot_local_xyz[b_idx, memb]                    # [M, 3]
+        acc_xyz = torch.zeros(rep.shape[0], 3, device=xyz.device, dtype=xyz.dtype)
+        cnt = torch.zeros(rep.shape[0], device=xyz.device, dtype=xyz.dtype)
+        acc_xyz.index_add_(0, rep_of, xyz)
+        cnt.index_add_(0, rep_of, torch.ones_like(w))
+        self.metadata.slot_local_xyz[b_idx, rep] = acc_xyz / cnt.unsqueeze(-1).clamp(min=1.0)
+        # score_state [B, N, Ds]: weighted average (only when present, i.e. scorer enabled)
+        if self.score_state is not None:
+            ss = self.score_state[b_idx, memb] * w.view(-1, 1)             # [M, Ds]
+            acc_ss = torch.zeros(rep.shape[0], ss.shape[-1], device=ss.device, dtype=ss.dtype)
+            acc_ss.index_add_(0, rep_of, ss)
+            self.score_state[b_idx, rep] = acc_ss
 
     def _scorer_scores_or_importance_(
         self,
