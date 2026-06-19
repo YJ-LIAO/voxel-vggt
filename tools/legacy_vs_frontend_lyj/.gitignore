@@ -1,0 +1,3 @@
+# Per-run stdout logs (verbose; structured result is in the .json files).
+# Keep the batch-runner *.log files.
+log_*.txt

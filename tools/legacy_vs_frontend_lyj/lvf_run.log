@@ -1,0 +1,26 @@
+[lvf] 72 runs target on 0 1 2 3 4 5 6 7 (resumable)
+=== frame tier 200f ===
+  [09:31:02] GPU0 legacy chess/seq-03 f200 s0
+  [09:31:02] GPU1 legacy chess/seq-03 f200 s1
+  [09:31:02] GPU2 legacy chess/seq-03 f200 s2
+  [09:31:02] GPU3 legacy fire/seq-03 f200 s0
+  [09:31:02] GPU4 legacy fire/seq-03 f200 s1
+  [09:31:02] GPU5 legacy fire/seq-03 f200 s2
+  [09:31:02] GPU6 legacy office/seq-03 f200 s0
+  [09:31:02] GPU7 legacy office/seq-03 f200 s1
+  [09:35:56] GPU0 legacy office/seq-03 f200 s2
+  [09:35:56] GPU1 legacy redkitchen/seq-03 f200 s0
+  [09:35:56] GPU2 legacy redkitchen/seq-03 f200 s1
+  [09:35:56] GPU3 legacy redkitchen/seq-03 f200 s2
+  [09:35:56] GPU4 frontend chess/seq-03 f200 s0
+  [09:35:56] GPU5 frontend chess/seq-03 f200 s1
+  [09:35:56] GPU6 frontend chess/seq-03 f200 s2
+  [09:35:56] GPU7 frontend fire/seq-03 f200 s0
+  [09:40:29] GPU0 frontend fire/seq-03 f200 s1
+  [09:40:29] GPU1 frontend fire/seq-03 f200 s2
+  [09:40:29] GPU2 frontend office/seq-03 f200 s0
+  [09:40:29] GPU3 frontend office/seq-03 f200 s1
+  [09:40:29] GPU4 frontend office/seq-03 f200 s2
+  [09:40:29] GPU5 frontend redkitchen/seq-03 f200 s0
+  [09:40:29] GPU6 frontend redkitchen/seq-03 f200 s1
+  [09:40:29] GPU7 frontend redkitchen/seq-03 f200 s2

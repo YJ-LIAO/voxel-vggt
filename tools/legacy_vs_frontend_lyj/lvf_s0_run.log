@@ -1,0 +1,12 @@
+[lvf-s0] 24 seed-0 combos across GPU 4 5 6 7 (resumable; expected ~10 to run)
+  [GPU6 14:36:16] frontend office/seq-03 f500 s0
+  [GPU7 14:36:16] frontend redkitchen/seq-03 f500 s0
+  [GPU5 14:36:16] legacy fire/seq-03 f1000 s0
+  [GPU4 14:36:16] legacy chess/seq-03 f1000 s0
+  [GPU5 14:42:37] frontend fire/seq-03 f1000 s0
+  [GPU4 14:42:45] frontend chess/seq-03 f1000 s0
+  [GPU7 14:43:11] legacy redkitchen/seq-03 f1000 s0
+  [GPU6 14:43:15] legacy office/seq-03 f1000 s0
+  [GPU7 14:49:01] frontend redkitchen/seq-03 f1000 s0
+  [GPU6 14:49:07] frontend office/seq-03 f1000 s0
+[lvf-s0] done.
