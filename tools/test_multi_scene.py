@@ -55,18 +55,31 @@ for scene_name in scenes:
         a=ate(gt,getp(o,h,w)); del m; gc.collect(); torch.cuda.empty_cache()
         return a
 
-    a_leg = run(lambda: OVGGT(mode='legacy',per_layer_budget=8000),
+    a_leg = run(lambda: OVGGT(mode='legacy',per_layer_budget=8334),
                 lambda m: m.inference(inputs,history_anchor_strategy='coverage',anchor_interval=250))
 
-    a_orig = run(lambda: OVGGT(mode='frontend_eval',per_layer_budget=8000,
+    a_orig = run(lambda: OVGGT(mode='frontend_eval',per_layer_budget=8334,
                 frontend_pose_encoding_type=ABS_POSE_ENCODING,
                 frontend_cache_config=FrontendCacheConfig(enabled=True,dedup_enabled=True)),
              lambda m: m.inference(inputs,history_anchor_strategy='fixed_interval',anchor_interval=8,max_anchors=3))
 
-    a_opt = run(lambda: OVGGT(mode='frontend_eval',per_layer_budget=8000,
+    a_opt = run(lambda: OVGGT(mode='frontend_eval',per_layer_budget=8334,
                 frontend_pose_encoding_type=ABS_POSE_ENCODING,
                 frontend_cache_config=FrontendCacheConfig(enabled=True,dedup_enabled=True,
-                    intra_frame_dedup_enabled=False,fifo_keep_topk=80)),
+                    intra_frame_dedup_enabled=True,fifo_keep_topk=80,
+                    fifo_protected_ring_ratio=0.2)),
              lambda m: m.inference(inputs,history_anchor_strategy='fixed_interval',anchor_interval=8,max_anchors=3))
+    # Production config (verified 2026-06-17): per_layer_budget=8334 (×depth24
+    # =200016≈original total 200000; the old 8000 assumed depth=25 → 192000),
+    # intra_frame_dedup ON (with the bounded ring below, cache is no longer
+    # crowded by stale protected tokens, so intra dedup's redundancy-merging
+    # helps again: chess 200f 0.0263 vs 0.0295 OFF, 500f 0.0528 vs 0.0546 OFF;
+    # the old "noIntra is better" finding was under fifo80-without-ring + the
+    # 192000 budget bug and no longer applies), fifo_keep_topk=80 with a BOUNDED
+    # rescued pool (fifo_protected_ring_ratio=0.2 → cap 1666/layer).
+    # FrontendCacheConfig defaults budget_allocation='uniform' + ring_ratio=0.2,
+    # which is REQUIRED: dynamic allocation dips below protected_count on
+    # budget-poor layers and triggers anchor overflow (verified 4.7–10.2%;
+    # uniform→0.0%). See docs/p1_ablation_results.md.
 
     print('{:>20s} | {:10.4f} | {:10.4f} | {:10.4f}'.format(scene_name, a_leg, a_orig, a_opt))

@@ -44,7 +44,7 @@ class OVGGT(nn.Module, PyTorchModelHubMixin):
         img_size=518,
         patch_size=14,
         embed_dim=1024,
-        per_layer_budget=8000,
+        per_layer_budget=8334,  # 8334 × depth(24) = 200016 ≈ original total_budget 200000 (the 8000 default assumed depth=25 and shrank real total to 192000)
         camera_budget=384,
         eviction_strategy="repr_shift_spatial",
         intra_frame_keep_ratio=1.0,

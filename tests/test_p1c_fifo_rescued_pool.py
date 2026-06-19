@@ -9,14 +9,24 @@ from ovggt.utils.frontend_cache import (
 
 # ---------- Task 1: config + mutual-exclusion assert ----------
 
-def test_config_has_fifo_protected_ring_ratio_default_off():
+def test_config_has_fifo_protected_ring_ratio_default_on():
+    # Production default is 0.2 (bounded rescued pool, paired with
+    # budget_allocation='uniform'). Tests that need ring OFF must set it explicitly.
     cfg = FrontendCacheConfig()
-    assert cfg.fifo_protected_ring_ratio == 0.0
+    assert cfg.fifo_protected_ring_ratio == 0.2
+    assert cfg.budget_allocation == "uniform"
 
 
 def test_config_rejects_ring_and_max_protected_both_set():
     with pytest.raises(ValueError, match="互斥"):
         FrontendCacheConfig(fifo_protected_ring_ratio=0.3, max_protected_ratio=0.5)
+
+
+def test_config_rejects_ring_with_dynamic_budget_allocation():
+    # ring sizes capacity against static per_layer_budget; dynamic allocation
+    # dips below protected_count on budget-poor layers -> anchor overflow.
+    with pytest.raises(ValueError, match="uniform"):
+        FrontendCacheConfig(fifo_protected_ring_ratio=0.3, budget_allocation="dynamic")
 
 
 def test_config_allows_ring_with_default_max_protected():
@@ -25,7 +35,8 @@ def test_config_allows_ring_with_default_max_protected():
 
 
 def test_config_allows_max_protected_without_ring():
-    cfg = FrontendCacheConfig(max_protected_ratio=0.5)
+    # v1 cap is only reachable when the ring is explicitly off.
+    cfg = FrontendCacheConfig(fifo_protected_ring_ratio=0.0, max_protected_ratio=0.5)
     assert cfg.max_protected_ratio == 0.5
 
 

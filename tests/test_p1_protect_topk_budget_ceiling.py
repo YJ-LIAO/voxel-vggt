@@ -49,6 +49,7 @@ def test_protect_topk_respects_budget_ceiling():
     cfg = FrontendCacheConfig(enabled=True, dedup_enabled=True, voxel_size=0.1,
                                intra_frame_dedup_enabled=False,
                                fifo_keep_topk=80,
+                               fifo_protected_ring_ratio=0.0,  # this test exercises the v1 cap, not the ring
                                max_protected_ratio=0.5)  # NEW config field (P1 fix)
 
     cs = fresh_cache(make_meta([3, 200, 200, 200], [0, 1, 2, 3]))

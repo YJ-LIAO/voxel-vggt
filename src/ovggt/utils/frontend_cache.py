@@ -48,13 +48,22 @@ class FrontendCacheConfig:
     export_keyframe_packets: bool = False
     depth_conf_weight: float = 0.5
     importance_weight: float = 0.5
+    # P2: eviction old/new-token blend weight (old=cosine diversity, new=repr_shift),
+    # decoupled from `importance_weight` (which the dedup composite uses as its
+    # importance-vs-depth_conf blend). Default 0.5 = prior behavior (backward compat).
+    # Only the eviction call in commit_pending_update_ reads this; dedup is unaffected.
+    eviction_importance_weight: float = 0.5
     dedup_cooldown_frames: int = 0
     intra_frame_dedup_enabled: bool = True
     fifo_keep_topk: int = 0  # Retain top-K tokens by score when demoting oldest anchor (0=disable)
+    # NOTE: production noIntra+fifo80 baseline sets this to 80 at the call site
+    # (e.g. tools/test_multi_scene.py). Unbounded 80/swap protection accumulates
+    # and starves eviction at long sequences; it is only safe with a bounded
+    # rescued pool (see fifo_protected_ring_ratio).
     learned_eviction_enabled: bool = False
     score_state_dim: int = 128
     oracle_window: int = 4
-    budget_allocation: Literal["dynamic", "uniform"] = "dynamic"
+    budget_allocation: Literal["dynamic", "uniform"] = "uniform"
     learned_fifo_keep_count: bool = False
     fifo_count_candidates: tuple = (0, 8, 16, 32, 64, 128)
     # P1 fix: cap the FIFO-protected slot-0 tokens so they cannot accumulate
@@ -66,7 +75,12 @@ class FrontendCacheConfig:
     # FIFO_SWAP would exceed it, the oldest keyframe's rescued tokens are
     # revoked (by keyframe_id, argsort-stable) before protecting new ones.
     # 0.0 = disabled (backward compat, falls back to v1 max_protected behavior).
-    fifo_protected_ring_ratio: float = 0.0
+    # Production default 0.2: with per_layer_budget=8334 (depth=24 → total
+    # ~200016) the ring caps rescued tokens at 1666/layer. MUST be paired with
+    # budget_allocation='uniform', else the dynamic per-layer budget can dip
+    # below protected_count on budget-poor layers and trigger anchor overflow
+    # (verified: dynamic→4.7–10.2% overflow_rate; uniform→0.0%).
+    fifo_protected_ring_ratio: float = 0.2
 
     def __post_init__(self):
         # pass-5 #4: ring and v1 max_protected are mutually exclusive — both
@@ -76,6 +90,17 @@ class FrontendCacheConfig:
             raise ValueError(
                 "fifo_protected_ring_ratio 和 max_protected_ratio 互斥 (两者顺序作用同一 keep_count 会混淆)。"
                 "启用 ring 时保持 max_protected_ratio=1.0 (默认, cap 禁用)。"
+            )
+        # ring sizes capacity against the static per_layer_budget, but eviction
+        # uses the per-layer budget. Under budget_allocation='dynamic' the
+        # softmax can push a layer's budget below protected_count (global anchor
+        # + ring rescued) and trigger anchor overflow (verified 4.7–10.2% on
+        # 7-Scenes). Require uniform allocation whenever the ring is on.
+        if self.fifo_protected_ring_ratio > 0.0 and self.budget_allocation == "dynamic":
+            raise ValueError(
+                "fifo_protected_ring_ratio>0 需要 budget_allocation='uniform'："
+                "ring 按 per_layer_budget 算容量，而 dynamic 分配会把某些层 budget 压到低于 protected_count，"
+                "触发 anchor overflow（实测 4.7–10.2%）。请设 budget_allocation='uniform'。"
             )
 
 
@@ -1262,7 +1287,7 @@ class LayerCacheState:
             self.protected_count,
             importance_scores=importance_scores,
             num_new_tokens=num_new_tokens,
-            importance_weight=config.importance_weight,
+            importance_weight=config.eviction_importance_weight,
         )
         self.k = final_k
         self.v = final_v
