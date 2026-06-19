@@ -55,6 +55,10 @@ class FrontendCacheConfig:
     eviction_importance_weight: float = 0.5
     dedup_cooldown_frames: int = 0
     intra_frame_dedup_enabled: bool = True
+    # soft-merge intra dedup: "drop" (hard-drop all but best-score per 0.1m voxel, legacy behavior)
+    # or "merge" (importance-weighted K/V avg of co-voxel tokens — preserves multi-view info).
+    # Only takes effect when intra_frame_dedup_enabled=True (that boolean gates the whole intra block).
+    intra_dedup_mode: Literal["drop", "merge"] = "drop"
     fifo_keep_topk: int = 0  # Retain top-K tokens by score when demoting oldest anchor (0=disable)
     # NOTE: production noIntra+fifo80 baseline sets this to 80 at the call site
     # (e.g. tools/test_multi_scene.py). Unbounded 80/swap protection accumulates
