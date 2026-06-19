@@ -1,0 +1,12 @@
+{
+  "config": "P1-v1cap",
+  "scene": "office/seq-03",
+  "num_frames": 1000,
+  "seed": 1,
+  "deterministic": false,
+  "ate_rmse": 0.7135811448097229,
+  "time_s": 588.7302527427673,
+  "fps": 1.698570772168095,
+  "peak_mem_gb": 9.703771591186523,
+  "per_layer_budget": 8000
+}

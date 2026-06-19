@@ -1,0 +1,12 @@
+{
+  "config": "P1-current",
+  "scene": "redkitchen/seq-03",
+  "num_frames": 1000,
+  "seed": 4,
+  "deterministic": false,
+  "ate_rmse": 0.6776086091995239,
+  "time_s": 608.9508259296417,
+  "fps": 1.642168722693448,
+  "peak_mem_gb": 9.704887866973877,
+  "per_layer_budget": 8000
+}

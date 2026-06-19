@@ -1,0 +1,23 @@
+{
+  "budget_per_layer (headline ref)": 8334,
+  "dynamic_budget_p10/p50/p90": [
+    8334,
+    8334,
+    8334
+  ],
+  "frames_with_eviction": 492,
+  "max_protected_count_any_frame": 5830,
+  "max_protected_over_ref_budget (8000)": 0.729,
+  "max_per_layer_ratio (worst protected/budget on any single layer)": 0.7,
+  "first_frame_protected_ge_50pct_budget": 32,
+  "first_frame_protected_ge_90pct_budget": null,
+  "first_overflow_frame (per-record, protected>=that layer budget)": null,
+  "n_overflow_frames": 0,
+  "overflow_rate (overflow_frames/eviction_frames)": 0.0,
+  "first_5_overflow_frames": [],
+  "scene": "redkitchen/seq-03",
+  "num_frames": 500,
+  "ate_rmse": 0.04654870182275772,
+  "budget_allocation": "uniform",
+  "config": "ring0.2_b8334_uniform"
+}

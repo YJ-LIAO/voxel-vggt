@@ -1,0 +1,12 @@
+{
+  "config": "P2-w0.7",
+  "scene": "office/seq-03",
+  "num_frames": 500,
+  "seed": 0,
+  "deterministic": false,
+  "ate_rmse": 0.10169080644845963,
+  "time_s": 742.9119238853455,
+  "fps": 0.6730272915597538,
+  "peak_mem_gb": 8.618871212005615,
+  "per_layer_budget": 8000
+}

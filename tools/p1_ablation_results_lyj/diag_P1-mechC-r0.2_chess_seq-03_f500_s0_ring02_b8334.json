@@ -1,0 +1,4463 @@
+{
+  "headline": {
+    "budget_per_layer (headline ref)": 8334,
+    "dynamic_budget_p10/p50/p90": [
+      6737,
+      7937,
+      9068
+    ],
+    "frames_with_eviction": 492,
+    "max_protected_count_any_frame": 5830,
+    "max_protected_over_ref_budget (8000)": 0.729,
+    "max_per_layer_ratio (worst protected/budget on any single layer)": 1.737,
+    "first_frame_protected_ge_50pct_budget": 32,
+    "first_frame_protected_ge_90pct_budget": null,
+    "first_overflow_frame (per-record, protected>=that layer budget)": 26,
+    "n_overflow_frames": 50,
+    "overflow_rate (overflow_frames/eviction_frames)": 0.102,
+    "first_5_overflow_frames": [
+      26,
+      27,
+      34,
+      35,
+      42
+    ],
+    "config": "P1-mechC-r0.2",
+    "scene": "chess/seq-03",
+    "num_frames": 500,
+    "seed": 0,
+    "ate_rmse": 0.05464359372854233,
+    "time_s": 473.9656960964203,
+    "per_layer_budget": 8334
+  },
+  "per_frame": [
+    {
+      "frame": 8,
+      "max_protected": 2082,
+      "max_slot0": 1041,
+      "max_num_tokens": 9369,
+      "budget": 8334,
+      "any_overflow": 0,
+      "n_layers": 24
+    },
+    {
+      "frame": 9,
+      "max_protected": 2082,
+      "max_slot0": 1041,
+      "max_num_tokens": 9375,
+      "budget": 8543,
+      "any_overflow": 0,
+      "n_layers": 16
+    },
+    {
+      "frame": 10,
+      "max_protected": 2082,
+      "max_slot0": 1041,
+      "max_num_tokens": 10416,
+      "budget": 4257,
+      "any_overflow": 0,
+      "n_layers": 8
+    },
+    {
+      "frame": 11,
+      "max_protected": 2082,
+      "max_slot0": 1041,
+      "max_num_tokens": 10625,
+      "budget": 8702,
+      "any_overflow": 0,
+      "n_layers": 16
+    },
+    {
+      "frame": 12,
+      "max_protected": 2082,
+      "max_slot0": 1041,
+      "max_num_tokens": 9743,
+      "budget": 8754,
+      "any_overflow": 0,
+      "n_layers": 16
+    },
+    {
+      "frame": 13,
+      "max_protected": 2082,
+      "max_slot0": 1041,
+      "max_num_tokens": 9795,
+      "budget": 8587,
+      "any_overflow": 0,
+      "n_layers": 16
+    },
+    {
+      "frame": 14,
+      "max_protected": 2082,
+      "max_slot0": 1041,
+      "max_num_tokens": 9628,
+      "budget": 8630,
+      "any_overflow": 0,
+      "n_layers": 16
+    },
+    {
+      "frame": 15,
+      "max_protected": 2082,
+      "max_slot0": 1041,
+      "max_num_tokens": 10187,
+      "budget": 9314,
+      "any_overflow": 0,
+      "n_layers": 24
+    },
+    {
+      "frame": 16,
+      "max_protected": 3123,
+      "max_slot0": 1041,
+      "max_num_tokens": 10924,
+      "budget": 9368,
+      "any_overflow": 0,
+      "n_layers": 24
+    },
+    {
+      "frame": 17,
+      "max_protected": 3123,
+      "max_slot0": 1041,
+      "max_num_tokens": 9935,
+      "budget": 8453,
+      "any_overflow": 0,
+      "n_layers": 16
+    },
+    {
+      "frame": 18,
+      "max_protected": 3123,
+      "max_slot0": 1041,
+      "max_num_tokens": 12033,
+      "budget": 4282,
+      "any_overflow": 0,
+      "n_layers": 8
+    },
+    {
+      "frame": 19,
+      "max_protected": 3123,
+      "max_slot0": 1041,
+      "max_num_tokens": 10535,
+      "budget": 8698,
+      "any_overflow": 0,
+      "n_layers": 15
+    },
+    {
+      "frame": 20,
+      "max_protected": 3123,
+      "max_slot0": 1041,
+      "max_num_tokens": 9858,
+      "budget": 8545,
+      "any_overflow": 0,
+      "n_layers": 16
+    },
+    {
+      "frame": 21,
+      "max_protected": 3123,
+      "max_slot0": 1041,
+      "max_num_tokens": 10476,
+      "budget": 8421,
+      "any_overflow": 0,
+      "n_layers": 16
+    },
+    {
+      "frame": 22,
+      "max_protected": 3123,
+      "max_slot0": 1041,
+      "max_num_tokens": 9462,
+      "budget": 8442,
+      "any_overflow": 0,
+      "n_layers": 16
+    },
+    {
+      "frame": 23,
+      "max_protected": 3123,
+      "max_slot0": 1041,
+      "max_num_tokens": 10047,
+      "budget": 9641,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 24,
+      "max_protected": 4164,
+      "max_slot0": 1041,
+      "max_num_tokens": 10889,
+      "budget": 9827,
+      "any_overflow": 0,
+      "n_layers": 24
+    },
+    {
+      "frame": 25,
+      "max_protected": 4164,
+      "max_slot0": 1041,
+      "max_num_tokens": 11050,
+      "budget": 10231,
+      "any_overflow": 0,
+      "n_layers": 17
+    },
+    {
+      "frame": 26,
+      "max_protected": 4164,
+      "max_slot0": 1041,
+      "max_num_tokens": 12329,
+      "budget": 4396,
+      "any_overflow": 1,
+      "n_layers": 7
+    },
+    {
+      "frame": 27,
+      "max_protected": 4164,
+      "max_slot0": 1041,
+      "max_num_tokens": 12313,
+      "budget": 3405,
+      "any_overflow": 1,
+      "n_layers": 11
+    },
+    {
+      "frame": 28,
+      "max_protected": 4164,
+      "max_slot0": 1041,
+      "max_num_tokens": 11203,
+      "budget": 3465,
+      "any_overflow": 0,
+      "n_layers": 19
+    },
+    {
+      "frame": 29,
+      "max_protected": 4164,
+      "max_slot0": 1041,
+      "max_num_tokens": 11038,
+      "budget": 3735,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 30,
+      "max_protected": 4164,
+      "max_slot0": 1041,
+      "max_num_tokens": 11322,
+      "budget": 9558,
+      "any_overflow": 0,
+      "n_layers": 17
+    },
+    {
+      "frame": 31,
+      "max_protected": 4164,
+      "max_slot0": 1041,
+      "max_num_tokens": 10599,
+      "budget": 9500,
+      "any_overflow": 0,
+      "n_layers": 19
+    },
+    {
+      "frame": 32,
+      "max_protected": 4244,
+      "max_slot0": 1121,
+      "max_num_tokens": 11001,
+      "budget": 9837,
+      "any_overflow": 0,
+      "n_layers": 21
+    },
+    {
+      "frame": 33,
+      "max_protected": 4244,
+      "max_slot0": 1121,
+      "max_num_tokens": 11480,
+      "budget": 9638,
+      "any_overflow": 0,
+      "n_layers": 19
+    },
+    {
+      "frame": 34,
+      "max_protected": 4244,
+      "max_slot0": 1121,
+      "max_num_tokens": 12197,
+      "budget": 9748,
+      "any_overflow": 1,
+      "n_layers": 6
+    },
+    {
+      "frame": 35,
+      "max_protected": 4244,
+      "max_slot0": 1121,
+      "max_num_tokens": 11505,
+      "budget": 9182,
+      "any_overflow": 1,
+      "n_layers": 7
+    },
+    {
+      "frame": 36,
+      "max_protected": 4244,
+      "max_slot0": 1121,
+      "max_num_tokens": 11040,
+      "budget": 9219,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 37,
+      "max_protected": 4244,
+      "max_slot0": 1121,
+      "max_num_tokens": 11123,
+      "budget": 9038,
+      "any_overflow": 0,
+      "n_layers": 23
+    },
+    {
+      "frame": 38,
+      "max_protected": 4244,
+      "max_slot0": 1121,
+      "max_num_tokens": 11190,
+      "budget": 9183,
+      "any_overflow": 0,
+      "n_layers": 22
+    },
+    {
+      "frame": 39,
+      "max_protected": 4244,
+      "max_slot0": 1121,
+      "max_num_tokens": 11206,
+      "budget": 9376,
+      "any_overflow": 0,
+      "n_layers": 24
+    },
+    {
+      "frame": 40,
+      "max_protected": 4324,
+      "max_slot0": 1201,
+      "max_num_tokens": 11311,
+      "budget": 9182,
+      "any_overflow": 0,
+      "n_layers": 23
+    },
+    {
+      "frame": 41,
+      "max_protected": 4324,
+      "max_slot0": 1201,
+      "max_num_tokens": 10365,
+      "budget": 10005,
+      "any_overflow": 0,
+      "n_layers": 21
+    },
+    {
+      "frame": 42,
+      "max_protected": 4324,
+      "max_slot0": 1201,
+      "max_num_tokens": 12285,
+      "budget": 9626,
+      "any_overflow": 1,
+      "n_layers": 7
+    },
+    {
+      "frame": 43,
+      "max_protected": 4324,
+      "max_slot0": 1201,
+      "max_num_tokens": 11100,
+      "budget": 9147,
+      "any_overflow": 1,
+      "n_layers": 20
+    },
+    {
+      "frame": 44,
+      "max_protected": 4324,
+      "max_slot0": 1201,
+      "max_num_tokens": 10672,
+      "budget": 9618,
+      "any_overflow": 0,
+      "n_layers": 22
+    },
+    {
+      "frame": 45,
+      "max_protected": 4324,
+      "max_slot0": 1201,
+      "max_num_tokens": 10659,
+      "budget": 9294,
+      "any_overflow": 0,
+      "n_layers": 22
+    },
+    {
+      "frame": 46,
+      "max_protected": 4324,
+      "max_slot0": 1201,
+      "max_num_tokens": 10712,
+      "budget": 9489,
+      "any_overflow": 0,
+      "n_layers": 23
+    },
+    {
+      "frame": 47,
+      "max_protected": 4324,
+      "max_slot0": 1201,
+      "max_num_tokens": 10739,
+      "budget": 9237,
+      "any_overflow": 0,
+      "n_layers": 23
+    },
+    {
+      "frame": 48,
+      "max_protected": 4404,
+      "max_slot0": 1281,
+      "max_num_tokens": 10684,
+      "budget": 9324,
+      "any_overflow": 0,
+      "n_layers": 23
+    },
+    {
+      "frame": 49,
+      "max_protected": 4404,
+      "max_slot0": 1281,
+      "max_num_tokens": 10542,
+      "budget": 9673,
+      "any_overflow": 0,
+      "n_layers": 21
+    },
+    {
+      "frame": 50,
+      "max_protected": 4404,
+      "max_slot0": 1281,
+      "max_num_tokens": 11668,
+      "budget": 9513,
+      "any_overflow": 1,
+      "n_layers": 6
+    },
+    {
+      "frame": 51,
+      "max_protected": 4404,
+      "max_slot0": 1281,
+      "max_num_tokens": 11315,
+      "budget": 9067,
+      "any_overflow": 1,
+      "n_layers": 17
+    },
+    {
+      "frame": 52,
+      "max_protected": 4404,
+      "max_slot0": 1281,
+      "max_num_tokens": 10875,
+      "budget": 9221,
+      "any_overflow": 0,
+      "n_layers": 22
+    },
+    {
+      "frame": 53,
+      "max_protected": 4404,
+      "max_slot0": 1281,
+      "max_num_tokens": 11508,
+      "budget": 9120,
+      "any_overflow": 0,
+      "n_layers": 23
+    },
+    {
+      "frame": 54,
+      "max_protected": 4404,
+      "max_slot0": 1281,
+      "max_num_tokens": 11688,
+      "budget": 9237,
+      "any_overflow": 0,
+      "n_layers": 22
+    },
+    {
+      "frame": 55,
+      "max_protected": 4404,
+      "max_slot0": 1281,
+      "max_num_tokens": 11739,
+      "budget": 9202,
+      "any_overflow": 0,
+      "n_layers": 24
+    },
+    {
+      "frame": 56,
+      "max_protected": 4484,
+      "max_slot0": 1361,
+      "max_num_tokens": 11804,
+      "budget": 9131,
+      "any_overflow": 0,
+      "n_layers": 23
+    },
+    {
+      "frame": 57,
+      "max_protected": 4484,
+      "max_slot0": 1361,
+      "max_num_tokens": 10477,
+      "budget": 9765,
+      "any_overflow": 0,
+      "n_layers": 21
+    },
+    {
+      "frame": 58,
+      "max_protected": 4484,
+      "max_slot0": 1361,
+      "max_num_tokens": 12754,
+      "budget": 9434,
+      "any_overflow": 0,
+      "n_layers": 7
+    },
+    {
+      "frame": 59,
+      "max_protected": 4484,
+      "max_slot0": 1361,
+      "max_num_tokens": 11290,
+      "budget": 8734,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 60,
+      "max_protected": 4484,
+      "max_slot0": 1361,
+      "max_num_tokens": 10499,
+      "budget": 9166,
+      "any_overflow": 0,
+      "n_layers": 21
+    },
+    {
+      "frame": 61,
+      "max_protected": 4484,
+      "max_slot0": 1361,
+      "max_num_tokens": 10349,
+      "budget": 8740,
+      "any_overflow": 0,
+      "n_layers": 22
+    },
+    {
+      "frame": 62,
+      "max_protected": 4484,
+      "max_slot0": 1361,
+      "max_num_tokens": 10496,
+      "budget": 8995,
+      "any_overflow": 0,
+      "n_layers": 22
+    },
+    {
+      "frame": 63,
+      "max_protected": 4484,
+      "max_slot0": 1361,
+      "max_num_tokens": 10623,
+      "budget": 8941,
+      "any_overflow": 0,
+      "n_layers": 23
+    },
+    {
+      "frame": 64,
+      "max_protected": 4564,
+      "max_slot0": 1441,
+      "max_num_tokens": 10935,
+      "budget": 9085,
+      "any_overflow": 0,
+      "n_layers": 24
+    },
+    {
+      "frame": 65,
+      "max_protected": 4564,
+      "max_slot0": 1441,
+      "max_num_tokens": 10488,
+      "budget": 9064,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 66,
+      "max_protected": 4564,
+      "max_slot0": 1441,
+      "max_num_tokens": 12826,
+      "budget": 3565,
+      "any_overflow": 1,
+      "n_layers": 6
+    },
+    {
+      "frame": 67,
+      "max_protected": 4564,
+      "max_slot0": 1441,
+      "max_num_tokens": 11889,
+      "budget": 3321,
+      "any_overflow": 1,
+      "n_layers": 20
+    },
+    {
+      "frame": 68,
+      "max_protected": 4564,
+      "max_slot0": 1441,
+      "max_num_tokens": 10687,
+      "budget": 3446,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 69,
+      "max_protected": 4564,
+      "max_slot0": 1441,
+      "max_num_tokens": 10620,
+      "budget": 9061,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 70,
+      "max_protected": 4564,
+      "max_slot0": 1441,
+      "max_num_tokens": 10601,
+      "budget": 4617,
+      "any_overflow": 0,
+      "n_layers": 21
+    },
+    {
+      "frame": 71,
+      "max_protected": 4564,
+      "max_slot0": 1441,
+      "max_num_tokens": 10759,
+      "budget": 9054,
+      "any_overflow": 0,
+      "n_layers": 21
+    },
+    {
+      "frame": 72,
+      "max_protected": 4644,
+      "max_slot0": 1521,
+      "max_num_tokens": 11835,
+      "budget": 9818,
+      "any_overflow": 0,
+      "n_layers": 23
+    },
+    {
+      "frame": 73,
+      "max_protected": 4644,
+      "max_slot0": 1521,
+      "max_num_tokens": 10607,
+      "budget": 8360,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 74,
+      "max_protected": 4644,
+      "max_slot0": 1521,
+      "max_num_tokens": 12948,
+      "budget": 8348,
+      "any_overflow": 0,
+      "n_layers": 5
+    },
+    {
+      "frame": 75,
+      "max_protected": 4644,
+      "max_slot0": 1521,
+      "max_num_tokens": 11248,
+      "budget": 9062,
+      "any_overflow": 0,
+      "n_layers": 19
+    },
+    {
+      "frame": 76,
+      "max_protected": 4644,
+      "max_slot0": 1521,
+      "max_num_tokens": 10704,
+      "budget": 9626,
+      "any_overflow": 0,
+      "n_layers": 21
+    },
+    {
+      "frame": 77,
+      "max_protected": 4644,
+      "max_slot0": 1521,
+      "max_num_tokens": 10667,
+      "budget": 9743,
+      "any_overflow": 0,
+      "n_layers": 21
+    },
+    {
+      "frame": 78,
+      "max_protected": 4644,
+      "max_slot0": 1521,
+      "max_num_tokens": 10784,
+      "budget": 9840,
+      "any_overflow": 0,
+      "n_layers": 21
+    },
+    {
+      "frame": 79,
+      "max_protected": 4644,
+      "max_slot0": 1521,
+      "max_num_tokens": 10881,
+      "budget": 9855,
+      "any_overflow": 0,
+      "n_layers": 23
+    },
+    {
+      "frame": 80,
+      "max_protected": 4724,
+      "max_slot0": 1601,
+      "max_num_tokens": 11569,
+      "budget": 9961,
+      "any_overflow": 0,
+      "n_layers": 24
+    },
+    {
+      "frame": 81,
+      "max_protected": 4724,
+      "max_slot0": 1601,
+      "max_num_tokens": 10334,
+      "budget": 8720,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 82,
+      "max_protected": 4724,
+      "max_slot0": 1601,
+      "max_num_tokens": 12779,
+      "budget": 4321,
+      "any_overflow": 0,
+      "n_layers": 5
+    },
+    {
+      "frame": 83,
+      "max_protected": 4724,
+      "max_slot0": 1601,
+      "max_num_tokens": 11591,
+      "budget": 8954,
+      "any_overflow": 0,
+      "n_layers": 19
+    },
+    {
+      "frame": 84,
+      "max_protected": 4724,
+      "max_slot0": 1601,
+      "max_num_tokens": 10713,
+      "budget": 8575,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 85,
+      "max_protected": 4724,
+      "max_slot0": 1601,
+      "max_num_tokens": 10222,
+      "budget": 8652,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 86,
+      "max_protected": 4724,
+      "max_slot0": 1601,
+      "max_num_tokens": 10323,
+      "budget": 8627,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 87,
+      "max_protected": 4724,
+      "max_slot0": 1601,
+      "max_num_tokens": 10718,
+      "budget": 9698,
+      "any_overflow": 0,
+      "n_layers": 22
+    },
+    {
+      "frame": 88,
+      "max_protected": 4804,
+      "max_slot0": 1681,
+      "max_num_tokens": 11825,
+      "budget": 10148,
+      "any_overflow": 0,
+      "n_layers": 24
+    },
+    {
+      "frame": 89,
+      "max_protected": 4804,
+      "max_slot0": 1681,
+      "max_num_tokens": 10483,
+      "budget": 8689,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 90,
+      "max_protected": 4804,
+      "max_slot0": 1681,
+      "max_num_tokens": 12940,
+      "budget": 4699,
+      "any_overflow": 0,
+      "n_layers": 6
+    },
+    {
+      "frame": 91,
+      "max_protected": 4804,
+      "max_slot0": 1681,
+      "max_num_tokens": 11504,
+      "budget": 9009,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 92,
+      "max_protected": 4804,
+      "max_slot0": 1681,
+      "max_num_tokens": 10915,
+      "budget": 8487,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 93,
+      "max_protected": 4804,
+      "max_slot0": 1681,
+      "max_num_tokens": 10247,
+      "budget": 8739,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 94,
+      "max_protected": 4804,
+      "max_slot0": 1681,
+      "max_num_tokens": 10337,
+      "budget": 8703,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 95,
+      "max_protected": 4804,
+      "max_slot0": 1681,
+      "max_num_tokens": 10731,
+      "budget": 9655,
+      "any_overflow": 0,
+      "n_layers": 22
+    },
+    {
+      "frame": 96,
+      "max_protected": 4884,
+      "max_slot0": 1761,
+      "max_num_tokens": 11789,
+      "budget": 10195,
+      "any_overflow": 0,
+      "n_layers": 24
+    },
+    {
+      "frame": 97,
+      "max_protected": 4884,
+      "max_slot0": 1761,
+      "max_num_tokens": 10451,
+      "budget": 8612,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 98,
+      "max_protected": 4884,
+      "max_slot0": 1761,
+      "max_num_tokens": 12972,
+      "budget": 4552,
+      "any_overflow": 1,
+      "n_layers": 6
+    },
+    {
+      "frame": 99,
+      "max_protected": 4884,
+      "max_slot0": 1761,
+      "max_num_tokens": 11474,
+      "budget": 4248,
+      "any_overflow": 1,
+      "n_layers": 20
+    },
+    {
+      "frame": 100,
+      "max_protected": 4884,
+      "max_slot0": 1761,
+      "max_num_tokens": 11346,
+      "budget": 4387,
+      "any_overflow": 0,
+      "n_layers": 21
+    },
+    {
+      "frame": 101,
+      "max_protected": 4884,
+      "max_slot0": 1761,
+      "max_num_tokens": 10527,
+      "budget": 4546,
+      "any_overflow": 0,
+      "n_layers": 21
+    },
+    {
+      "frame": 102,
+      "max_protected": 4884,
+      "max_slot0": 1761,
+      "max_num_tokens": 10641,
+      "budget": 8531,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 103,
+      "max_protected": 4884,
+      "max_slot0": 1761,
+      "max_num_tokens": 10598,
+      "budget": 8745,
+      "any_overflow": 0,
+      "n_layers": 21
+    },
+    {
+      "frame": 104,
+      "max_protected": 4964,
+      "max_slot0": 1841,
+      "max_num_tokens": 11643,
+      "budget": 10298,
+      "any_overflow": 0,
+      "n_layers": 24
+    },
+    {
+      "frame": 105,
+      "max_protected": 4964,
+      "max_slot0": 1841,
+      "max_num_tokens": 10694,
+      "budget": 8628,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 106,
+      "max_protected": 4964,
+      "max_slot0": 1841,
+      "max_num_tokens": 13076,
+      "budget": 4452,
+      "any_overflow": 0,
+      "n_layers": 5
+    },
+    {
+      "frame": 107,
+      "max_protected": 4964,
+      "max_slot0": 1841,
+      "max_num_tokens": 11409,
+      "budget": 8929,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 108,
+      "max_protected": 4964,
+      "max_slot0": 1841,
+      "max_num_tokens": 10838,
+      "budget": 8364,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 109,
+      "max_protected": 4964,
+      "max_slot0": 1841,
+      "max_num_tokens": 10341,
+      "budget": 8477,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 110,
+      "max_protected": 4964,
+      "max_slot0": 1841,
+      "max_num_tokens": 10476,
+      "budget": 8430,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 111,
+      "max_protected": 4964,
+      "max_slot0": 1841,
+      "max_num_tokens": 10557,
+      "budget": 9439,
+      "any_overflow": 0,
+      "n_layers": 22
+    },
+    {
+      "frame": 112,
+      "max_protected": 5044,
+      "max_slot0": 1921,
+      "max_num_tokens": 11575,
+      "budget": 10185,
+      "any_overflow": 0,
+      "n_layers": 24
+    },
+    {
+      "frame": 113,
+      "max_protected": 5044,
+      "max_slot0": 1921,
+      "max_num_tokens": 10564,
+      "budget": 8539,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 114,
+      "max_protected": 5044,
+      "max_slot0": 1921,
+      "max_num_tokens": 13003,
+      "budget": 4373,
+      "any_overflow": 0,
+      "n_layers": 6
+    },
+    {
+      "frame": 115,
+      "max_protected": 5044,
+      "max_slot0": 1921,
+      "max_num_tokens": 11341,
+      "budget": 8819,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 116,
+      "max_protected": 5044,
+      "max_slot0": 1921,
+      "max_num_tokens": 11026,
+      "budget": 8224,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 117,
+      "max_protected": 5044,
+      "max_slot0": 1921,
+      "max_num_tokens": 10095,
+      "budget": 8279,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 118,
+      "max_protected": 5044,
+      "max_slot0": 1921,
+      "max_num_tokens": 10360,
+      "budget": 8202,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 119,
+      "max_protected": 5044,
+      "max_slot0": 1921,
+      "max_num_tokens": 10824,
+      "budget": 9740,
+      "any_overflow": 0,
+      "n_layers": 22
+    },
+    {
+      "frame": 120,
+      "max_protected": 5124,
+      "max_slot0": 2001,
+      "max_num_tokens": 11558,
+      "budget": 10120,
+      "any_overflow": 0,
+      "n_layers": 24
+    },
+    {
+      "frame": 121,
+      "max_protected": 5124,
+      "max_slot0": 2001,
+      "max_num_tokens": 10434,
+      "budget": 8485,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 122,
+      "max_protected": 5124,
+      "max_slot0": 2001,
+      "max_num_tokens": 12958,
+      "budget": 4333,
+      "any_overflow": 0,
+      "n_layers": 6
+    },
+    {
+      "frame": 123,
+      "max_protected": 5124,
+      "max_slot0": 2001,
+      "max_num_tokens": 11229,
+      "budget": 8632,
+      "any_overflow": 0,
+      "n_layers": 18
+    },
+    {
+      "frame": 124,
+      "max_protected": 5124,
+      "max_slot0": 2001,
+      "max_num_tokens": 10831,
+      "budget": 8084,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 125,
+      "max_protected": 5124,
+      "max_slot0": 2001,
+      "max_num_tokens": 10602,
+      "budget": 8162,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 126,
+      "max_protected": 5124,
+      "max_slot0": 2001,
+      "max_num_tokens": 10366,
+      "budget": 8076,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 127,
+      "max_protected": 5124,
+      "max_slot0": 2001,
+      "max_num_tokens": 10772,
+      "budget": 9695,
+      "any_overflow": 0,
+      "n_layers": 22
+    },
+    {
+      "frame": 128,
+      "max_protected": 5204,
+      "max_slot0": 2081,
+      "max_num_tokens": 11521,
+      "budget": 10098,
+      "any_overflow": 0,
+      "n_layers": 24
+    },
+    {
+      "frame": 129,
+      "max_protected": 5204,
+      "max_slot0": 2081,
+      "max_num_tokens": 10427,
+      "budget": 8457,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 130,
+      "max_protected": 5204,
+      "max_slot0": 2081,
+      "max_num_tokens": 12934,
+      "budget": 4262,
+      "any_overflow": 0,
+      "n_layers": 7
+    },
+    {
+      "frame": 131,
+      "max_protected": 5204,
+      "max_slot0": 2081,
+      "max_num_tokens": 11266,
+      "budget": 7935,
+      "any_overflow": 0,
+      "n_layers": 19
+    },
+    {
+      "frame": 132,
+      "max_protected": 5204,
+      "max_slot0": 2081,
+      "max_num_tokens": 10868,
+      "budget": 8197,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 133,
+      "max_protected": 5204,
+      "max_slot0": 2081,
+      "max_num_tokens": 10326,
+      "budget": 8118,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 134,
+      "max_protected": 5204,
+      "max_slot0": 2081,
+      "max_num_tokens": 10347,
+      "budget": 8315,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 135,
+      "max_protected": 5204,
+      "max_slot0": 2081,
+      "max_num_tokens": 10701,
+      "budget": 9678,
+      "any_overflow": 0,
+      "n_layers": 22
+    },
+    {
+      "frame": 136,
+      "max_protected": 5284,
+      "max_slot0": 2161,
+      "max_num_tokens": 11457,
+      "budget": 9989,
+      "any_overflow": 0,
+      "n_layers": 24
+    },
+    {
+      "frame": 137,
+      "max_protected": 5284,
+      "max_slot0": 2161,
+      "max_num_tokens": 10352,
+      "budget": 8387,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 138,
+      "max_protected": 5284,
+      "max_slot0": 2161,
+      "max_num_tokens": 12816,
+      "budget": 4174,
+      "any_overflow": 0,
+      "n_layers": 6
+    },
+    {
+      "frame": 139,
+      "max_protected": 5284,
+      "max_slot0": 2161,
+      "max_num_tokens": 11251,
+      "budget": 8495,
+      "any_overflow": 0,
+      "n_layers": 19
+    },
+    {
+      "frame": 140,
+      "max_protected": 5284,
+      "max_slot0": 2161,
+      "max_num_tokens": 10908,
+      "budget": 8395,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 141,
+      "max_protected": 5284,
+      "max_slot0": 2161,
+      "max_num_tokens": 10356,
+      "budget": 8388,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 142,
+      "max_protected": 5284,
+      "max_slot0": 2161,
+      "max_num_tokens": 10322,
+      "budget": 8441,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 143,
+      "max_protected": 5284,
+      "max_slot0": 2161,
+      "max_num_tokens": 10913,
+      "budget": 9897,
+      "any_overflow": 0,
+      "n_layers": 22
+    },
+    {
+      "frame": 144,
+      "max_protected": 5364,
+      "max_slot0": 2241,
+      "max_num_tokens": 11364,
+      "budget": 9999,
+      "any_overflow": 0,
+      "n_layers": 24
+    },
+    {
+      "frame": 145,
+      "max_protected": 5364,
+      "max_slot0": 2241,
+      "max_num_tokens": 10426,
+      "budget": 8266,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 146,
+      "max_protected": 5364,
+      "max_slot0": 2241,
+      "max_num_tokens": 12860,
+      "budget": 4437,
+      "any_overflow": 0,
+      "n_layers": 7
+    },
+    {
+      "frame": 147,
+      "max_protected": 5364,
+      "max_slot0": 2241,
+      "max_num_tokens": 11055,
+      "budget": 8733,
+      "any_overflow": 0,
+      "n_layers": 19
+    },
+    {
+      "frame": 148,
+      "max_protected": 5364,
+      "max_slot0": 2241,
+      "max_num_tokens": 10789,
+      "budget": 8231,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 149,
+      "max_protected": 5364,
+      "max_slot0": 2241,
+      "max_num_tokens": 10201,
+      "budget": 8384,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 150,
+      "max_protected": 5364,
+      "max_slot0": 2241,
+      "max_num_tokens": 10286,
+      "budget": 8229,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 151,
+      "max_protected": 5364,
+      "max_slot0": 2241,
+      "max_num_tokens": 10839,
+      "budget": 9903,
+      "any_overflow": 0,
+      "n_layers": 22
+    },
+    {
+      "frame": 152,
+      "max_protected": 5444,
+      "max_slot0": 2321,
+      "max_num_tokens": 11799,
+      "budget": 10275,
+      "any_overflow": 0,
+      "n_layers": 24
+    },
+    {
+      "frame": 153,
+      "max_protected": 5444,
+      "max_slot0": 2321,
+      "max_num_tokens": 10380,
+      "budget": 8232,
+      "any_overflow": 0,
+      "n_layers": 19
+    },
+    {
+      "frame": 154,
+      "max_protected": 5444,
+      "max_slot0": 2321,
+      "max_num_tokens": 13130,
+      "budget": 4537,
+      "any_overflow": 1,
+      "n_layers": 5
+    },
+    {
+      "frame": 155,
+      "max_protected": 5444,
+      "max_slot0": 2321,
+      "max_num_tokens": 11014,
+      "budget": 8915,
+      "any_overflow": 1,
+      "n_layers": 19
+    },
+    {
+      "frame": 156,
+      "max_protected": 5444,
+      "max_slot0": 2321,
+      "max_num_tokens": 11105,
+      "budget": 8362,
+      "any_overflow": 0,
+      "n_layers": 19
+    },
+    {
+      "frame": 157,
+      "max_protected": 5444,
+      "max_slot0": 2321,
+      "max_num_tokens": 10284,
+      "budget": 8439,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 158,
+      "max_protected": 5444,
+      "max_slot0": 2321,
+      "max_num_tokens": 10331,
+      "budget": 8181,
+      "any_overflow": 0,
+      "n_layers": 19
+    },
+    {
+      "frame": 159,
+      "max_protected": 5444,
+      "max_slot0": 2321,
+      "max_num_tokens": 11120,
+      "budget": 9901,
+      "any_overflow": 0,
+      "n_layers": 21
+    },
+    {
+      "frame": 160,
+      "max_protected": 5524,
+      "max_slot0": 2401,
+      "max_num_tokens": 11900,
+      "budget": 10277,
+      "any_overflow": 0,
+      "n_layers": 24
+    },
+    {
+      "frame": 161,
+      "max_protected": 5524,
+      "max_slot0": 2401,
+      "max_num_tokens": 10241,
+      "budget": 8109,
+      "any_overflow": 0,
+      "n_layers": 19
+    },
+    {
+      "frame": 162,
+      "max_protected": 5524,
+      "max_slot0": 2401,
+      "max_num_tokens": 13081,
+      "budget": 4475,
+      "any_overflow": 1,
+      "n_layers": 5
+    },
+    {
+      "frame": 163,
+      "max_protected": 5524,
+      "max_slot0": 2401,
+      "max_num_tokens": 10929,
+      "budget": 4318,
+      "any_overflow": 1,
+      "n_layers": 19
+    },
+    {
+      "frame": 164,
+      "max_protected": 5524,
+      "max_slot0": 2401,
+      "max_num_tokens": 10972,
+      "budget": 4364,
+      "any_overflow": 0,
+      "n_layers": 19
+    },
+    {
+      "frame": 165,
+      "max_protected": 5524,
+      "max_slot0": 2401,
+      "max_num_tokens": 10211,
+      "budget": 4530,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 166,
+      "max_protected": 5524,
+      "max_slot0": 2401,
+      "max_num_tokens": 10341,
+      "budget": 8195,
+      "any_overflow": 0,
+      "n_layers": 19
+    },
+    {
+      "frame": 167,
+      "max_protected": 5524,
+      "max_slot0": 2401,
+      "max_num_tokens": 10949,
+      "budget": 6514,
+      "any_overflow": 0,
+      "n_layers": 22
+    },
+    {
+      "frame": 168,
+      "max_protected": 5604,
+      "max_slot0": 2481,
+      "max_num_tokens": 11782,
+      "budget": 10141,
+      "any_overflow": 0,
+      "n_layers": 23
+    },
+    {
+      "frame": 169,
+      "max_protected": 5604,
+      "max_slot0": 2481,
+      "max_num_tokens": 10304,
+      "budget": 7551,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 170,
+      "max_protected": 5604,
+      "max_slot0": 2481,
+      "max_num_tokens": 12996,
+      "budget": 4320,
+      "any_overflow": 1,
+      "n_layers": 5
+    },
+    {
+      "frame": 171,
+      "max_protected": 5604,
+      "max_slot0": 2481,
+      "max_num_tokens": 11033,
+      "budget": 4203,
+      "any_overflow": 1,
+      "n_layers": 17
+    },
+    {
+      "frame": 172,
+      "max_protected": 5604,
+      "max_slot0": 2481,
+      "max_num_tokens": 11268,
+      "budget": 4187,
+      "any_overflow": 1,
+      "n_layers": 23
+    },
+    {
+      "frame": 173,
+      "max_protected": 5604,
+      "max_slot0": 2481,
+      "max_num_tokens": 10958,
+      "budget": 4140,
+      "any_overflow": 1,
+      "n_layers": 23
+    },
+    {
+      "frame": 174,
+      "max_protected": 5604,
+      "max_slot0": 2481,
+      "max_num_tokens": 10891,
+      "budget": 4156,
+      "any_overflow": 0,
+      "n_layers": 23
+    },
+    {
+      "frame": 175,
+      "max_protected": 5604,
+      "max_slot0": 2481,
+      "max_num_tokens": 11002,
+      "budget": 4479,
+      "any_overflow": 0,
+      "n_layers": 23
+    },
+    {
+      "frame": 176,
+      "max_protected": 5684,
+      "max_slot0": 2561,
+      "max_num_tokens": 11382,
+      "budget": 9833,
+      "any_overflow": 0,
+      "n_layers": 23
+    },
+    {
+      "frame": 177,
+      "max_protected": 5684,
+      "max_slot0": 2561,
+      "max_num_tokens": 10379,
+      "budget": 7524,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 178,
+      "max_protected": 5684,
+      "max_slot0": 2561,
+      "max_num_tokens": 12184,
+      "budget": 7085,
+      "any_overflow": 1,
+      "n_layers": 5
+    },
+    {
+      "frame": 179,
+      "max_protected": 5684,
+      "max_slot0": 2561,
+      "max_num_tokens": 10488,
+      "budget": 4129,
+      "any_overflow": 1,
+      "n_layers": 16
+    },
+    {
+      "frame": 180,
+      "max_protected": 5684,
+      "max_slot0": 2561,
+      "max_num_tokens": 10743,
+      "budget": 4192,
+      "any_overflow": 0,
+      "n_layers": 22
+    },
+    {
+      "frame": 181,
+      "max_protected": 5684,
+      "max_slot0": 2561,
+      "max_num_tokens": 10813,
+      "budget": 9452,
+      "any_overflow": 0,
+      "n_layers": 23
+    },
+    {
+      "frame": 182,
+      "max_protected": 5684,
+      "max_slot0": 2561,
+      "max_num_tokens": 10493,
+      "budget": 9914,
+      "any_overflow": 0,
+      "n_layers": 22
+    },
+    {
+      "frame": 183,
+      "max_protected": 5684,
+      "max_slot0": 2561,
+      "max_num_tokens": 11221,
+      "budget": 10102,
+      "any_overflow": 0,
+      "n_layers": 23
+    },
+    {
+      "frame": 184,
+      "max_protected": 5764,
+      "max_slot0": 2641,
+      "max_num_tokens": 11745,
+      "budget": 10101,
+      "any_overflow": 0,
+      "n_layers": 23
+    },
+    {
+      "frame": 185,
+      "max_protected": 5764,
+      "max_slot0": 2641,
+      "max_num_tokens": 10165,
+      "budget": 7272,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 186,
+      "max_protected": 5546,
+      "max_slot0": 2423,
+      "max_num_tokens": 13103,
+      "budget": 4186,
+      "any_overflow": 1,
+      "n_layers": 4
+    },
+    {
+      "frame": 187,
+      "max_protected": 5764,
+      "max_slot0": 2641,
+      "max_num_tokens": 10199,
+      "budget": 3971,
+      "any_overflow": 1,
+      "n_layers": 17
+    },
+    {
+      "frame": 188,
+      "max_protected": 5764,
+      "max_slot0": 2641,
+      "max_num_tokens": 10670,
+      "budget": 4001,
+      "any_overflow": 0,
+      "n_layers": 22
+    },
+    {
+      "frame": 189,
+      "max_protected": 5764,
+      "max_slot0": 2641,
+      "max_num_tokens": 10515,
+      "budget": 4501,
+      "any_overflow": 0,
+      "n_layers": 22
+    },
+    {
+      "frame": 190,
+      "max_protected": 5764,
+      "max_slot0": 2641,
+      "max_num_tokens": 10484,
+      "budget": 9379,
+      "any_overflow": 0,
+      "n_layers": 22
+    },
+    {
+      "frame": 191,
+      "max_protected": 5764,
+      "max_slot0": 2641,
+      "max_num_tokens": 11025,
+      "budget": 6344,
+      "any_overflow": 0,
+      "n_layers": 24
+    },
+    {
+      "frame": 192,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 12014,
+      "budget": 9254,
+      "any_overflow": 0,
+      "n_layers": 23
+    },
+    {
+      "frame": 193,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 9909,
+      "budget": 7204,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 194,
+      "max_protected": 5612,
+      "max_slot0": 2489,
+      "max_num_tokens": 12915,
+      "budget": 9347,
+      "any_overflow": 1,
+      "n_layers": 5
+    },
+    {
+      "frame": 195,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10388,
+      "budget": 9791,
+      "any_overflow": 1,
+      "n_layers": 17
+    },
+    {
+      "frame": 196,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10832,
+      "budget": 10056,
+      "any_overflow": 0,
+      "n_layers": 22
+    },
+    {
+      "frame": 197,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 11097,
+      "budget": 10015,
+      "any_overflow": 0,
+      "n_layers": 22
+    },
+    {
+      "frame": 198,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 11056,
+      "budget": 9957,
+      "any_overflow": 0,
+      "n_layers": 22
+    },
+    {
+      "frame": 199,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 11004,
+      "budget": 10010,
+      "any_overflow": 0,
+      "n_layers": 24
+    },
+    {
+      "frame": 200,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 11989,
+      "budget": 10050,
+      "any_overflow": 0,
+      "n_layers": 23
+    },
+    {
+      "frame": 201,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 11091,
+      "budget": 11067,
+      "any_overflow": 0,
+      "n_layers": 21
+    },
+    {
+      "frame": 202,
+      "max_protected": 5612,
+      "max_slot0": 2489,
+      "max_num_tokens": 12835,
+      "budget": 10482,
+      "any_overflow": 1,
+      "n_layers": 6
+    },
+    {
+      "frame": 203,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 11523,
+      "budget": 9883,
+      "any_overflow": 1,
+      "n_layers": 21
+    },
+    {
+      "frame": 204,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10924,
+      "budget": 10008,
+      "any_overflow": 0,
+      "n_layers": 23
+    },
+    {
+      "frame": 205,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 11049,
+      "budget": 9744,
+      "any_overflow": 0,
+      "n_layers": 23
+    },
+    {
+      "frame": 206,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10785,
+      "budget": 9722,
+      "any_overflow": 0,
+      "n_layers": 23
+    },
+    {
+      "frame": 207,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10763,
+      "budget": 9709,
+      "any_overflow": 0,
+      "n_layers": 22
+    },
+    {
+      "frame": 208,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 11816,
+      "budget": 9685,
+      "any_overflow": 0,
+      "n_layers": 24
+    },
+    {
+      "frame": 209,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 9908,
+      "budget": 7692,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 210,
+      "max_protected": 5309,
+      "max_slot0": 2186,
+      "max_num_tokens": 12990,
+      "budget": 3933,
+      "any_overflow": 1,
+      "n_layers": 6
+    },
+    {
+      "frame": 211,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10626,
+      "budget": 3761,
+      "any_overflow": 1,
+      "n_layers": 19
+    },
+    {
+      "frame": 212,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10887,
+      "budget": 3798,
+      "any_overflow": 0,
+      "n_layers": 22
+    },
+    {
+      "frame": 213,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10708,
+      "budget": 4673,
+      "any_overflow": 0,
+      "n_layers": 22
+    },
+    {
+      "frame": 214,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10343,
+      "budget": 7457,
+      "any_overflow": 0,
+      "n_layers": 21
+    },
+    {
+      "frame": 215,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10889,
+      "budget": 6517,
+      "any_overflow": 0,
+      "n_layers": 22
+    },
+    {
+      "frame": 216,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 12130,
+      "budget": 6456,
+      "any_overflow": 0,
+      "n_layers": 23
+    },
+    {
+      "frame": 217,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 9994,
+      "budget": 7081,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 218,
+      "max_protected": 5309,
+      "max_slot0": 2186,
+      "max_num_tokens": 13212,
+      "budget": 9318,
+      "any_overflow": 0,
+      "n_layers": 4
+    },
+    {
+      "frame": 219,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10359,
+      "budget": 9467,
+      "any_overflow": 0,
+      "n_layers": 18
+    },
+    {
+      "frame": 220,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10508,
+      "budget": 9532,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 221,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10573,
+      "budget": 9540,
+      "any_overflow": 0,
+      "n_layers": 21
+    },
+    {
+      "frame": 222,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10581,
+      "budget": 9690,
+      "any_overflow": 0,
+      "n_layers": 22
+    },
+    {
+      "frame": 223,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10893,
+      "budget": 9681,
+      "any_overflow": 0,
+      "n_layers": 24
+    },
+    {
+      "frame": 224,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 11641,
+      "budget": 9837,
+      "any_overflow": 0,
+      "n_layers": 24
+    },
+    {
+      "frame": 225,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10562,
+      "budget": 7515,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 226,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 12509,
+      "budget": 4201,
+      "any_overflow": 0,
+      "n_layers": 7
+    },
+    {
+      "frame": 227,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10431,
+      "budget": 6906,
+      "any_overflow": 0,
+      "n_layers": 19
+    },
+    {
+      "frame": 228,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10432,
+      "budget": 7486,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 229,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10745,
+      "budget": 7532,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 230,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10027,
+      "budget": 7208,
+      "any_overflow": 0,
+      "n_layers": 21
+    },
+    {
+      "frame": 231,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10824,
+      "budget": 9191,
+      "any_overflow": 0,
+      "n_layers": 23
+    },
+    {
+      "frame": 232,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 11683,
+      "budget": 10187,
+      "any_overflow": 0,
+      "n_layers": 24
+    },
+    {
+      "frame": 233,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10223,
+      "budget": 7617,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 234,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 12551,
+      "budget": 4682,
+      "any_overflow": 0,
+      "n_layers": 7
+    },
+    {
+      "frame": 235,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10515,
+      "budget": 7044,
+      "any_overflow": 0,
+      "n_layers": 17
+    },
+    {
+      "frame": 236,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10087,
+      "budget": 7439,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 237,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10276,
+      "budget": 7264,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 238,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10103,
+      "budget": 7282,
+      "any_overflow": 0,
+      "n_layers": 21
+    },
+    {
+      "frame": 239,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10907,
+      "budget": 9315,
+      "any_overflow": 0,
+      "n_layers": 23
+    },
+    {
+      "frame": 240,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 11684,
+      "budget": 10184,
+      "any_overflow": 0,
+      "n_layers": 24
+    },
+    {
+      "frame": 241,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10223,
+      "budget": 7674,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 242,
+      "max_protected": 5309,
+      "max_slot0": 2186,
+      "max_num_tokens": 12541,
+      "budget": 4690,
+      "any_overflow": 0,
+      "n_layers": 6
+    },
+    {
+      "frame": 243,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10445,
+      "budget": 7107,
+      "any_overflow": 0,
+      "n_layers": 18
+    },
+    {
+      "frame": 244,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10120,
+      "budget": 7663,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 245,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10260,
+      "budget": 8104,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 246,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 9979,
+      "budget": 7552,
+      "any_overflow": 0,
+      "n_layers": 21
+    },
+    {
+      "frame": 247,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10781,
+      "budget": 9426,
+      "any_overflow": 0,
+      "n_layers": 23
+    },
+    {
+      "frame": 248,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 11629,
+      "budget": 10259,
+      "any_overflow": 0,
+      "n_layers": 24
+    },
+    {
+      "frame": 249,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10050,
+      "budget": 7759,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 250,
+      "max_protected": 5309,
+      "max_slot0": 2186,
+      "max_num_tokens": 12386,
+      "budget": 4483,
+      "any_overflow": 0,
+      "n_layers": 6
+    },
+    {
+      "frame": 251,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10537,
+      "budget": 7254,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 252,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 9988,
+      "budget": 7566,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 253,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 9995,
+      "budget": 7459,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 254,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 9988,
+      "budget": 7316,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 255,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10789,
+      "budget": 9334,
+      "any_overflow": 0,
+      "n_layers": 23
+    },
+    {
+      "frame": 256,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 11598,
+      "budget": 10227,
+      "any_overflow": 0,
+      "n_layers": 24
+    },
+    {
+      "frame": 257,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 9925,
+      "budget": 7588,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 258,
+      "max_protected": 5309,
+      "max_slot0": 2186,
+      "max_num_tokens": 12644,
+      "budget": 4465,
+      "any_overflow": 0,
+      "n_layers": 5
+    },
+    {
+      "frame": 259,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10429,
+      "budget": 7853,
+      "any_overflow": 0,
+      "n_layers": 19
+    },
+    {
+      "frame": 260,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10032,
+      "budget": 7583,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 261,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10030,
+      "budget": 7491,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 262,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 9907,
+      "budget": 7499,
+      "any_overflow": 0,
+      "n_layers": 21
+    },
+    {
+      "frame": 263,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 11162,
+      "budget": 9423,
+      "any_overflow": 0,
+      "n_layers": 23
+    },
+    {
+      "frame": 264,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 11780,
+      "budget": 10257,
+      "any_overflow": 0,
+      "n_layers": 24
+    },
+    {
+      "frame": 265,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 9797,
+      "budget": 7640,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 266,
+      "max_protected": 5309,
+      "max_slot0": 2186,
+      "max_num_tokens": 12627,
+      "budget": 4512,
+      "any_overflow": 0,
+      "n_layers": 6
+    },
+    {
+      "frame": 267,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10413,
+      "budget": 6911,
+      "any_overflow": 0,
+      "n_layers": 19
+    },
+    {
+      "frame": 268,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 9994,
+      "budget": 7483,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 269,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10161,
+      "budget": 7694,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 270,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 9912,
+      "budget": 7335,
+      "any_overflow": 0,
+      "n_layers": 21
+    },
+    {
+      "frame": 271,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 11046,
+      "budget": 9721,
+      "any_overflow": 0,
+      "n_layers": 23
+    },
+    {
+      "frame": 272,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 11907,
+      "budget": 10312,
+      "any_overflow": 0,
+      "n_layers": 24
+    },
+    {
+      "frame": 273,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 9889,
+      "budget": 7815,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 274,
+      "max_protected": 5309,
+      "max_slot0": 2186,
+      "max_num_tokens": 12729,
+      "budget": 4524,
+      "any_overflow": 0,
+      "n_layers": 6
+    },
+    {
+      "frame": 275,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10542,
+      "budget": 6996,
+      "any_overflow": 0,
+      "n_layers": 19
+    },
+    {
+      "frame": 276,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10308,
+      "budget": 7311,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 277,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 9987,
+      "budget": 7809,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 278,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 9829,
+      "budget": 7535,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 279,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10595,
+      "budget": 9845,
+      "any_overflow": 0,
+      "n_layers": 22
+    },
+    {
+      "frame": 280,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 11800,
+      "budget": 10373,
+      "any_overflow": 0,
+      "n_layers": 24
+    },
+    {
+      "frame": 281,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 9975,
+      "budget": 8117,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 282,
+      "max_protected": 5309,
+      "max_slot0": 2186,
+      "max_num_tokens": 13036,
+      "budget": 4508,
+      "any_overflow": 0,
+      "n_layers": 6
+    },
+    {
+      "frame": 283,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10477,
+      "budget": 7507,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 284,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10085,
+      "budget": 7864,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 285,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 9666,
+      "budget": 7677,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 286,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10116,
+      "budget": 7814,
+      "any_overflow": 0,
+      "n_layers": 21
+    },
+    {
+      "frame": 287,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 11079,
+      "budget": 9883,
+      "any_overflow": 0,
+      "n_layers": 22
+    },
+    {
+      "frame": 288,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 11470,
+      "budget": 10485,
+      "any_overflow": 0,
+      "n_layers": 24
+    },
+    {
+      "frame": 289,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 9919,
+      "budget": 7901,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 290,
+      "max_protected": 5309,
+      "max_slot0": 2186,
+      "max_num_tokens": 12919,
+      "budget": 4702,
+      "any_overflow": 0,
+      "n_layers": 5
+    },
+    {
+      "frame": 291,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10301,
+      "budget": 8099,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 292,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 9975,
+      "budget": 7899,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 293,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 9813,
+      "budget": 7736,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 294,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 9810,
+      "budget": 7758,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 295,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 11303,
+      "budget": 9869,
+      "any_overflow": 0,
+      "n_layers": 23
+    },
+    {
+      "frame": 296,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 12067,
+      "budget": 10413,
+      "any_overflow": 0,
+      "n_layers": 24
+    },
+    {
+      "frame": 297,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10020,
+      "budget": 7943,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 298,
+      "max_protected": 5309,
+      "max_slot0": 2186,
+      "max_num_tokens": 12957,
+      "budget": 4664,
+      "any_overflow": 0,
+      "n_layers": 6
+    },
+    {
+      "frame": 299,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10352,
+      "budget": 7362,
+      "any_overflow": 0,
+      "n_layers": 19
+    },
+    {
+      "frame": 300,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10169,
+      "budget": 7818,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 301,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 9973,
+      "budget": 7081,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 302,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 9786,
+      "budget": 7529,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 303,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 11056,
+      "budget": 9911,
+      "any_overflow": 0,
+      "n_layers": 23
+    },
+    {
+      "frame": 304,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 12006,
+      "budget": 10505,
+      "any_overflow": 0,
+      "n_layers": 24
+    },
+    {
+      "frame": 305,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 9875,
+      "budget": 7964,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 306,
+      "max_protected": 5309,
+      "max_slot0": 2186,
+      "max_num_tokens": 12874,
+      "budget": 4699,
+      "any_overflow": 1,
+      "n_layers": 6
+    },
+    {
+      "frame": 307,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10366,
+      "budget": 4315,
+      "any_overflow": 1,
+      "n_layers": 19
+    },
+    {
+      "frame": 308,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10248,
+      "budget": 4337,
+      "any_overflow": 0,
+      "n_layers": 21
+    },
+    {
+      "frame": 309,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10486,
+      "budget": 4456,
+      "any_overflow": 0,
+      "n_layers": 21
+    },
+    {
+      "frame": 310,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10034,
+      "budget": 7140,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 311,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10735,
+      "budget": 7036,
+      "any_overflow": 0,
+      "n_layers": 21
+    },
+    {
+      "frame": 312,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 11903,
+      "budget": 7101,
+      "any_overflow": 0,
+      "n_layers": 24
+    },
+    {
+      "frame": 313,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10102,
+      "budget": 7902,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 314,
+      "max_protected": 5309,
+      "max_slot0": 2186,
+      "max_num_tokens": 13279,
+      "budget": 4782,
+      "any_overflow": 0,
+      "n_layers": 6
+    },
+    {
+      "frame": 315,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10367,
+      "budget": 7354,
+      "any_overflow": 0,
+      "n_layers": 19
+    },
+    {
+      "frame": 316,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10095,
+      "budget": 7503,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 317,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 9654,
+      "budget": 7263,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 318,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 9743,
+      "budget": 7520,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 319,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10675,
+      "budget": 7371,
+      "any_overflow": 0,
+      "n_layers": 21
+    },
+    {
+      "frame": 320,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 11777,
+      "budget": 10109,
+      "any_overflow": 0,
+      "n_layers": 24
+    },
+    {
+      "frame": 321,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 9651,
+      "budget": 7802,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 322,
+      "max_protected": 5309,
+      "max_slot0": 2186,
+      "max_num_tokens": 13044,
+      "budget": 4951,
+      "any_overflow": 0,
+      "n_layers": 6
+    },
+    {
+      "frame": 323,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10248,
+      "budget": 7338,
+      "any_overflow": 0,
+      "n_layers": 19
+    },
+    {
+      "frame": 324,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 9833,
+      "budget": 7661,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 325,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 9775,
+      "budget": 7215,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 326,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10006,
+      "budget": 7494,
+      "any_overflow": 0,
+      "n_layers": 21
+    },
+    {
+      "frame": 327,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10920,
+      "budget": 10060,
+      "any_overflow": 0,
+      "n_layers": 23
+    },
+    {
+      "frame": 328,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 11828,
+      "budget": 10476,
+      "any_overflow": 0,
+      "n_layers": 24
+    },
+    {
+      "frame": 329,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 9976,
+      "budget": 7831,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 330,
+      "max_protected": 5309,
+      "max_slot0": 2186,
+      "max_num_tokens": 12558,
+      "budget": 5065,
+      "any_overflow": 0,
+      "n_layers": 6
+    },
+    {
+      "frame": 331,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10240,
+      "budget": 7538,
+      "any_overflow": 0,
+      "n_layers": 19
+    },
+    {
+      "frame": 332,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10055,
+      "budget": 7605,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 333,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 9934,
+      "budget": 7341,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 334,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10009,
+      "budget": 7522,
+      "any_overflow": 0,
+      "n_layers": 21
+    },
+    {
+      "frame": 335,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10859,
+      "budget": 9819,
+      "any_overflow": 0,
+      "n_layers": 23
+    },
+    {
+      "frame": 336,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 11630,
+      "budget": 10356,
+      "any_overflow": 0,
+      "n_layers": 24
+    },
+    {
+      "frame": 337,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 9856,
+      "budget": 7744,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 338,
+      "max_protected": 5309,
+      "max_slot0": 2186,
+      "max_num_tokens": 12438,
+      "budget": 5232,
+      "any_overflow": 0,
+      "n_layers": 6
+    },
+    {
+      "frame": 339,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10160,
+      "budget": 7310,
+      "any_overflow": 0,
+      "n_layers": 19
+    },
+    {
+      "frame": 340,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 9922,
+      "budget": 7608,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 341,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10087,
+      "budget": 7062,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 342,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10100,
+      "budget": 7304,
+      "any_overflow": 0,
+      "n_layers": 21
+    },
+    {
+      "frame": 343,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10885,
+      "budget": 10232,
+      "any_overflow": 0,
+      "n_layers": 24
+    },
+    {
+      "frame": 344,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 11565,
+      "budget": 9922,
+      "any_overflow": 0,
+      "n_layers": 24
+    },
+    {
+      "frame": 345,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10301,
+      "budget": 7545,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 346,
+      "max_protected": 5309,
+      "max_slot0": 2186,
+      "max_num_tokens": 12496,
+      "budget": 5249,
+      "any_overflow": 0,
+      "n_layers": 6
+    },
+    {
+      "frame": 347,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 9941,
+      "budget": 7145,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 348,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10410,
+      "budget": 7492,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 349,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 9915,
+      "budget": 7179,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 350,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10173,
+      "budget": 7266,
+      "any_overflow": 0,
+      "n_layers": 21
+    },
+    {
+      "frame": 351,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10950,
+      "budget": 10198,
+      "any_overflow": 0,
+      "n_layers": 24
+    },
+    {
+      "frame": 352,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 11722,
+      "budget": 9945,
+      "any_overflow": 0,
+      "n_layers": 24
+    },
+    {
+      "frame": 353,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10208,
+      "budget": 7632,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 354,
+      "max_protected": 5309,
+      "max_slot0": 2186,
+      "max_num_tokens": 12530,
+      "budget": 5189,
+      "any_overflow": 0,
+      "n_layers": 7
+    },
+    {
+      "frame": 355,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10064,
+      "budget": 7100,
+      "any_overflow": 0,
+      "n_layers": 18
+    },
+    {
+      "frame": 356,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10026,
+      "budget": 7310,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 357,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10289,
+      "budget": 7084,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 358,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10100,
+      "budget": 6967,
+      "any_overflow": 0,
+      "n_layers": 21
+    },
+    {
+      "frame": 359,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10906,
+      "budget": 10304,
+      "any_overflow": 0,
+      "n_layers": 24
+    },
+    {
+      "frame": 360,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 11814,
+      "budget": 9904,
+      "any_overflow": 0,
+      "n_layers": 24
+    },
+    {
+      "frame": 361,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10068,
+      "budget": 7622,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 362,
+      "max_protected": 5309,
+      "max_slot0": 2186,
+      "max_num_tokens": 12594,
+      "budget": 5079,
+      "any_overflow": 0,
+      "n_layers": 7
+    },
+    {
+      "frame": 363,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10065,
+      "budget": 6979,
+      "any_overflow": 0,
+      "n_layers": 19
+    },
+    {
+      "frame": 364,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10199,
+      "budget": 7144,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 365,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 9923,
+      "budget": 7228,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 366,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10069,
+      "budget": 7160,
+      "any_overflow": 0,
+      "n_layers": 21
+    },
+    {
+      "frame": 367,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10918,
+      "budget": 10272,
+      "any_overflow": 0,
+      "n_layers": 23
+    },
+    {
+      "frame": 368,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 11734,
+      "budget": 9911,
+      "any_overflow": 0,
+      "n_layers": 24
+    },
+    {
+      "frame": 369,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 9805,
+      "budget": 7847,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 370,
+      "max_protected": 5309,
+      "max_slot0": 2186,
+      "max_num_tokens": 13034,
+      "budget": 4948,
+      "any_overflow": 0,
+      "n_layers": 6
+    },
+    {
+      "frame": 371,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10184,
+      "budget": 7078,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 372,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10026,
+      "budget": 7333,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 373,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 9866,
+      "budget": 7249,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 374,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 9883,
+      "budget": 7270,
+      "any_overflow": 0,
+      "n_layers": 21
+    },
+    {
+      "frame": 375,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10870,
+      "budget": 9985,
+      "any_overflow": 0,
+      "n_layers": 22
+    },
+    {
+      "frame": 376,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 11911,
+      "budget": 10279,
+      "any_overflow": 0,
+      "n_layers": 24
+    },
+    {
+      "frame": 377,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 9938,
+      "budget": 7854,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 378,
+      "max_protected": 5309,
+      "max_slot0": 2186,
+      "max_num_tokens": 13137,
+      "budget": 5038,
+      "any_overflow": 0,
+      "n_layers": 6
+    },
+    {
+      "frame": 379,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10093,
+      "budget": 7122,
+      "any_overflow": 0,
+      "n_layers": 19
+    },
+    {
+      "frame": 380,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10087,
+      "budget": 7337,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 381,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 9963,
+      "budget": 7149,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 382,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10051,
+      "budget": 7040,
+      "any_overflow": 0,
+      "n_layers": 21
+    },
+    {
+      "frame": 383,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10969,
+      "budget": 9942,
+      "any_overflow": 0,
+      "n_layers": 22
+    },
+    {
+      "frame": 384,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 11773,
+      "budget": 10442,
+      "any_overflow": 0,
+      "n_layers": 24
+    },
+    {
+      "frame": 385,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 9820,
+      "budget": 7898,
+      "any_overflow": 0,
+      "n_layers": 19
+    },
+    {
+      "frame": 386,
+      "max_protected": 5309,
+      "max_slot0": 2186,
+      "max_num_tokens": 13088,
+      "budget": 5000,
+      "any_overflow": 1,
+      "n_layers": 6
+    },
+    {
+      "frame": 387,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10181,
+      "budget": 7524,
+      "any_overflow": 1,
+      "n_layers": 18
+    },
+    {
+      "frame": 388,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10113,
+      "budget": 7548,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 389,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10330,
+      "budget": 7187,
+      "any_overflow": 0,
+      "n_layers": 19
+    },
+    {
+      "frame": 390,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10095,
+      "budget": 7323,
+      "any_overflow": 0,
+      "n_layers": 21
+    },
+    {
+      "frame": 391,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10994,
+      "budget": 10194,
+      "any_overflow": 0,
+      "n_layers": 22
+    },
+    {
+      "frame": 392,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 11801,
+      "budget": 9595,
+      "any_overflow": 0,
+      "n_layers": 23
+    },
+    {
+      "frame": 393,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 9982,
+      "budget": 7359,
+      "any_overflow": 0,
+      "n_layers": 19
+    },
+    {
+      "frame": 394,
+      "max_protected": 5309,
+      "max_slot0": 2186,
+      "max_num_tokens": 12983,
+      "budget": 4775,
+      "any_overflow": 1,
+      "n_layers": 5
+    },
+    {
+      "frame": 395,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 9738,
+      "budget": 4663,
+      "any_overflow": 1,
+      "n_layers": 14
+    },
+    {
+      "frame": 396,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10231,
+      "budget": 4565,
+      "any_overflow": 1,
+      "n_layers": 20
+    },
+    {
+      "frame": 397,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10877,
+      "budget": 4453,
+      "any_overflow": 1,
+      "n_layers": 23
+    },
+    {
+      "frame": 398,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10643,
+      "budget": 4457,
+      "any_overflow": 0,
+      "n_layers": 23
+    },
+    {
+      "frame": 399,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10658,
+      "budget": 4940,
+      "any_overflow": 0,
+      "n_layers": 23
+    },
+    {
+      "frame": 400,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10999,
+      "budget": 5858,
+      "any_overflow": 0,
+      "n_layers": 23
+    },
+    {
+      "frame": 401,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10465,
+      "budget": 7162,
+      "any_overflow": 0,
+      "n_layers": 19
+    },
+    {
+      "frame": 402,
+      "max_protected": 5309,
+      "max_slot0": 2186,
+      "max_num_tokens": 12103,
+      "budget": 5055,
+      "any_overflow": 0,
+      "n_layers": 6
+    },
+    {
+      "frame": 403,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 9911,
+      "budget": 6926,
+      "any_overflow": 0,
+      "n_layers": 16
+    },
+    {
+      "frame": 404,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10103,
+      "budget": 7232,
+      "any_overflow": 0,
+      "n_layers": 19
+    },
+    {
+      "frame": 405,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10088,
+      "budget": 8554,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 406,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 9934,
+      "budget": 8882,
+      "any_overflow": 0,
+      "n_layers": 22
+    },
+    {
+      "frame": 407,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 11322,
+      "budget": 9444,
+      "any_overflow": 0,
+      "n_layers": 24
+    },
+    {
+      "frame": 408,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 11631,
+      "budget": 9652,
+      "any_overflow": 0,
+      "n_layers": 24
+    },
+    {
+      "frame": 409,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 9804,
+      "budget": 7369,
+      "any_overflow": 0,
+      "n_layers": 19
+    },
+    {
+      "frame": 410,
+      "max_protected": 5309,
+      "max_slot0": 2186,
+      "max_num_tokens": 12957,
+      "budget": 4980,
+      "any_overflow": 0,
+      "n_layers": 8
+    },
+    {
+      "frame": 411,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 9616,
+      "budget": 7041,
+      "any_overflow": 0,
+      "n_layers": 19
+    },
+    {
+      "frame": 412,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10058,
+      "budget": 7303,
+      "any_overflow": 0,
+      "n_layers": 19
+    },
+    {
+      "frame": 413,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 9628,
+      "budget": 6810,
+      "any_overflow": 0,
+      "n_layers": 19
+    },
+    {
+      "frame": 414,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 9931,
+      "budget": 6815,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 415,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 11308,
+      "budget": 10030,
+      "any_overflow": 0,
+      "n_layers": 24
+    },
+    {
+      "frame": 416,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 11921,
+      "budget": 9627,
+      "any_overflow": 0,
+      "n_layers": 24
+    },
+    {
+      "frame": 417,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 9957,
+      "budget": 7981,
+      "any_overflow": 0,
+      "n_layers": 19
+    },
+    {
+      "frame": 418,
+      "max_protected": 5309,
+      "max_slot0": 2186,
+      "max_num_tokens": 12923,
+      "budget": 4933,
+      "any_overflow": 0,
+      "n_layers": 7
+    },
+    {
+      "frame": 419,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 9714,
+      "budget": 7322,
+      "any_overflow": 0,
+      "n_layers": 19
+    },
+    {
+      "frame": 420,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10079,
+      "budget": 7198,
+      "any_overflow": 0,
+      "n_layers": 19
+    },
+    {
+      "frame": 421,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 9614,
+      "budget": 6844,
+      "any_overflow": 0,
+      "n_layers": 19
+    },
+    {
+      "frame": 422,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 9773,
+      "budget": 6900,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 423,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 11100,
+      "budget": 9620,
+      "any_overflow": 0,
+      "n_layers": 23
+    },
+    {
+      "frame": 424,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 11932,
+      "budget": 10166,
+      "any_overflow": 0,
+      "n_layers": 24
+    },
+    {
+      "frame": 425,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 9876,
+      "budget": 7552,
+      "any_overflow": 0,
+      "n_layers": 19
+    },
+    {
+      "frame": 426,
+      "max_protected": 5309,
+      "max_slot0": 2186,
+      "max_num_tokens": 12866,
+      "budget": 4841,
+      "any_overflow": 1,
+      "n_layers": 8
+    },
+    {
+      "frame": 427,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 9884,
+      "budget": 4165,
+      "any_overflow": 1,
+      "n_layers": 16
+    },
+    {
+      "frame": 428,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10049,
+      "budget": 4189,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 429,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10281,
+      "budget": 4323,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 430,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10063,
+      "budget": 6826,
+      "any_overflow": 0,
+      "n_layers": 19
+    },
+    {
+      "frame": 431,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 11068,
+      "budget": 6305,
+      "any_overflow": 0,
+      "n_layers": 23
+    },
+    {
+      "frame": 432,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 12072,
+      "budget": 10295,
+      "any_overflow": 0,
+      "n_layers": 23
+    },
+    {
+      "frame": 433,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10051,
+      "budget": 7174,
+      "any_overflow": 0,
+      "n_layers": 19
+    },
+    {
+      "frame": 434,
+      "max_protected": 5309,
+      "max_slot0": 2186,
+      "max_num_tokens": 12944,
+      "budget": 4691,
+      "any_overflow": 1,
+      "n_layers": 6
+    },
+    {
+      "frame": 435,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 9834,
+      "budget": 4305,
+      "any_overflow": 1,
+      "n_layers": 16
+    },
+    {
+      "frame": 436,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10356,
+      "budget": 4376,
+      "any_overflow": 0,
+      "n_layers": 21
+    },
+    {
+      "frame": 437,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10610,
+      "budget": 4385,
+      "any_overflow": 0,
+      "n_layers": 21
+    },
+    {
+      "frame": 438,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10618,
+      "budget": 9586,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 439,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10767,
+      "budget": 9745,
+      "any_overflow": 0,
+      "n_layers": 22
+    },
+    {
+      "frame": 440,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 11819,
+      "budget": 6823,
+      "any_overflow": 0,
+      "n_layers": 24
+    },
+    {
+      "frame": 441,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10111,
+      "budget": 7533,
+      "any_overflow": 0,
+      "n_layers": 19
+    },
+    {
+      "frame": 442,
+      "max_protected": 5309,
+      "max_slot0": 2186,
+      "max_num_tokens": 13093,
+      "budget": 4856,
+      "any_overflow": 0,
+      "n_layers": 7
+    },
+    {
+      "frame": 443,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 9923,
+      "budget": 6648,
+      "any_overflow": 0,
+      "n_layers": 17
+    },
+    {
+      "frame": 444,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10123,
+      "budget": 6788,
+      "any_overflow": 0,
+      "n_layers": 19
+    },
+    {
+      "frame": 445,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10182,
+      "budget": 7064,
+      "any_overflow": 0,
+      "n_layers": 19
+    },
+    {
+      "frame": 446,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 9886,
+      "budget": 6757,
+      "any_overflow": 0,
+      "n_layers": 19
+    },
+    {
+      "frame": 447,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10660,
+      "budget": 9760,
+      "any_overflow": 0,
+      "n_layers": 22
+    },
+    {
+      "frame": 448,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 11775,
+      "budget": 9907,
+      "any_overflow": 0,
+      "n_layers": 24
+    },
+    {
+      "frame": 449,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 9930,
+      "budget": 7163,
+      "any_overflow": 0,
+      "n_layers": 18
+    },
+    {
+      "frame": 450,
+      "max_protected": 5309,
+      "max_slot0": 2186,
+      "max_num_tokens": 12995,
+      "budget": 4840,
+      "any_overflow": 1,
+      "n_layers": 7
+    },
+    {
+      "frame": 451,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 9913,
+      "budget": 2623,
+      "any_overflow": 1,
+      "n_layers": 18
+    },
+    {
+      "frame": 452,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10237,
+      "budget": 2654,
+      "any_overflow": 0,
+      "n_layers": 19
+    },
+    {
+      "frame": 453,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 9968,
+      "budget": 7812,
+      "any_overflow": 0,
+      "n_layers": 18
+    },
+    {
+      "frame": 454,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 9947,
+      "budget": 3990,
+      "any_overflow": 0,
+      "n_layers": 19
+    },
+    {
+      "frame": 455,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10839,
+      "budget": 9824,
+      "any_overflow": 0,
+      "n_layers": 21
+    },
+    {
+      "frame": 456,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 11692,
+      "budget": 10211,
+      "any_overflow": 0,
+      "n_layers": 23
+    },
+    {
+      "frame": 457,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 9705,
+      "budget": 6563,
+      "any_overflow": 0,
+      "n_layers": 18
+    },
+    {
+      "frame": 458,
+      "max_protected": 5309,
+      "max_slot0": 2186,
+      "max_num_tokens": 12853,
+      "budget": 4746,
+      "any_overflow": 0,
+      "n_layers": 5
+    },
+    {
+      "frame": 459,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 9545,
+      "budget": 8306,
+      "any_overflow": 0,
+      "n_layers": 15
+    },
+    {
+      "frame": 460,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 9631,
+      "budget": 8720,
+      "any_overflow": 0,
+      "n_layers": 19
+    },
+    {
+      "frame": 461,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10092,
+      "budget": 8887,
+      "any_overflow": 0,
+      "n_layers": 19
+    },
+    {
+      "frame": 462,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 9928,
+      "budget": 9026,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 463,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10496,
+      "budget": 9613,
+      "any_overflow": 0,
+      "n_layers": 23
+    },
+    {
+      "frame": 464,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 11466,
+      "budget": 10286,
+      "any_overflow": 0,
+      "n_layers": 24
+    },
+    {
+      "frame": 465,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10151,
+      "budget": 9895,
+      "any_overflow": 0,
+      "n_layers": 18
+    },
+    {
+      "frame": 466,
+      "max_protected": 5309,
+      "max_slot0": 2186,
+      "max_num_tokens": 12368,
+      "budget": 4723,
+      "any_overflow": 1,
+      "n_layers": 6
+    },
+    {
+      "frame": 467,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 11977,
+      "budget": 9681,
+      "any_overflow": 1,
+      "n_layers": 17
+    },
+    {
+      "frame": 468,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10722,
+      "budget": 8929,
+      "any_overflow": 0,
+      "n_layers": 19
+    },
+    {
+      "frame": 469,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10250,
+      "budget": 9342,
+      "any_overflow": 0,
+      "n_layers": 19
+    },
+    {
+      "frame": 470,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10383,
+      "budget": 8765,
+      "any_overflow": 0,
+      "n_layers": 19
+    },
+    {
+      "frame": 471,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10411,
+      "budget": 9545,
+      "any_overflow": 0,
+      "n_layers": 21
+    },
+    {
+      "frame": 472,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 11514,
+      "budget": 10201,
+      "any_overflow": 0,
+      "n_layers": 24
+    },
+    {
+      "frame": 473,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 9954,
+      "budget": 8931,
+      "any_overflow": 0,
+      "n_layers": 18
+    },
+    {
+      "frame": 474,
+      "max_protected": 5309,
+      "max_slot0": 2186,
+      "max_num_tokens": 12647,
+      "budget": 4858,
+      "any_overflow": 0,
+      "n_layers": 6
+    },
+    {
+      "frame": 475,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 11013,
+      "budget": 9414,
+      "any_overflow": 0,
+      "n_layers": 16
+    },
+    {
+      "frame": 476,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10455,
+      "budget": 8585,
+      "any_overflow": 0,
+      "n_layers": 18
+    },
+    {
+      "frame": 477,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10175,
+      "budget": 8787,
+      "any_overflow": 0,
+      "n_layers": 18
+    },
+    {
+      "frame": 478,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10244,
+      "budget": 8589,
+      "any_overflow": 0,
+      "n_layers": 19
+    },
+    {
+      "frame": 479,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10772,
+      "budget": 9599,
+      "any_overflow": 0,
+      "n_layers": 23
+    },
+    {
+      "frame": 480,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 11313,
+      "budget": 10155,
+      "any_overflow": 0,
+      "n_layers": 24
+    },
+    {
+      "frame": 481,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 9925,
+      "budget": 8481,
+      "any_overflow": 0,
+      "n_layers": 19
+    },
+    {
+      "frame": 482,
+      "max_protected": 5309,
+      "max_slot0": 2186,
+      "max_num_tokens": 12237,
+      "budget": 4842,
+      "any_overflow": 1,
+      "n_layers": 5
+    },
+    {
+      "frame": 483,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 11030,
+      "budget": 4235,
+      "any_overflow": 1,
+      "n_layers": 18
+    },
+    {
+      "frame": 484,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10371,
+      "budget": 4245,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 485,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10121,
+      "budget": 4589,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 486,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10135,
+      "budget": 8622,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 487,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10890,
+      "budget": 6335,
+      "any_overflow": 0,
+      "n_layers": 23
+    },
+    {
+      "frame": 488,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 11259,
+      "budget": 10031,
+      "any_overflow": 0,
+      "n_layers": 23
+    },
+    {
+      "frame": 489,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10068,
+      "budget": 7784,
+      "any_overflow": 0,
+      "n_layers": 19
+    },
+    {
+      "frame": 490,
+      "max_protected": 5309,
+      "max_slot0": 2186,
+      "max_num_tokens": 12113,
+      "budget": 4907,
+      "any_overflow": 0,
+      "n_layers": 5
+    },
+    {
+      "frame": 491,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10007,
+      "budget": 8921,
+      "any_overflow": 0,
+      "n_layers": 16
+    },
+    {
+      "frame": 492,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10628,
+      "budget": 9122,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 493,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10163,
+      "budget": 9092,
+      "any_overflow": 0,
+      "n_layers": 20
+    },
+    {
+      "frame": 494,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10133,
+      "budget": 9158,
+      "any_overflow": 0,
+      "n_layers": 21
+    },
+    {
+      "frame": 495,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10547,
+      "budget": 9989,
+      "any_overflow": 0,
+      "n_layers": 24
+    },
+    {
+      "frame": 496,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 11081,
+      "budget": 9689,
+      "any_overflow": 0,
+      "n_layers": 24
+    },
+    {
+      "frame": 497,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10214,
+      "budget": 8068,
+      "any_overflow": 0,
+      "n_layers": 19
+    },
+    {
+      "frame": 498,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 11975,
+      "budget": 4654,
+      "any_overflow": 1,
+      "n_layers": 6
+    },
+    {
+      "frame": 499,
+      "max_protected": 5830,
+      "max_slot0": 2707,
+      "max_num_tokens": 10156,
+      "budget": 4290,
+      "any_overflow": 1,
+      "n_layers": 17
+    }
+  ]
+}

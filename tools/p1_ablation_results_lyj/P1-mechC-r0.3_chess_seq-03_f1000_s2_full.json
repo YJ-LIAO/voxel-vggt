@@ -1,0 +1,12 @@
+{
+  "config": "P1-mechC-r0.3",
+  "scene": "chess/seq-03",
+  "num_frames": 1000,
+  "seed": 2,
+  "deterministic": false,
+  "ate_rmse": 0.582604706287384,
+  "time_s": 677.7460570335388,
+  "fps": 1.4754788900977909,
+  "peak_mem_gb": 9.706023693084717,
+  "per_layer_budget": 8000
+}

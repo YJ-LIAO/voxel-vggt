@@ -1,0 +1,12 @@
+{
+  "config": "P1-mechC-r0.2",
+  "scene": "fire/seq-03",
+  "num_frames": 1000,
+  "seed": 1,
+  "deterministic": false,
+  "ate_rmse": 0.05510174110531807,
+  "time_s": 833.3904206752777,
+  "fps": 1.1999177998587052,
+  "peak_mem_gb": 9.702683448791504,
+  "per_layer_budget": 8000
+}

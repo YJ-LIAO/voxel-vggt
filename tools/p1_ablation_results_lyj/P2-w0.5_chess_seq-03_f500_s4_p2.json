@@ -1,0 +1,12 @@
+{
+  "config": "P2-w0.5",
+  "scene": "chess/seq-03",
+  "num_frames": 500,
+  "seed": 4,
+  "deterministic": false,
+  "ate_rmse": 0.052815791219472885,
+  "time_s": 809.4997069835663,
+  "fps": 0.6176654490254813,
+  "peak_mem_gb": 8.618273735046387,
+  "per_layer_budget": 8000
+}

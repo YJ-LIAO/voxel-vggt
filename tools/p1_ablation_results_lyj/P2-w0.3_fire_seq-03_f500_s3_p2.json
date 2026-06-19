@@ -1,0 +1,12 @@
+{
+  "config": "P2-w0.3",
+  "scene": "fire/seq-03",
+  "num_frames": 500,
+  "seed": 3,
+  "deterministic": false,
+  "ate_rmse": 0.05946124345064163,
+  "time_s": 848.2042410373688,
+  "fps": 0.5894806649262814,
+  "peak_mem_gb": 8.61730432510376,
+  "per_layer_budget": 8000
+}

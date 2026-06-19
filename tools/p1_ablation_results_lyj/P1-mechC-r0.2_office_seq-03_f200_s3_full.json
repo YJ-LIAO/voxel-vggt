@@ -1,0 +1,12 @@
+{
+  "config": "P1-mechC-r0.2",
+  "scene": "office/seq-03",
+  "num_frames": 200,
+  "seed": 3,
+  "deterministic": false,
+  "ate_rmse": 0.046572696417570114,
+  "time_s": 109.66203093528748,
+  "fps": 1.8237853001101334,
+  "peak_mem_gb": 7.8837571144104,
+  "per_layer_budget": 8000
+}

@@ -1,0 +1,38 @@
+Loading checkpoint /mnt/lyj/workspace/StreamVGGT/ckpt/checkpoints.pth ...
+
+======================================================================
+DIAG: P1-none chess/seq-03 f500 s0
+======================================================================
+{
+  "budget_per_layer (headline ref)": 8000,
+  "dynamic_budget_p10/p50/p90": [
+    6400,
+    7446,
+    8782
+  ],
+  "frames_with_eviction": 493,
+  "max_protected_count_any_frame": 4164,
+  "max_protected_over_ref_budget (8000)": 0.52,
+  "max_per_layer_ratio (worst protected/budget on any single layer)": 1.338,
+  "first_frame_protected_ge_50pct_budget": 24,
+  "first_frame_protected_ge_90pct_budget": null,
+  "first_frame_overflow (protected>=budget)": null,
+  "n_overflow_frames": 4,
+  "overflow_rate (overflow_frames/eviction_frames)": 0.008,
+  "first_5_overflow_frames": [
+    26,
+    27,
+    434,
+    435
+  ],
+  "config": "P1-none",
+  "scene": "chess/seq-03",
+  "num_frames": 500,
+  "seed": 0,
+  "ate_rmse": 0.06499160826206207,
+  "time_s": 559.7940769195557,
+  "per_layer_budget": 8000
+}
+
+ATE=0.0650m  (0.9 FPS)
+saved /path/to/mount/lyj/voxel-vggt/tools/p1_ablation_results_lyj/diag_P1-none_chess_seq-03_f500_s0_f500.json
