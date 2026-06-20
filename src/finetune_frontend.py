@@ -28,6 +28,7 @@ from croco.utils.misc import NativeScalerWithGradNormCount as NativeScaler
 from ovggt.losses.frontend_supervised import FrontendSupervisedLoss
 from ovggt.models.ovggt import OVGGT
 from train_frontend import (
+    build_frontend_cache_config,
     build_validation_loader,
     build_dataset,
     evaluate_frontend_epoch,
@@ -308,12 +309,14 @@ def train(args):
     enable_track_head = int(getattr(args, "n_corres_train", 0) or 0) > 0
     if not enable_track_head:
         printer.info("Disabling track head because n_corres_train=0; this saves ~65.9M parameters.")
+    frontend_cache_config = build_frontend_cache_config(args)
     model = OVGGT(
         mode=args.frontend_mode,
         frontend_pose_encoding_type=args.frontend_pose_encoding_type,
         per_layer_budget=frontend_per_layer_budget,
         camera_budget=frontend_camera_budget,
         anchor_overflow_policy=anchor_overflow_policy,
+        frontend_cache_config=frontend_cache_config,
         frontend_head_checkpointing=bool(getattr(args, "frontend_head_checkpointing", False)),
         enable_track_head=enable_track_head,
     )
