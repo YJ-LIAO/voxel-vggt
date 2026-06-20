@@ -65,3 +65,19 @@ fire 与 office/chess 对 dedup 的需求**相反**。在用户约束（**单一
 1. **averaging K/V 不是"保留信息"** —— 它模糊表示，对稠密/高频场景（chess）灾难性。ToMe 式按特征相似度合并 ≠ 按空间 voxel 合并。
 2. **场景冲突的 deficit 无法用单配置修** —— fire vs office/chess 的几何差异决定了相反的最优。诊断（RCA）应早期识别这种冲突，避免在不可达目标上投入。
 3. **负面结果要留档**（本文档），避免日后重复尝试 soft-merge。
+
+## 8. log(n) bias 假设的证伪（SOTA 研究后追加实验，2026-06-20）
+
+SOTA 研究（Co-Me, [arxiv 2511.14751](https://arxiv.org/abs/2511.14751)）提出：加权平均 K/V 后 merged token 在 softmax attention 里系统性欠权重 → 加 **log(n) attention bias** 恢复 mass 即可修复。
+
+**实验**：保留 rep 的原始 K（不平均 K，只平均 V）—— 这等价于"无 attention mass loss"（rep K 全 distinctiveness）。若 log(n)/attention-mass 是根因，chess 应恢复到 ~drop。
+
+**结果**：chess = **0.1543**（vs full merge 0.5002，drop 0.0263）。
+
+**结论**：K-preserve（消除 attention mass loss）只把 chess 从 0.5 改善到 0.15，**仍比 drop 差 6×**。剩余 gap 纯来自 **V-averaging**（信息混合），log(n) attention bias **不解决 V 侧**。所以：
+
+- **log(n) bias 不是解药** —— V-averaging 才是 chess 灾难的根因，不是 attention mass loss。
+- Co-Me 真正有效的是 **低置信度 gating**（不合并高精度 token），不是 log(n) bias。
+- 即使用 importance 作 gating proxy（只合并低 importance token），固定阈值无法同时满足 fire（要少合并）和 chess（要保护高 importance）—— **同样的场景冲突**。
+
+**最终判定**：token averaging（任何形式：K+V / V-only）对稠密精确场景有害；"全面超越 legacy at 200f"经 3 轮实验（full merge / K-preserve / drop vs OFF）**确认在单配置约束下不可达**。merge 方向彻底关闭。
