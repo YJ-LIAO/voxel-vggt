@@ -1,0 +1,10 @@
+{
+  "mode": "frontend",
+  "scene": "office/seq-03",
+  "num_frames": 200,
+  "seed": 0,
+  "ate_rmse": 0.04660345986485481,
+  "time_s": 113.96450901031494,
+  "fps": 1.7549323182877747,
+  "peak_mem_gb": 7.911620140075684
+}

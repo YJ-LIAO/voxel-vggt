@@ -1,0 +1,10 @@
+{
+  "mode": "frontend",
+  "scene": "chess/seq-03",
+  "num_frames": 200,
+  "seed": 0,
+  "ate_rmse": 0.5001558661460876,
+  "time_s": 111.7426176071167,
+  "fps": 1.7898274112675014,
+  "peak_mem_gb": 7.912793159484863
+}

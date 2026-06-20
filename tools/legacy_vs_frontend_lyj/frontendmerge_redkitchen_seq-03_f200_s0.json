@@ -1,0 +1,10 @@
+{
+  "mode": "frontend",
+  "scene": "redkitchen/seq-03",
+  "num_frames": 200,
+  "seed": 0,
+  "ate_rmse": 0.044458597898483276,
+  "time_s": 113.14291000366211,
+  "fps": 1.767675941811348,
+  "peak_mem_gb": 7.911876201629639
+}

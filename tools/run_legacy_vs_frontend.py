@@ -40,14 +40,15 @@ def ate(gt, p):
     return float(np.sqrt(np.mean(np.sum((al - gp) ** 2, axis=1))))
 
 
-def build(mode):
+def build(mode, intra_mode="drop"):
     if mode == "legacy":
         return OVGGT(mode="legacy", per_layer_budget=8334)
     return OVGGT(mode="frontend_eval", per_layer_budget=8334,
                  frontend_pose_encoding_type=ABS_POSE_ENCODING,
                  frontend_cache_config=FrontendCacheConfig(
                      enabled=True, dedup_enabled=True, intra_frame_dedup_enabled=True,
-                     fifo_keep_topk=80, fifo_protected_ring_ratio=0.2))
+                     fifo_keep_topk=80, fifo_protected_ring_ratio=0.2,
+                     intra_dedup_mode=intra_mode))
 
 
 def infer(m, mode, inputs):
@@ -62,6 +63,7 @@ def main():
     ap.add_argument("--scene", default="chess/seq-03")
     ap.add_argument("--num_frames", type=int, default=200)
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--intra-mode", default="drop", choices=["drop", "merge"])
     args = ap.parse_args()
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
@@ -75,7 +77,7 @@ def main():
 
     sd = torch.load(CKPT, map_location="cpu", weights_only=False)
     if isinstance(sd, dict) and "model" in sd: sd = sd["model"]
-    m = build(args.mode); m.load_state_dict(sd, strict=False); m = m.cuda().eval()
+    m = build(args.mode, intra_mode=args.intra_mode); m.load_state_dict(sd, strict=False); m = m.cuda().eval()
     torch.cuda.reset_peak_memory_stats(); torch.cuda.synchronize(); t0 = time.time()
     with torch.no_grad(): o = infer(m, args.mode, inputs)
     torch.cuda.synchronize(); elapsed = time.time() - t0
@@ -85,7 +87,7 @@ def main():
 
     res = dict(mode=args.mode, scene=args.scene, num_frames=args.num_frames, seed=args.seed,
                ate_rmse=a, time_s=elapsed, fps=args.num_frames/elapsed, peak_mem_gb=peak_mem)
-    out = os.path.join(OUTPUT_DIR, f"{args.mode}_{args.scene.replace('/', '_')}_f{args.num_frames}_s{args.seed}.json")
+    out = os.path.join(OUTPUT_DIR, f"{args.mode}{args.intra_mode}_{args.scene.replace('/', '_')}_f{args.num_frames}_s{args.seed}.json")
     with open(out, "w") as f: json.dump(res, f, indent=2)
     print(f"[{args.mode}] {args.scene} f{args.num_frames} s{args.seed} | ATE={a:.4f}m | {res['fps']:.1f}FPS | {peak_mem:.1f}GB")
     print(f"  saved {out}")

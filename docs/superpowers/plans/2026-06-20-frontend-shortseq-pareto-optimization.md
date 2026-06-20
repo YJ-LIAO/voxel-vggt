@@ -132,6 +132,8 @@ Test pins the math: `self.k[0,:,rep[0],:] ≈ Σ_m w[m]·K0[m]` for the 3-token 
 
 ## Task 4: Gate 1 + 1b — soft-merge empirical (fire/office/chess/redkitchen @200f, fire/chess @1000f)
 
+> **RESULT (2026-06-20): Gate 1 FAILED — soft-merge rejected.** Merge worse than drop on ALL 4 scenes (fire 0.0531 vs 0.0458, office 0.0466 vs 0.0377, **chess 0.5002 vs 0.0263 catastrophic**, redkitchen 0.0445 vs 0.0138). Verified NOT a bug (merge plan + weighted math correct via TDD + multi-group check) — averaging co-voxel K/V genuinely blurs the representation. See `docs/soft_merge_negative_result.md`. **Plan halted at Task 4**: the 200f deficits are scene-conflicting (fire needs less dedup, office/chess need more) → single-config "全面超越 200f" unachievable. Components 2-3 (coverage anchoring, redkitchen) not pursued — coverage won't fix fire/chess. Soft-merge code kept as opt-in (`intra_dedup_mode="merge"`, default drop).
+
 **Files:** temp script (reuse `run_legacy_vs_frontend.py` build with `intra_dedup_mode="merge"` — add a `--intra-mode` arg, or a temp variant). Run on GPU 4-7.
 
 - [ ] **Step 1:** Add `--intra-mode {drop,merge}` arg to `tools/run_legacy_vs_frontend.py` (frontend build sets `intra_dedup_mode`). Smoke 1 run to confirm it loads.
