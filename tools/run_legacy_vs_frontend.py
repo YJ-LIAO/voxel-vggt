@@ -64,8 +64,10 @@ def main():
     ap.add_argument("--num_frames", type=int, default=200)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--intra-mode", default="drop", choices=["drop", "merge"])
+    ap.add_argument("--ckpt", default=None, help="checkpoint path (default: builtin CKPT)")
     args = ap.parse_args()
     os.makedirs(OUTPUT_DIR, exist_ok=True)
+    ckpt_path = args.ckpt if args.ckpt else CKPT
 
     torch.manual_seed(args.seed); np.random.seed(args.seed)
     scene_path = os.path.join(DATASET, args.scene)
@@ -75,7 +77,7 @@ def main():
     gt = np.array([np.loadtxt(os.path.join(scene_path, f.replace(".color.png", ".pose.txt"))).astype(np.float32) for f in cfs])
     h, w = imgs.shape[2], imgs.shape[3]
 
-    sd = torch.load(CKPT, map_location="cpu", weights_only=False)
+    sd = torch.load(ckpt_path, map_location="cpu", weights_only=False)
     if isinstance(sd, dict) and "model" in sd: sd = sd["model"]
     m = build(args.mode, intra_mode=args.intra_mode); m.load_state_dict(sd, strict=False); m = m.cuda().eval()
     torch.cuda.reset_peak_memory_stats(); torch.cuda.synchronize(); t0 = time.time()
