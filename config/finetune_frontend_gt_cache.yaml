@@ -54,7 +54,8 @@ seed: 0
 batch_size: 1
 accum_iter: 2
 gradient_checkpointing: True
-ddp_static_graph: True
+ddp_static_graph: False
+ddp_find_unused_parameters: True
 frontend_head_checkpointing: True
 epochs: 1
 start_epoch: 0
@@ -70,12 +71,12 @@ use_count_head: False
 finetune_full_model: True
 
 num_workers: 8
-world_size: 1
+world_size: 4
 local-rank: -1
 dist_url: env://
 rank: 0
 gpu: 0
-distributed: False
+distributed: True
 dist_backend: nccl
 
 save_freq: 1
@@ -85,7 +86,7 @@ keep_iter_freq: 0
 print_freq: 10
 print_img_freq: 50000000
 save_dir: /path/to/mount/lyj/voxel-vggt/checkpoints
-exp_name: OVGGT_frontend_gt_finetune_full
+exp_name: OVGGT_frontend_gt_ddp
 task: OVGGT_frontend
 logdir: ${save_dir}/${exp_name}/logs
 output_dir: ${save_dir}/${exp_name}/
