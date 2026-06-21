@@ -30,12 +30,12 @@ frontend_cache:
   voxel_size: 0.1
 
 num_views: 24
+train_aug_crop: 0
 n_corres_train: 0
 train_criterion: FrontendSupervisedLoss()
 
-train_resolutions: "[(518, 392), (518, 336), (518, 294), (518, 266), (518, 210), (518, 154), (392, 518), (336, 518), (294, 518), (266, 518)]"
+train_resolutions: "[(518, 392)]"
 train_transform: SeqColorJitter
-train_aug_crop: 16
 data_root: /path/to/mount/lyj
 
 # Subset to confirmed-available indoor-heavy datasets
@@ -46,7 +46,7 @@ dataset_hypersim: HyperSim_Multi(allow_repeat=${allow_repeat}, split='train', RO
 dataset_blendedmvs: BlendedMVS_Multi(allow_repeat=${allow_repeat}, split='train', ROOT='${data_root}/blendedmvs_processed', aug_crop=${train_aug_crop}, resolution=${train_resolutions}, transform=${train_transform}, num_views=${num_views}, n_corres=${n_corres_train})
 dataset_megadepth: MegaDepth_Multi(allow_repeat=${allow_repeat}, split='train', ROOT='${data_root}/processed_megadepth', aug_crop=${train_aug_crop}, resolution=${train_resolutions}, transform=${train_transform}, num_views=${num_views}, n_corres=${n_corres_train})
 
-train_dataset: 50 @ ${dataset_blendedmvs}
+train_dataset: 50 @ ${dataset_co3d}
 
 num_test_views: 4
 test_dataset: 100 @ BlendedMVS_Multi(allow_repeat=False, split='train', ROOT='${data_root}/blendedmvs_processed', resolution=(518, 392), num_views=${num_test_views}, seed=42, n_corres=0)
