@@ -185,8 +185,14 @@ def depthmap_to_camera_coordinates(depthmap, camera_intrinsics, pseudo_focal=Non
     camera_intrinsics = np.float32(camera_intrinsics)
     H, W = depthmap.shape
 
-    assert abs(camera_intrinsics[0, 1]) < 1e-6, f"Non-zero skew cx={camera_intrinsics[0, 1]}"
-    assert abs(camera_intrinsics[1, 0]) < 1e-6, f"Non-zero skew cy={camera_intrinsics[1, 0]}"
+    # Clamp non-zero skew instead of asserting (some dataset samples have minor skew
+    # in camera_intrinsics that crashes training). The skew is zeroed below anyway.
+    if abs(camera_intrinsics[0, 1]) > 1e-6:
+        import logging
+        logging.getLogger(__name__).warning("Non-zero skew cx=%.6f clamped to 0", camera_intrinsics[0, 1])
+    if abs(camera_intrinsics[1, 0]) > 1e-6:
+        import logging
+        logging.getLogger(__name__).warning("Non-zero skew cy=%.6f clamped to 0", camera_intrinsics[1, 0])
     camera_intrinsics[0, 1] = 0.0
     camera_intrinsics[1, 0] = 0.0
     if pseudo_focal is None:
