@@ -359,7 +359,21 @@ def train(args):
     if args.pretrained and not args.resume:
         load_student_pretrained_weights(model, args.pretrained)
 
-    freeze_frontend_stage_a_parameters(model)
+    freeze_strategy = str(getattr(args, "freeze_strategy", "stage_a"))
+    if freeze_strategy == "last4":
+        printer.info("Freeze strategy: last4 (freeze backbone, train last-4 global blocks + all heads)")
+        for param in model.parameters():
+            param.requires_grad = False
+        for block in model.aggregator.global_blocks[-4:]:
+            for param in block.parameters():
+                param.requires_grad = True
+        for head_name in ['camera_head', 'depth_head', 'point_head']:
+            head = getattr(model, head_name, None)
+            if head is not None:
+                for param in head.parameters():
+                    param.requires_grad = True
+    else:
+        freeze_frontend_stage_a_parameters(model)
     summarize_trainable_parameters(model)
 
     param_groups = misc.get_parameter_groups(model, args.weight_decay)

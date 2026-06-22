@@ -2,7 +2,7 @@
 # Multi-GPU (4×GPU 4-7), 6 confirmed datasets (indoor-heavy), 1 epoch.
 # FrontendSupervisedLoss (GT targets) + production cache (ring0.2+budget8334+intra ON).
 
-pretrained: /path/to/mount/lyj/voxel-vggt/ckpt/model.pt
+pretrained: /path/to/mount/lyj/voxel-vggt/ckpt/checkpoints.pth
 resume: null
 benchmark: False
 
@@ -27,7 +27,7 @@ frontend_cache:
   eviction_importance_weight: 0.5
   voxel_size: 0.1
 
-num_views: 24
+num_views: 16
 train_aug_crop: 16
 n_corres_train: 0
 train_criterion: FrontendSupervisedLoss()
@@ -61,7 +61,7 @@ epochs: 1
 start_epoch: 0
 start_step: 0
 weight_decay: 0.05
-lr: 5e-6
+lr: 1e-5
 min_lr: 1e-7
 warmup_epochs: 0.5
 amp: 1
@@ -86,7 +86,7 @@ keep_iter_freq: 0
 print_freq: 10
 print_img_freq: 50000000
 save_dir: /path/to/mount/lyj/voxel-vggt/checkpoints
-exp_name: OVGGT_frontend_gt_ddp
+exp_name: OVGGT_gt_ddp_last4_1e5
 task: OVGGT_frontend
 logdir: ${save_dir}/${exp_name}/logs
 output_dir: ${save_dir}/${exp_name}/
@@ -94,3 +94,4 @@ hydra:
   verbose: True
   run:
     dir: ${save_dir}/${exp_name}
+freeze_strategy: last4

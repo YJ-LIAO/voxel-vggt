@@ -79,7 +79,16 @@ def main():
 
     sd = torch.load(ckpt_path, map_location="cpu", weights_only=False)
     if isinstance(sd, dict) and "model" in sd: sd = sd["model"]
-    m = build(args.mode, intra_mode=args.intra_mode); m.load_state_dict(sd, strict=False); m = m.cuda().eval()
+    m = build(args.mode, intra_mode=args.intra_mode)
+    # Two-step load: first load the FULL pretrained checkpoint (all 1797 keys),
+    # then overlay the finetuned checkpoint (may have fewer keys — missing modules
+    # like track_head/token_scorers stay at pretrained values, not random init).
+    if args.ckpt:
+        base_sd = torch.load(CKPT, map_location="cpu", weights_only=False)
+        if isinstance(base_sd, dict) and "model" in base_sd: base_sd = base_sd["model"]
+        m.load_state_dict(base_sd, strict=False)  # full pretrained
+    m.load_state_dict(sd, strict=False)  # overlay finetuned (or just pretrained if no --ckpt)
+    m = m.cuda().eval()
     torch.cuda.reset_peak_memory_stats(); torch.cuda.synchronize(); t0 = time.time()
     with torch.no_grad(): o = infer(m, args.mode, inputs)
     torch.cuda.synchronize(); elapsed = time.time() - t0
