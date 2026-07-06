@@ -8,6 +8,7 @@ import torch.nn.functional as F
 from ovggt.layers import Mlp
 from ovggt.layers.block import Block
 from ovggt.heads.head_act import activate_pose
+from ovggt.utils.pose_enc import ABS_POSE_ENCODING, REL_POSE_ENCODING
 
 
 class CameraHead(nn.Module):
@@ -15,7 +16,7 @@ class CameraHead(nn.Module):
         self,
         dim_in: int = 2048,
         trunk_depth: int = 4,
-        pose_encoding_type: str = "absT_quaR_FoV",
+        pose_encoding_type: str = ABS_POSE_ENCODING,
         num_heads: int = 16,
         mlp_ratio: int = 4,
         init_values: float = 0.01,
@@ -27,12 +28,13 @@ class CameraHead(nn.Module):
     ):
         super().__init__()
 
-        if pose_encoding_type == "absT_quaR_FoV":
+        if pose_encoding_type in {ABS_POSE_ENCODING, REL_POSE_ENCODING}:
             self.target_dim = 9
         else:
             raise ValueError(
                 f"Unsupported camera encoding type: {pose_encoding_type}")
 
+        self.pose_encoding_type = pose_encoding_type
         self.trans_act = trans_act
         self.quat_act = quat_act
         self.fl_act = fl_act
@@ -79,8 +81,25 @@ class CameraHead(nn.Module):
             out_features=self.target_dim,
             drop=0,
         )
+        self.rel_pose_branch = Mlp(
+            in_features=dim_in,
+            hidden_features=dim_in // 2,
+            out_features=self.target_dim,
+            drop=0,
+        )
+        self.rel_pose_branch.load_state_dict(self.pose_branch.state_dict())
 
-    def forward(self, aggregated_tokens_list: list, num_iterations: int = 4, past_key_values_camera=None, use_cache: bool = False, anchor_token_count: int = None) -> list:
+    def forward(
+        self,
+        aggregated_tokens_list: list,
+        num_iterations: int = 4,
+        past_key_values_camera=None,
+        use_cache: bool = False,
+        anchor_token_count: int = None,
+        pose_encoding_type: str = None,
+        return_pose_predictions: bool = False,
+        return_last_pose_only: bool = False,
+    ):
         """
         Forward pass to predict camera parameters.
 
@@ -97,6 +116,10 @@ class CameraHead(nn.Module):
         """
         # Use tokens from the last block for camera prediction.
         tokens = aggregated_tokens_list[-1]
+        pose_encoding_type = pose_encoding_type or self.pose_encoding_type
+        if pose_encoding_type not in {ABS_POSE_ENCODING, REL_POSE_ENCODING}:
+            raise ValueError(
+                f"Unsupported camera encoding type: {pose_encoding_type}")
 
         # Extract the camera tokens
         pose_tokens = tokens[:, :, 0]
@@ -104,14 +127,40 @@ class CameraHead(nn.Module):
 
         if use_cache:
             pred_pose_enc_list, past_key_values_camera = self.trunk_fn(
-                pose_tokens, num_iterations, past_key_values_camera, use_cache, anchor_token_count=anchor_token_count)
+                pose_tokens,
+                num_iterations,
+                past_key_values_camera,
+                use_cache,
+                anchor_token_count=anchor_token_count,
+                pose_encoding_type=pose_encoding_type,
+                return_pose_predictions=return_pose_predictions,
+                return_last_pose_only=return_last_pose_only,
+            )
             return pred_pose_enc_list, past_key_values_camera
         else:
             pred_pose_enc_list = self.trunk_fn(
-                pose_tokens, num_iterations, past_key_values_camera=None, use_cache=use_cache, anchor_token_count=anchor_token_count)
+                pose_tokens,
+                num_iterations,
+                past_key_values_camera=None,
+                use_cache=use_cache,
+                anchor_token_count=anchor_token_count,
+                pose_encoding_type=pose_encoding_type,
+                return_pose_predictions=return_pose_predictions,
+                return_last_pose_only=return_last_pose_only,
+            )
             return pred_pose_enc_list
 
-    def trunk_fn(self, pose_tokens: torch.Tensor, num_iterations: int, past_key_values_camera, use_cache: bool, anchor_token_count: int = None) -> list:
+    def trunk_fn(
+        self,
+        pose_tokens: torch.Tensor,
+        num_iterations: int,
+        past_key_values_camera,
+        use_cache: bool,
+        anchor_token_count: int = None,
+        pose_encoding_type: str = None,
+        return_pose_predictions: bool = False,
+        return_last_pose_only: bool = False,
+    ) -> list:
         """
         Iteratively refine camera pose predictions.
 
@@ -127,7 +176,9 @@ class CameraHead(nn.Module):
         """
         B, S, C = pose_tokens.shape  # S is expected to be 1.
         pred_pose_enc = None
+        pred_rel_pose_enc = None
         pred_pose_enc_list = []
+        pred_rel_pose_enc_list = []
 
         current_budgets = self._calculate_dynamic_budgets(self.total_budget)
         scores_list = []
@@ -204,30 +255,59 @@ class CameraHead(nn.Module):
                         pose_tokens_modulated, attn_mask=attn_mask)
 
             # Compute the delta update for the pose encoding.
-            pred_pose_enc_delta = self.pose_branch(
-                self.trunk_norm(pose_tokens_modulated))
+            trunk_tokens = self.trunk_norm(pose_tokens_modulated)
+            pred_pose_enc_delta = self.pose_branch(trunk_tokens)
+            pred_rel_pose_enc_delta = self.rel_pose_branch(trunk_tokens)
 
             if pred_pose_enc is None:
                 pred_pose_enc = pred_pose_enc_delta
             else:
                 pred_pose_enc = pred_pose_enc + pred_pose_enc_delta
 
+            if pred_rel_pose_enc is None:
+                pred_rel_pose_enc = pred_rel_pose_enc_delta
+            else:
+                pred_rel_pose_enc = pred_rel_pose_enc + pred_rel_pose_enc_delta
+
             # Apply final activation functions for translation, quaternion, and field-of-view.
-            activated_pose = activate_pose(
+            activated_abs_pose = activate_pose(
                 pred_pose_enc,
                 trans_act=self.trans_act,
                 quat_act=self.quat_act,
                 fl_act=self.fl_act,
             )
-            pred_pose_enc_list.append(activated_pose)
+            activated_rel_pose = activate_pose(
+                pred_rel_pose_enc,
+                trans_act=self.trans_act,
+                quat_act=self.quat_act,
+                fl_act=self.fl_act,
+            )
+            pred_pose_enc_list.append(activated_abs_pose)
+            pred_rel_pose_enc_list.append(activated_rel_pose)
 
         if scores_list:
             self.last_scores = torch.tensor(
                 scores_list, device=self.last_scores.device, dtype=self.last_scores.dtype)
 
+        if return_pose_predictions:
+            if return_last_pose_only:
+                pose_predictions = {
+                    "abs_pose_enc": pred_pose_enc_list[-1],
+                    "rel_pose_enc": pred_rel_pose_enc_list[-1],
+                }
+            else:
+                pose_predictions = {
+                    "abs_pose_enc_list": pred_pose_enc_list,
+                    "rel_pose_enc_list": pred_rel_pose_enc_list,
+                }
+        elif pose_encoding_type == REL_POSE_ENCODING:
+            pose_predictions = pred_rel_pose_enc_list
+        else:
+            pose_predictions = pred_pose_enc_list
+
         if use_cache:
-            return pred_pose_enc_list, past_key_values_camera
-        return pred_pose_enc_list
+            return pose_predictions, past_key_values_camera
+        return pose_predictions
 
     def sync_anchor_change(self, past_key_values_camera, anchor_token_count, num_cam_iters=4, is_fifo=False):
         """
@@ -303,6 +383,24 @@ class CameraHead(nn.Module):
             past_key_values_camera[idx] = (k_new, v_new)
 
         return past_key_values_camera
+
+    def apply_keyframe_event(self, past_key_values_camera, event, num_cam_iters=4):
+        if event is None or past_key_values_camera is None:
+            return past_key_values_camera
+        event_name = str(getattr(event, "event_type", ""))
+        if event_name.endswith("NOOP"):
+            return past_key_values_camera
+        if getattr(event, "frame_idx", None) == 0 and getattr(event, "anchor_slot", -1) == 0:
+            return past_key_values_camera
+        num_anchor_frames = getattr(event, "num_anchor_frames", 0)
+        if num_anchor_frames <= 0:
+            return past_key_values_camera
+        return self.sync_anchor_change(
+            past_key_values_camera,
+            anchor_token_count=num_anchor_frames * num_cam_iters,
+            num_cam_iters=num_cam_iters,
+            is_fifo=event_name.endswith("FIFO_SWAP"),
+        )
 
     def _calculate_dynamic_budgets(self, total_budget):
         with torch.no_grad():
