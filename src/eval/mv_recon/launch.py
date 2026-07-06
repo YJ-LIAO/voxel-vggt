@@ -18,6 +18,51 @@ import uuid
 import json
 from collections import defaultdict
 
+
+def resolve_7scenes_root(data_root: str) -> str:
+    return data_root or "./data/7scenes"
+
+
+def validate_model_mode(model_name: str, ovggt_mode: str) -> None:
+    if model_name != "OVGGT" and ovggt_mode != "legacy":
+        raise ValueError(
+            f"frontend mode is only supported for OVGGT, got model_name={model_name!r}, "
+            f"ovggt_mode={ovggt_mode!r}"
+        )
+
+
+def build_ovggt_kwargs_for_eval(args):
+    if args.ovggt_mode == "legacy":
+        return {"mode": "legacy"}
+
+    from ovggt.utils.frontend_cache import FrontendCacheConfig
+    from ovggt.utils.frontend_keyframe import KeyframeSwitchConfig
+
+    return {
+        "mode": "frontend_eval",
+        "frontend_cache_config": FrontendCacheConfig(
+            enabled=True,
+            dedup_enabled=args.frontend_dedup_enabled,
+        ),
+        "keyframe_switch_config": KeyframeSwitchConfig(
+            strategy="fixed_interval",
+            interval=args.frontend_anchor_interval,
+        ),
+    }
+
+
+def build_7scenes_kwargs(data_root: str, resolution, max_frames: int):
+    return {
+        "split": "test",
+        "ROOT": resolve_7scenes_root(data_root),
+        "resolution": resolution,
+        "num_seq": 1,
+        "full_video": True,
+        "kf_every": 2,
+        "max_frames": max_frames,
+    }
+
+
 def get_args_parser():
     parser = argparse.ArgumentParser("3D Reconstruction evaluation", add_help=False)
     parser.add_argument(
@@ -42,10 +87,30 @@ def get_args_parser():
     parser.add_argument("--freeze", action="store_true")
     parser.add_argument("--max_frames", type=int, default=None, help="max frames limit")
     parser.add_argument("--use_proj", action="store_true")
+    parser.add_argument("--data_root", type=str, default="")
+    parser.add_argument(
+        "--ovggt_mode",
+        type=str,
+        default="legacy",
+        choices=("legacy", "frontend_eval"),
+    )
+    parser.add_argument(
+        "--frontend_dedup_enabled",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+    )
+    parser.add_argument("--frontend_anchor_interval", type=int, default=8)
     return parser
 
 
 def main(args):
+    validate_model_mode(args.model_name, args.ovggt_mode)
+    seven_scenes_root = resolve_7scenes_root(args.data_root)
+    if args.weights and not os.path.exists(args.weights):
+        raise FileNotFoundError(f"Checkpoint not found: {args.weights}")
+    if seven_scenes_root and not os.path.exists(seven_scenes_root):
+        raise FileNotFoundError(f"7-Scenes root not found: {seven_scenes_root}")
+
     add_path_to_dust3r(args.weights)
     from eval.mv_recon.data import SevenScenes, NRGBD
     from eval.mv_recon.utils import accuracy, completion
@@ -60,15 +125,7 @@ def main(args):
     else:
         raise NotImplementedError
     datasets_all = {
-        "7scenes": SevenScenes(
-            split="test",
-            ROOT="./data/7scenes",
-            resolution=resolution,
-            num_seq=1,
-            full_video=True,
-            kf_every=2,
-            # max_frames=args.max_frames,
-        ),  # 20),
+        "7scenes": SevenScenes(**build_7scenes_kwargs(seven_scenes_root, resolution, args.max_frames)),
         # "NRGBD": NRGBD(
         #     split="test",
         #     ROOT="./data/neural_rgbd_data",
@@ -89,7 +146,7 @@ def main(args):
         from eval.mv_recon.criterion import Regr3D_t_ScaleShiftInv, L21
         from dust3r.utils.geometry import geotrf
         from copy import deepcopy
-        model = OVGGT()
+        model = OVGGT(**build_ovggt_kwargs_for_eval(args))
         ckpt = torch.load(args.weights, map_location=device)
         model.load_state_dict(ckpt, strict=True)
         model.eval()
