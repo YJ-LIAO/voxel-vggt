@@ -14,6 +14,7 @@ from ovggt.layers import PatchEmbed
 from ovggt.layers.block import Block
 from ovggt.layers.rope import RotaryPositionEmbedding2D, PositionGetter
 from ovggt.layers.vision_transformer import vit_small, vit_base, vit_large, vit_giant2
+from ovggt.utils.frontend_cache import PendingLayerUpdate
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +76,8 @@ class Aggregator(nn.Module):
         self.eviction_strategy = eviction_strategy
         self.intra_frame_keep_ratio = intra_frame_keep_ratio
         self.spatial_alpha = spatial_alpha
+        self.token_scorers = None
+        self.score_state_projs = None
 
         # Patch tokens start after camera(1) + register tokens
         self._patch_start_idx = 1 + num_register_tokens
@@ -162,6 +165,29 @@ class Aggregator(nn.Module):
             )
         self.last_scores = torch.zeros(self.depth)
 
+    def init_token_scorers(
+        self,
+        embed_dim: int,
+        bottleneck_dim: int = None,
+        score_state_dim: int = 128,
+    ):
+        from ovggt.layers.token_scorer import TokenScorer
+
+        self.score_state_projs = nn.ModuleList([
+            nn.Linear(embed_dim, score_state_dim)
+            for _ in range(self.depth)
+        ])
+        self.token_scorers = nn.ModuleList([
+            TokenScorer(
+                score_state_dim=score_state_dim,
+                bottleneck_dim=bottleneck_dim,
+                num_layers=self.depth,
+            )
+            for _ in range(self.depth)
+        ])
+        for idx, block in enumerate(self.global_blocks):
+            block.token_scorer = self.token_scorers[idx]
+            block.score_state_proj = self.score_state_projs[idx]
 
     def __build_patch_embed__(
         self,
@@ -208,11 +234,14 @@ class Aggregator(nn.Module):
         self,
         images: torch.Tensor,
         past_key_values=None,
+        cache_states=None,
         use_cache=False,
         past_frame_idx=0,
-        total_budget=0,
+        per_layer_budget=0,
         anchor_token_count: int = None,
         importance_weight: float = 0.5,
+        frontend_cache_config=None,
+        total_budget=0,
         window_token_count: int = 0,
     ) -> Tuple[List[torch.Tensor], int]:
         """
@@ -230,16 +259,15 @@ class Aggregator(nn.Module):
         # Compute patch grid size dynamically from actual image dimensions
         grid_h = H // self._patch_size
         grid_w = W // self._patch_size
-        if self.patch_grid_size != (grid_h, grid_w):
-            self.patch_grid_size = (grid_h, grid_w)
+        current_patch_grid_size = (grid_h, grid_w)
+        if self.patch_grid_size != current_patch_grid_size:
+            self.patch_grid_size = current_patch_grid_size
             for block in self.global_blocks:
-                block.patch_grid_size = (grid_h, grid_w)
+                block.patch_grid_size = current_patch_grid_size
 
-        if use_cache and past_key_values[0] is not None:
-            # _, _, S_true, _, _ = past_key_values[0][0].shape
-            S_true = past_frame_idx + 1
-        else:
-            S_true = S
+        frontend_cache_mode = use_cache and frontend_cache_config is not None and frontend_cache_config.enabled
+        if (per_layer_budget is None or int(per_layer_budget) == 0) and total_budget not in (None, 0):
+            per_layer_budget = int(total_budget) // self.depth
         
         if use_cache and S > 1:
             print(f"Use KV cache expects S=1, got S={S}")
@@ -260,11 +288,17 @@ class Aggregator(nn.Module):
         _, P, C = patch_tokens.shape
 
         if use_cache:
-            camera_token_full = slice_expand_and_flatten(self.camera_token, B, S_true)
-            camera_token = camera_token_full[-1:, :, :]
-            
-            register_token_full = slice_expand_and_flatten(self.register_token, B, S_true)
-            register_token = register_token_full[-1:, :, :]
+            use_first_frame_tokens = past_frame_idx == 0
+            camera_token = select_cached_special_token(
+                self.camera_token,
+                batch_size=B,
+                use_first_frame_tokens=use_first_frame_tokens,
+            )
+            register_token = select_cached_special_token(
+                self.register_token,
+                batch_size=B,
+                use_first_frame_tokens=use_first_frame_tokens,
+            )
         else:
             camera_token = slice_expand_and_flatten(self.camera_token, B, S)
             register_token = slice_expand_and_flatten(self.register_token, B, S)
@@ -288,8 +322,9 @@ class Aggregator(nn.Module):
         frame_idx = 0
         global_idx = 0
         output_list = []
-        current_budgets = self._calculate_dynamic_budgets(total_budget)
+        current_budgets = self._calculate_budgets(per_layer_budget, frontend_cache_config)
         scores = []
+        pending_updates: List[Optional[PendingLayerUpdate]] = [None] * self.depth
 
         # Track importance within current frame processing (layer to layer)
         prev_importance = None
@@ -301,7 +336,36 @@ class Aggregator(nn.Module):
                         tokens, B, S, P, C, frame_idx, pos=pos
                     )
                 elif attn_type == "global":
-                    if use_cache:
+                    if frontend_cache_mode:
+                        layer_budget = None if current_budgets is None else current_budgets[global_idx].item()
+                        tokens, global_idx, global_intermediates, pending_update, new_importance, score_state = self._process_global_attention(
+                            tokens, B, S, P, C, global_idx, pos=pos,
+                            past_key_values_block=cache_states[global_idx].as_past_key_values()
+                            if cache_states is not None and cache_states[global_idx] is not None
+                            else None,
+                            use_cache=True,
+                            past_frame_idx=past_frame_idx,
+                            cache_budget=layer_budget,
+                            prev_importance=prev_importance,
+                            intra_frame_keep_ratio=self.intra_frame_keep_ratio,
+                            anchor_token_count=anchor_token_count,
+                            importance_weight=importance_weight,
+                            frontend_cache_mode=True,
+                            patch_grid_size=current_patch_grid_size,
+                        )
+
+                        prev_importance = new_importance
+                        layer_idx = global_idx - 1
+                        if pending_update is not None:
+                            pending_updates[layer_idx] = PendingLayerUpdate(
+                                k_current=pending_update[0],
+                                v_current=pending_update[1],
+                                importance_current=new_importance,
+                                frame_id=past_frame_idx,
+                                cache_budget=layer_budget,
+                                score_state_current=score_state,
+                            )
+                    elif use_cache:
                         if past_key_values[global_idx] is not None:
                             k, v = past_key_values[global_idx]
 
@@ -321,6 +385,7 @@ class Aggregator(nn.Module):
                             anchor_token_count=anchor_token_count,
                             importance_weight=importance_weight,
                             window_token_count=window_token_count,
+                            patch_grid_size=current_patch_grid_size,
                         )
 
                         # Pass new importance to next layer (within same frame)
@@ -334,7 +399,8 @@ class Aggregator(nn.Module):
                             scores.append(self.last_scores[layer_idx].item())
                     else:
                         tokens, global_idx, global_intermediates = self._process_global_attention(
-                            tokens, B, S, P, C, global_idx, pos=pos
+                            tokens, B, S, P, C, global_idx, pos=pos,
+                            patch_grid_size=current_patch_grid_size,
                         )
                 else:
                     raise ValueError(f"Unknown attention type: {attn_type}")
@@ -348,6 +414,8 @@ class Aggregator(nn.Module):
         del concat_inter
         del frame_intermediates
         del global_intermediates
+        if frontend_cache_mode:
+            return output_list, self.patch_start_idx, cache_states, pending_updates, None
         if use_cache:      
             return output_list, self.patch_start_idx, past_key_values
         return output_list, self.patch_start_idx
@@ -392,6 +460,8 @@ class Aggregator(nn.Module):
         anchor_token_count: int = None,
         importance_weight: float = 0.5,
         window_token_count: int = 0,
+        frontend_cache_mode: bool = False,
+        patch_grid_size: Optional[Tuple[int, int]] = None,
     ) -> Union[Tuple[torch.Tensor, int, List[torch.Tensor]], Tuple[torch.Tensor, int, List[torch.Tensor], List]]:
         """
         Process global attention blocks. We keep tokens in shape (B, S*P, C).
@@ -414,6 +484,8 @@ class Aggregator(nn.Module):
         intermediates = []
         new_importance = None
         kept_indices = None
+        pending_update = None
+        score_state = None
 
         for _ in range(self.aa_block_size):
             if not use_cache:
@@ -425,7 +497,23 @@ class Aggregator(nn.Module):
                 attn_mask = None
 
             scores = None
-            if use_cache:
+            if frontend_cache_mode:
+                tokens, pending_update, new_importance, score_state = self.global_blocks[global_idx](
+                    tokens,
+                    pos=pos,
+                    attn_mask=attn_mask,
+                    past_key_values=past_key_values_block,
+                    use_cache=True,
+                    cache_budget=cache_budget,
+                    prev_importance=prev_importance,
+                    intra_frame_keep_ratio=intra_frame_keep_ratio,
+                    anchor_token_count=anchor_token_count,
+                    importance_weight=importance_weight,
+                    window_token_count=window_token_count,
+                    frontend_cache_mode=True,
+                    patch_grid_size=patch_grid_size,
+                )
+            elif use_cache:
                 # Skip intra-frame pruning for anchor frame (first frame)
                 effective_keep_ratio = 1.0 if past_frame_idx == 0 else intra_frame_keep_ratio
                 tokens, block_kv, scores, new_importance, kept_indices = self.global_blocks[global_idx](
@@ -440,18 +528,46 @@ class Aggregator(nn.Module):
                     anchor_token_count=anchor_token_count,
                     importance_weight=importance_weight,
                     window_token_count=window_token_count,
+                    patch_grid_size=patch_grid_size,
                 )
             else:
-                tokens = self.global_blocks[global_idx](tokens, pos=pos, attn_mask=attn_mask)
+                tokens = self.global_blocks[global_idx](
+                    tokens,
+                    pos=pos,
+                    attn_mask=attn_mask,
+                    patch_grid_size=patch_grid_size,
+                )
 
             global_idx += 1
             intermediates.append(tokens.reshape(B, S, P, C))
 
             # if self.use_causal_global:
             #     del attn_mask
+        if frontend_cache_mode:
+            return tokens, global_idx, intermediates, pending_update, new_importance, score_state
         if use_cache:
             return tokens, global_idx, intermediates, block_kv, scores, new_importance, kept_indices
         return tokens, global_idx, intermediates
+
+    def _calculate_budgets(self, per_layer_budget, frontend_cache_config=None):
+        # Handle None budget (eviction paused for History Anchor window).
+        # ``per_layer_budget`` is per-layer; dynamic allocation preserves that
+        # average while redistributing across layers using the recent scores.
+        if per_layer_budget is None:
+            return None
+
+        with torch.no_grad():
+            if per_layer_budget < 0:
+                per_layer_budget = 0
+            if frontend_cache_config is not None and getattr(frontend_cache_config, "budget_allocation", "dynamic") == "uniform":
+                return torch.full((self.depth,), int(per_layer_budget), dtype=torch.int64)
+
+            diversity_scores = 1.0 - self.last_scores
+            scaled_scores = diversity_scores / 0.5
+            proportions = torch.softmax(scaled_scores, dim=0)
+            budgets = proportions * (per_layer_budget * self.depth)
+
+        return budgets.int()
         
     def _calculate_dynamic_budgets(self, total_budget):
         # Handle None budget (eviction paused for History Anchor window)
@@ -660,3 +776,10 @@ def slice_expand_and_flatten(token_tensor, B, S):
     # Finally flatten => shape (B*S, ...)
     combined = combined.reshape(B * S, *combined.shape[2:])
     return combined
+
+
+def select_cached_special_token(token_tensor, batch_size: int, use_first_frame_tokens: bool):
+    token_idx = 0 if use_first_frame_tokens else 1
+    selected = token_tensor[:, token_idx : token_idx + 1, ...]
+    selected = selected.expand(batch_size, 1, *token_tensor.shape[2:])
+    return selected.reshape(batch_size, *token_tensor.shape[2:])
