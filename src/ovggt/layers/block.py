@@ -116,6 +116,7 @@ class Block(nn.Module):
             defer_eviction=False,
             anchor_token_count_inner=None,
             importance_weight_inner: float = 0.5,
+            window_token_count_inner: int = 0,
         ) -> Union[Tensor, Tuple[Tensor, Dict]]:
             if use_cache:
                 output, new_kv, scores = self.attn(
@@ -128,6 +129,7 @@ class Block(nn.Module):
                     defer_eviction=defer_eviction,
                     anchor_token_count=anchor_token_count_inner,
                     importance_weight=importance_weight_inner,
+                    window_token_count=window_token_count_inner,
                 )
                 return self.ls1(output), new_kv, scores
             else:
@@ -180,6 +182,7 @@ class Block(nn.Module):
                     defer_eviction=True,
                     anchor_token_count_inner=anchor_token_count,
                     importance_weight_inner=importance_weight,
+                    window_token_count_inner=window_token_count,
                 )
                 _, _, k_current, v_current, _ = kv_info
 
@@ -217,6 +220,8 @@ class Block(nn.Module):
                     importance_scores=prev_importance,
                     defer_eviction=True,
                     anchor_token_count_inner=anchor_token_count,
+                    importance_weight_inner=importance_weight,
+                    window_token_count_inner=window_token_count,
                 )
                 k_full, v_full, k_current, v_current, past_kv = kv_info
                 kept_indices = None
@@ -274,6 +279,7 @@ class Block(nn.Module):
                         importance_scores=importance_pruned,
                         num_new_tokens=num_new_tokens_after_prune,
                         importance_weight=importance_weight,
+                        window_token_count=window_token_count,
                     )
 
                 new_kv = (k, v)
@@ -289,6 +295,7 @@ class Block(nn.Module):
                     defer_eviction=False,
                     anchor_token_count_inner=anchor_token_count,
                     importance_weight_inner=importance_weight,
+                    window_token_count_inner=window_token_count,
                 )
                 k, v, kept_indices = new_kv_full
                 new_kv = (k, v)

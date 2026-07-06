@@ -173,7 +173,6 @@ class Attention(nn.Module):
             A tuple of (pruned_k, pruned_v, avg_scores, kept_indices).
             kept_indices: [B, cache_budget] global indices of kept tokens, or None if no eviction.
         """
-        _ = window_token_count
         B, H, N, D = k.shape
         cache_budget = max(int(cache_budget), 0)
         num_anchor_tokens = min(max(int(num_anchor_tokens), 0), N)
@@ -220,6 +219,33 @@ class Attention(nn.Module):
         if num_to_keep_from_candidates >= num_candidates:
             return k, v, None, None
 
+        protected_window_count = min(
+            max(int(window_token_count), 0),
+            num_candidates,
+            num_to_keep_from_candidates,
+        )
+
+        def _select_candidate_indices(scores: Tensor) -> Tensor:
+            num_scored = num_candidates - protected_window_count
+            num_from_scores = num_to_keep_from_candidates - protected_window_count
+            if num_from_scores > 0:
+                scored = scores[:, :num_scored]
+                _, top_indices = torch.topk(scored, k=num_from_scores, dim=-1)
+                top_indices_sorted = top_indices.sort(dim=-1).values
+            else:
+                top_indices_sorted = torch.empty(B, 0, dtype=torch.long, device=k.device)
+
+            if protected_window_count <= 0:
+                return top_indices_sorted
+
+            window_indices = torch.arange(
+                num_scored,
+                num_candidates,
+                dtype=torch.long,
+                device=k.device,
+            ).unsqueeze(0).expand(B, -1)
+            return torch.cat([top_indices_sorted, window_indices], dim=-1)
+
         # Compute baseline scores (cosine diversity) for ALL candidates
         candidate_k_norm = F.normalize(candidate_k, p=2, dim=-1)
         mean_vector = torch.mean(candidate_k_norm, dim=2, keepdim=True)
@@ -255,8 +281,7 @@ class Attention(nn.Module):
             avg_scores = combined_scores.mean().item()
 
             # Keep tokens with HIGHEST combined score
-            _, top_indices = torch.topk(combined_scores, k=num_to_keep_from_candidates, dim=-1)
-            top_indices_sorted = top_indices.sort(dim=-1).values  # Maintain temporal order
+            top_indices_sorted = _select_candidate_indices(combined_scores)
 
             # Expand for gather across heads: [B, H, num_to_keep, D]
             expanded_indices = top_indices_sorted.unsqueeze(1).unsqueeze(-1).expand(B, H, num_to_keep_from_candidates, D)
@@ -271,12 +296,7 @@ class Attention(nn.Module):
 
             # Keep tokens with HIGHEST diversity using one unified selection across
             # heads so K/V ordering stays consistent with metadata indices.
-            _, top_indices = torch.topk(
-                baseline_diversity_avg,
-                k=num_to_keep_from_candidates,
-                dim=-1,
-            )
-            top_indices_sorted = top_indices.sort(dim=-1).values
+            top_indices_sorted = _select_candidate_indices(baseline_diversity_avg)
 
             expanded_indices = top_indices_sorted.unsqueeze(1).unsqueeze(-1).expand(
                 B,

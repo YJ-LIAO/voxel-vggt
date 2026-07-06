@@ -344,6 +344,19 @@ class LayerCacheState:
         importances = []
         depth_confs = []
 
+        def metadata_index_select_batch(b_idx: int, indices: Tensor) -> TokenMetadata:
+            meta_indices = indices.to(device=self.metadata.frame_id.device, dtype=torch.long)
+            return TokenMetadata(
+                token_kind=self.metadata.token_kind[b_idx:b_idx + 1].index_select(1, meta_indices),
+                frame_id=self.metadata.frame_id[b_idx:b_idx + 1].index_select(1, meta_indices),
+                anchor_slot=self.metadata.anchor_slot[b_idx:b_idx + 1].index_select(1, meta_indices),
+                keyframe_id=self.metadata.keyframe_id[b_idx:b_idx + 1].index_select(1, meta_indices),
+                slot_id=self.metadata.slot_id[b_idx:b_idx + 1].index_select(1, meta_indices),
+                slot_local_xyz=self.metadata.slot_local_xyz[b_idx:b_idx + 1].index_select(1, meta_indices),
+                importance=self.metadata.importance[b_idx:b_idx + 1].index_select(1, meta_indices),
+                depth_conf=self.metadata.depth_conf[b_idx:b_idx + 1].index_select(1, meta_indices),
+            )
+
         for b_idx, indices in enumerate(indices_list):
             num_kept = indices.shape[0]
 
@@ -383,7 +396,7 @@ class LayerCacheState:
                     padded_score_state.append(torch.cat([score_b, score_pad], dim=1))
 
                 # Gather metadata并padding
-                metadata_b = self.metadata.index_select(indices.unsqueeze(0))
+                metadata_b = metadata_index_select_batch(b_idx, indices)
                 token_kinds.append(torch.cat([
                     metadata_b.token_kind[0],
                     metadata_b.token_kind[0, -1:].expand(pad_size).clone()
@@ -424,7 +437,7 @@ class LayerCacheState:
                 if self.score_state is not None:
                     score_indices = indices.unsqueeze(0).unsqueeze(-1).expand(1, num_kept, score_dim)
                     score_b = torch.gather(self.score_state[b_idx:b_idx+1], 1, score_indices)
-                metadata_b = self.metadata.index_select(indices.unsqueeze(0))
+                metadata_b = metadata_index_select_batch(b_idx, indices)
 
                 padded_k.append(k_b)
                 padded_v.append(v_b)
@@ -925,7 +938,9 @@ class LayerCacheState:
         indices = self.get_demoted_slot_indices(demoted_slot, local_batch_index)
         if indices.numel() == 0 or self.score_state is None:
             Ds = self.score_state.shape[-1] if self.score_state is not None else 0
-            return torch.empty(0, Ds, dtype=torch.float)
+            dtype = self.score_state.dtype if self.score_state is not None else torch.float
+            device = self.score_state.device if self.score_state is not None else torch.device("cpu")
+            return torch.empty(0, Ds, dtype=dtype, device=device)
         # score_state is [B, N, Ds]; index via [local_batch_index, indices]
         return self.score_state[local_batch_index, indices]
 
@@ -952,7 +967,13 @@ class LayerCacheState:
         """
         indices = self.get_demoted_slot_indices(demoted_slot, local_batch_index)
         if indices.numel() == 0:
-            return torch.empty(0, TOKEN_METADATA_FEATURE_DIM, dtype=torch.float)
+            if self.metadata is not None:
+                dtype = self.metadata.slot_local_xyz.dtype
+                device = self.metadata.slot_local_xyz.device
+            else:
+                dtype = torch.float
+                device = torch.device("cpu")
+            return torch.empty(0, TOKEN_METADATA_FEATURE_DIM, dtype=dtype, device=device)
         full_features = self.build_scorer_metadata_features(
             current_frame_id, decision_context=2
         )

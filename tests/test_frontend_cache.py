@@ -9,10 +9,12 @@ if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
 from ovggt.layers.attention import Attention
+from ovggt.layers.block import Block
 from ovggt.utils.frontend_cache import (
     FrontendCacheConfig,
     LayerCacheState,
     PendingLayerUpdate,
+    TOKEN_METADATA_FEATURE_DIM,
     TokenKind,
     TokenMetadata,
 )
@@ -92,6 +94,59 @@ class FrontendCacheTests(unittest.TestCase):
         self.assertTrue(torch.equal(state.metadata.frame_id[0], torch.tensor([0, 1, 2])))
         self.assertTrue(torch.equal(state.metadata.slot_id[0], torch.tensor([0, 1, 2])))
         self.assertTrue(torch.equal(state.k[0, 0, :, 0], torch.tensor([0.0, 4.0, 10.0])))
+
+    def test_gather_per_batch_uses_metadata_from_each_batch(self):
+        k = torch.arange(2 * 2 * 4 * 2, dtype=torch.float32).reshape(2, 2, 4, 2)
+        v = k + 100.0
+        metadata = TokenMetadata(
+            token_kind=torch.full((2, 4), int(TokenKind.PATCH), dtype=torch.long),
+            frame_id=torch.tensor([[10, 11, 12, 13], [20, 21, 22, 23]], dtype=torch.long),
+            anchor_slot=torch.full((2, 4), -1, dtype=torch.long),
+            keyframe_id=torch.tensor([[10, 11, 12, 13], [20, 21, 22, 23]], dtype=torch.long),
+            slot_id=torch.tensor([[10, 11, 12, 13], [20, 21, 22, 23]], dtype=torch.long),
+            slot_local_xyz=torch.arange(2 * 4 * 3, dtype=torch.float32).reshape(2, 4, 3),
+            importance=torch.tensor([[0.1, 0.2, 0.3, 0.4], [0.5, 0.6, 0.7, 0.8]], dtype=torch.float32),
+            depth_conf=torch.tensor([[0.9, 0.8, 0.7, 0.6], [0.5, 0.4, 0.3, 0.2]], dtype=torch.float32),
+        )
+        state = LayerCacheState(k=k.clone(), v=v.clone(), metadata=metadata)
+
+        state.gather_per_batch_([
+            torch.tensor([0, 2], dtype=torch.long),
+            torch.tensor([1, 3], dtype=torch.long),
+        ])
+
+        self.assertTrue(torch.equal(state.metadata.frame_id[0], torch.tensor([10, 12])))
+        self.assertTrue(torch.equal(state.metadata.frame_id[1], torch.tensor([21, 23])))
+        self.assertTrue(torch.equal(state.metadata.slot_id[1], torch.tensor([21, 23])))
+        self.assertTrue(torch.equal(state.k[1, 0, :, 0], k[1, 0, [1, 3], 0]))
+
+    def test_empty_demoted_slot_helpers_preserve_dtype_and_device(self):
+        metadata = TokenMetadata(
+            token_kind=torch.full((1, 2), int(TokenKind.PATCH), dtype=torch.long),
+            frame_id=torch.tensor([[1, 2]], dtype=torch.long),
+            anchor_slot=torch.tensor([[0, 1]], dtype=torch.long),
+            keyframe_id=torch.tensor([[1, 2]], dtype=torch.long),
+            slot_id=torch.tensor([[1, 2]], dtype=torch.long),
+            slot_local_xyz=torch.zeros(1, 2, 3, dtype=torch.float64),
+            importance=torch.zeros(1, 2, dtype=torch.float64),
+            depth_conf=torch.ones(1, 2, dtype=torch.float64),
+        )
+        score_state = torch.randn(1, 2, 5, dtype=torch.float64)
+        state = LayerCacheState(
+            score_state=score_state,
+            metadata=metadata,
+            slot_to_active={1: make_transform(0.0).to(dtype=torch.float64), 2: make_transform(0.0).to(dtype=torch.float64)},
+        )
+
+        empty_score = state.get_demoted_slot_score_state(demoted_slot=99)
+        empty_features = state.get_demoted_slot_metadata_features(demoted_slot=99, current_frame_id=2)
+
+        self.assertEqual(empty_score.shape, (0, 5))
+        self.assertEqual(empty_score.dtype, torch.float64)
+        self.assertEqual(empty_score.device, score_state.device)
+        self.assertEqual(empty_features.shape, (0, TOKEN_METADATA_FEATURE_DIM))
+        self.assertEqual(empty_features.dtype, torch.float64)
+        self.assertEqual(empty_features.device, metadata.slot_local_xyz.device)
 
     def test_fifo_event_shifts_anchor_slots(self):
         state = LayerCacheState(metadata=make_metadata(anchor_slots=[0, 1, 2, -1], slot_ids=[0, 1, 2, 3]))
@@ -393,6 +448,49 @@ def test_attention_eviction_accepts_legacy_window_token_count_kwarg():
     )
     assert final_k.shape[2] <= 3
     assert final_v.shape[2] <= 3
+
+
+def test_attention_eviction_reserves_newest_window_tokens():
+    torch.manual_seed(2)
+    attn = Attention(dim=8, num_heads=2)
+    k = torch.randn(1, 2, 6, 4)
+    v = k + 1000.0
+
+    final_k, final_v, _, kept = attn.eviction(
+        k,
+        v,
+        cache_budget=3,
+        num_anchor_tokens=1,
+        window_token_count=2,
+    )
+
+    assert kept.tolist() == [[0, 4, 5]]
+    assert torch.equal(final_k, k[:, :, [0, 4, 5], :])
+    assert torch.equal(final_v, v[:, :, [0, 4, 5], :])
+
+
+def test_block_forwards_window_token_count_to_attention_eviction():
+    block = Block(dim=8, num_heads=2)
+    x = torch.randn(1, 2, 8)
+    past_k = torch.randn(1, 2, 2, 4)
+    past_v = torch.randn(1, 2, 2, 4)
+    seen = {}
+
+    def eviction_spy(k, v, cache_budget, num_anchor_tokens, **kwargs):
+        seen["window_token_count"] = kwargs.get("window_token_count")
+        return k, v, None, None
+
+    block.attn.eviction = eviction_spy
+    block(
+        x,
+        past_key_values=(past_k, past_v),
+        use_cache=True,
+        cache_budget=3,
+        anchor_token_count=1,
+        window_token_count=7,
+    )
+
+    assert seen["window_token_count"] == 7
 
 
 def test_attention_baseline_fallback_score_remains_similarity_contract():
