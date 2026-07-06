@@ -331,5 +331,98 @@ class TestApplyVoxelDedupProbeCallbackOrdering:
         )
 
 
+def test_attention_global_plus_recent_anchor_overflow_keeps_global_anchor():
+    attn = Attention(dim=8, num_heads=2)
+    attn.anchor_overflow_policy = "global_plus_recent"
+    k = torch.arange(1 * 2 * 6 * 4, dtype=torch.float32).reshape(1, 2, 6, 4)
+    v = k + 1000.0
+
+    final_k, final_v, _, kept = attn.eviction(
+        k,
+        v,
+        cache_budget=3,
+        num_anchor_tokens=5,
+    )
+
+    assert kept.tolist() == [[0, 3, 4]]
+    assert torch.equal(final_k, k[:, :, [0, 3, 4], :])
+    assert torch.equal(final_v, v[:, :, [0, 3, 4], :])
+
+
+def test_attention_global_plus_recent_overflow_when_all_tokens_are_anchors():
+    attn = Attention(dim=8, num_heads=2)
+    attn.anchor_overflow_policy = "global_plus_recent"
+    k = torch.arange(1 * 2 * 5 * 4, dtype=torch.float32).reshape(1, 2, 5, 4)
+    v = k + 1000.0
+
+    final_k, final_v, _, kept = attn.eviction(
+        k,
+        v,
+        cache_budget=3,
+        num_anchor_tokens=5,
+    )
+
+    assert kept.tolist() == [[0, 3, 4]]
+    assert torch.equal(final_k, k[:, :, [0, 3, 4], :])
+    assert torch.equal(final_v, v[:, :, [0, 3, 4], :])
+
+
+def test_attention_accepts_legacy_window_token_count_kwarg():
+    attn = Attention(dim=8, num_heads=2)
+    x = torch.randn(1, 2, 8)
+    out, new_kv, _ = attn(
+        x,
+        use_cache=True,
+        cache_budget=4,
+        window_token_count=1,
+    )
+    assert out.shape == x.shape
+    assert new_kv[0].shape[2] <= 2
+
+
+def test_attention_eviction_accepts_legacy_window_token_count_kwarg():
+    attn = Attention(dim=8, num_heads=2)
+    k = torch.randn(1, 2, 4, 4)
+    v = torch.randn(1, 2, 4, 4)
+    final_k, final_v, _, kept = attn.eviction(
+        k,
+        v,
+        cache_budget=3,
+        num_anchor_tokens=1,
+        window_token_count=1,
+    )
+    assert final_k.shape[2] <= 3
+    assert final_v.shape[2] <= 3
+
+
+def test_attention_baseline_fallback_score_remains_similarity_contract():
+    attn = Attention(dim=8, num_heads=2)
+    uniform_k = torch.ones(1, 2, 4, 4)
+    diverse_k = torch.tensor(
+        [[
+            [[1.0, 0.0, 0.0, 0.0], [-1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, -1.0, 0.0, 0.0]],
+            [[1.0, 0.0, 0.0, 0.0], [-1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, -1.0, 0.0, 0.0]],
+        ]],
+        dtype=torch.float32,
+    )
+    uniform_v = uniform_k.clone()
+    diverse_v = diverse_k.clone()
+
+    _, _, uniform_score, _ = attn.eviction(
+        uniform_k,
+        uniform_v,
+        cache_budget=2,
+        num_anchor_tokens=0,
+    )
+    _, _, diverse_score, _ = attn.eviction(
+        diverse_k,
+        diverse_v,
+        cache_budget=2,
+        num_anchor_tokens=0,
+    )
+
+    assert diverse_score < uniform_score
+
+
 if __name__ == "__main__":
     unittest.main()

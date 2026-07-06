@@ -11,6 +11,27 @@ from typing import Union, Tuple, Dict, Optional
 XFORMERS_AVAILABLE = False
 
 
+def _normalize_scores(scores: Tensor, neutral_value: float = 0.5) -> Tensor:
+    """
+    Normalize scores to [0, 1] while keeping equal-score groups neutral instead of
+    collapsing them to zeros, which would bias eviction decisions.
+    """
+    score_min = scores.min(dim=-1, keepdim=True)[0]
+    score_max = scores.max(dim=-1, keepdim=True)[0]
+    denom = score_max - score_min
+    normalized = (scores - score_min) / (denom + 1e-8)
+    if scores.shape[-1] == 0:
+        return normalized
+    equal_mask = denom <= 1e-8
+    if equal_mask.any():
+        normalized = torch.where(
+            equal_mask.expand_as(normalized),
+            torch.full_like(normalized, neutral_value),
+            normalized,
+        )
+    return normalized
+
+
 
 class Attention(nn.Module):
     def __init__(
@@ -41,9 +62,36 @@ class Attention(nn.Module):
         self.proj_drop = nn.Dropout(proj_drop)
         self.rope = rope
         self.num_anchor_tokens = 0
+        # Overflow behavior when cache budget cannot keep all anchor tokens.
+        # - "recent": keep the most recent anchors
+        # - "global_plus_recent": always keep global anchor (index 0) plus recent anchors
+        self.anchor_overflow_policy = "recent"
 
     def _reset_cache_state(self):
         self.num_anchor_tokens = 0
+
+    def _select_anchor_indices_on_overflow(
+        self,
+        num_anchor_tokens: int,
+        keep_anchor_count: int,
+        device: torch.device,
+    ) -> Tensor:
+        if keep_anchor_count <= 0:
+            return torch.empty(0, dtype=torch.long, device=device)
+
+        if self.anchor_overflow_policy == "global_plus_recent" and num_anchor_tokens > 0:
+            if keep_anchor_count == 1:
+                return torch.tensor([0], dtype=torch.long, device=device)
+            recent_count = keep_anchor_count - 1
+            start_idx = max(num_anchor_tokens - recent_count, 1)
+            recent_indices = torch.arange(start_idx, num_anchor_tokens, dtype=torch.long, device=device)
+            return torch.cat(
+                [torch.tensor([0], dtype=torch.long, device=device), recent_indices],
+                dim=0,
+            )
+
+        start_idx = max(num_anchor_tokens - keep_anchor_count, 0)
+        return torch.arange(start_idx, num_anchor_tokens, dtype=torch.long, device=device)
 
     def intra_frame_prune(
         self,
@@ -125,49 +173,52 @@ class Attention(nn.Module):
             A tuple of (pruned_k, pruned_v, avg_scores, kept_indices).
             kept_indices: [B, cache_budget] global indices of kept tokens, or None if no eviction.
         """
+        _ = window_token_count
         B, H, N, D = k.shape
+        cache_budget = max(int(cache_budget), 0)
+        num_anchor_tokens = min(max(int(num_anchor_tokens), 0), N)
 
         if N <= cache_budget:
             return k, v, None, None
 
-        if cache_budget <= num_anchor_tokens:
-            anchor_k = k[:, :, :num_anchor_tokens, :]
-            anchor_v = v[:, :, :num_anchor_tokens, :]
-            anchor_indices = torch.arange(num_anchor_tokens, device=k.device).unsqueeze(0).expand(B, -1)
-            return anchor_k, anchor_v, None, anchor_indices
+        anchor_k, candidate_k = k.split([num_anchor_tokens, N - num_anchor_tokens], dim=2)
+        anchor_v, candidate_v = v.split([num_anchor_tokens, N - num_anchor_tokens], dim=2)
 
-        window_token_count = 0 if window_token_count is None else int(window_token_count)
-        window_token_count = max(window_token_count, 0)
-        max_tail = max(N - num_anchor_tokens, 0)
-        tail_count = min(window_token_count, max(cache_budget - num_anchor_tokens, 0), max_tail)
-        tail_start = N - tail_count if tail_count > 0 else N
+        num_candidates = N - num_anchor_tokens
+        num_to_keep_from_candidates = min(max(cache_budget - num_anchor_tokens, 0), num_candidates)
+        num_old_candidates = max(num_candidates - num_new_tokens, 0)
 
-        anchor_k = k[:, :, :num_anchor_tokens, :]
-        anchor_v = v[:, :, :num_anchor_tokens, :]
-        tail_k = k[:, :, tail_start:, :] if tail_count > 0 else None
-        tail_v = v[:, :, tail_start:, :] if tail_count > 0 else None
-        candidate_k = k[:, :, num_anchor_tokens:tail_start, :]
-        candidate_v = v[:, :, num_anchor_tokens:tail_start, :]
-
-        num_candidates = candidate_k.shape[2]
-        num_to_keep_from_candidates = min(max(cache_budget - num_anchor_tokens - tail_count, 0), num_candidates)
-        num_new_candidates = max(num_new_tokens - tail_count, 0)
-        num_old_candidates = max(num_candidates - num_new_candidates, 0)
+        # Edge case: the budget cannot even hold all protected anchors.
+        # Keep the most recent anchors so the returned cache still honors the
+        # requested size while favoring short-term geometry consistency.
+        if num_to_keep_from_candidates <= 0:
+            keep_anchor_count = min(max(cache_budget, 0), num_anchor_tokens)
+            keep_anchor_indices = self._select_anchor_indices_on_overflow(
+                num_anchor_tokens=num_anchor_tokens,
+                keep_anchor_count=keep_anchor_count,
+                device=k.device,
+            )
+            anchor_indices = keep_anchor_indices.unsqueeze(0).expand(B, -1)
+            if keep_anchor_count <= 0:
+                return (
+                    anchor_k[:, :, :0, :],
+                    anchor_v[:, :, :0, :],
+                    None,
+                    anchor_indices,
+                )
+            expanded_anchor_indices = keep_anchor_indices.view(1, 1, keep_anchor_count, 1).expand(
+                B, H, keep_anchor_count, D
+            )
+            return (
+                torch.gather(anchor_k, 2, expanded_anchor_indices),
+                torch.gather(anchor_v, 2, expanded_anchor_indices),
+                None,
+                anchor_indices,
+            )
 
         # Edge case: if we can keep all candidates
         if num_to_keep_from_candidates >= num_candidates:
             return k, v, None, None
-        
-        # Edge case: budget is too small (occupied by anchors), keep only anchors
-        if num_to_keep_from_candidates <= 0:
-            anchor_indices = torch.arange(num_anchor_tokens, device=k.device).unsqueeze(0).expand(B, -1)
-            if tail_count > 0:
-                tail_indices = torch.arange(tail_start, N, device=k.device).unsqueeze(0).expand(B, -1)
-                kept_indices = torch.cat([anchor_indices, tail_indices], dim=-1)
-                final_k = torch.cat([anchor_k, tail_k], dim=2)
-                final_v = torch.cat([anchor_v, tail_v], dim=2)
-                return final_k, final_v, None, kept_indices
-            return anchor_k, anchor_v, None, anchor_indices
 
         # Compute baseline scores (cosine diversity) for ALL candidates
         candidate_k_norm = F.normalize(candidate_k, p=2, dim=-1)
@@ -179,26 +230,21 @@ class Attention(nn.Module):
         baseline_diversity_avg = baseline_diversity.mean(dim=1)  # [B, N_cand]
 
         # Check if we can use hybrid scoring
-        if importance_scores is not None and num_new_candidates > 0:
-            importance_scores = importance_scores[:, :num_new_candidates]
         use_hybrid = (
             importance_scores is not None
-            and importance_scores.shape[1] == num_new_candidates
-            and num_new_candidates > 0
+            and importance_scores.shape[1] == num_new_tokens
+            and num_new_tokens > 0
             and num_old_candidates > 0
         )
 
         if use_hybrid:
             # Hybrid strategy: baseline for old, repr_shift for new
             old_scores = baseline_diversity_avg[:, :num_old_candidates]  # [B, N_old]
-            new_importance = importance_scores  # [B, N_new_candidates]
+            new_importance = importance_scores  # [B, N_new]
 
-            # Normalize both to [0, 1] range for fair comparison
-            old_min, old_max = old_scores.min(dim=-1, keepdim=True)[0], old_scores.max(dim=-1, keepdim=True)[0]
-            old_normalized = (old_scores - old_min) / (old_max - old_min + 1e-8)
-
-            new_min, new_max = new_importance.min(dim=-1, keepdim=True)[0], new_importance.max(dim=-1, keepdim=True)[0]
-            new_normalized = (new_importance - new_min) / (new_max - new_min + 1e-8)
+            # Normalize both to [0, 1] range for fair comparison.
+            old_normalized = _normalize_scores(old_scores)
+            new_normalized = _normalize_scores(new_importance)
 
             # Apply importance_weight: current frame weighted by importance_weight, past frames by (1 - importance_weight)
             weighted_old = (1.0 - importance_weight) * old_normalized
@@ -218,39 +264,37 @@ class Attention(nn.Module):
             # Build kept_indices
             anchor_indices = torch.arange(num_anchor_tokens, device=k.device).unsqueeze(0).expand(B, -1)
             kept_candidate_indices = top_indices_sorted + num_anchor_tokens
-            if tail_count > 0:
-                tail_indices = torch.arange(tail_start, N, device=k.device).unsqueeze(0).expand(B, -1)
-                kept_indices = torch.cat([anchor_indices, kept_candidate_indices, tail_indices], dim=-1)
-            else:
-                kept_indices = torch.cat([anchor_indices, kept_candidate_indices], dim=-1)
+            kept_indices = torch.cat([anchor_indices, kept_candidate_indices], dim=-1)
         else:
             # Fallback: pure baseline (cosine diversity)
             avg_scores = baseline_scores.mean().item()
 
-            # Keep tokens with LOWEST similarity (most diverse)
-            _, top_indices = torch.topk(-baseline_scores, k=num_to_keep_from_candidates, dim=-1)
+            # Keep tokens with HIGHEST diversity using one unified selection across
+            # heads so K/V ordering stays consistent with metadata indices.
+            _, top_indices = torch.topk(
+                baseline_diversity_avg,
+                k=num_to_keep_from_candidates,
+                dim=-1,
+            )
             top_indices_sorted = top_indices.sort(dim=-1).values
 
-            expanded_indices = top_indices_sorted.unsqueeze(-1).expand(B, H, num_to_keep_from_candidates, D)
+            expanded_indices = top_indices_sorted.unsqueeze(1).unsqueeze(-1).expand(
+                B,
+                H,
+                num_to_keep_from_candidates,
+                D,
+            )
 
-            # Build kept_indices (use first head's indices)
+            # Build kept_indices.
             anchor_indices = torch.arange(num_anchor_tokens, device=k.device).unsqueeze(0).expand(B, -1)
-            kept_candidate_indices = top_indices_sorted[:, 0, :] + num_anchor_tokens
-            if tail_count > 0:
-                tail_indices = torch.arange(tail_start, N, device=k.device).unsqueeze(0).expand(B, -1)
-                kept_indices = torch.cat([anchor_indices, kept_candidate_indices, tail_indices], dim=-1)
-            else:
-                kept_indices = torch.cat([anchor_indices, kept_candidate_indices], dim=-1)
+            kept_candidate_indices = top_indices_sorted + num_anchor_tokens
+            kept_indices = torch.cat([anchor_indices, kept_candidate_indices], dim=-1)
 
         kept_candidate_k = torch.gather(candidate_k, 2, expanded_indices)
         kept_candidate_v = torch.gather(candidate_v, 2, expanded_indices)
 
-        if tail_count > 0:
-            final_k = torch.cat([anchor_k, kept_candidate_k, tail_k], dim=2)
-            final_v = torch.cat([anchor_v, kept_candidate_v, tail_v], dim=2)
-        else:
-            final_k = torch.cat([anchor_k, kept_candidate_k], dim=2)
-            final_v = torch.cat([anchor_v, kept_candidate_v], dim=2)
+        final_k = torch.cat([anchor_k, kept_candidate_k], dim=2)
+        final_v = torch.cat([anchor_v, kept_candidate_v], dim=2)
 
         return final_k, final_v, avg_scores, kept_indices
 
@@ -292,7 +336,10 @@ class Attention(nn.Module):
         if use_cache and self.num_anchor_tokens == 0:
             self.num_anchor_tokens = k.shape[2]
 
-        k_current, v_current = k.clone(), v.clone() 
+        # Keep direct references for current-frame K/V.
+        # These tensors are not modified in-place before concatenation, so clones
+        # only increase peak memory without changing behavior.
+        k_current, v_current = k, v
         past_kv_for_block = None
 
         if use_cache:

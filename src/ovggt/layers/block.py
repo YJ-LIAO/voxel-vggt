@@ -5,6 +5,7 @@ import warnings
 
 import torch
 from torch import nn, Tensor
+from torch.utils.checkpoint import checkpoint
 
 from .attention import Attention
 from .drop_path import DropPath
@@ -48,6 +49,8 @@ class Block(nn.Module):
             strategy=eviction_strategy,
             spatial_alpha=spatial_alpha,
         )
+        self.token_scorer = None  # set by Aggregator.init_token_scorers()
+        self.score_state_proj = None  # set by Aggregator.init_token_scorers()
 
         self.norm1 = norm_layer(dim)
 
@@ -79,6 +82,7 @@ class Block(nn.Module):
         self.drop_path2 = DropPath(drop_path) if drop_path > 0.0 else nn.Identity()
 
         self.sample_drop_ratio = drop_path
+        self.use_checkpoint = False
 
     def forward(
         self,
@@ -93,10 +97,13 @@ class Block(nn.Module):
         anchor_token_count: int = None,
         importance_weight: float = 0.5,
         window_token_count: int = 0,
+        frontend_cache_mode: bool = False,
+        patch_grid_size: Optional[Tuple[int, int]] = None,
     ) -> Union[Tensor, Tuple[Tensor, Dict]]:
 
         # Determine if we use two-stage eviction (intra-frame + inter-frame)
         use_two_stage = use_cache and intra_frame_keep_ratio < 1.0
+        resolved_patch_grid_size = patch_grid_size if patch_grid_size is not None else self.patch_grid_size
 
         def attn_residual_func(
             x: Tensor,
@@ -109,7 +116,6 @@ class Block(nn.Module):
             defer_eviction=False,
             anchor_token_count_inner=None,
             importance_weight_inner: float = 0.5,
-            window_token_count_inner: int = 0,
         ) -> Union[Tensor, Tuple[Tensor, Dict]]:
             if use_cache:
                 output, new_kv, scores = self.attn(
@@ -122,7 +128,6 @@ class Block(nn.Module):
                     defer_eviction=defer_eviction,
                     anchor_token_count=anchor_token_count_inner,
                     importance_weight=importance_weight_inner,
-                    window_token_count=window_token_count_inner,
                 )
                 return self.ls1(output), new_kv, scores
             else:
@@ -134,7 +139,73 @@ class Block(nn.Module):
         def ffn_residual_func(x: Tensor) -> Tensor:
             return self.ls2(self.mlp(self.norm2(x)))
 
+        def ffn_residual_maybe_checkpoint(x_in: Tensor) -> Tensor:
+            if self.use_checkpoint and self.training:
+                return checkpoint(
+                    ffn_residual_func,
+                    x_in,
+                    use_reentrant=False,
+                    determinism_check="none",
+                )
+            return ffn_residual_func(x_in)
+
+        def current_frame_keys(x_input: Tensor, pos_input=None) -> Tensor:
+            """
+            Recompute current-frame keys before eviction so legacy cache updates do
+            not infer "new tokens" from an already-evicted KV cache.
+            """
+            B, N, _ = x_input.shape
+            qkv = self.attn.qkv(self.norm1(x_input)).reshape(
+                B,
+                N,
+                3,
+                self.attn.num_heads,
+                self.attn.head_dim,
+            ).permute(2, 0, 3, 1, 4)
+            _, k_current, _ = qkv.unbind(0)
+            k_current = self.attn.k_norm(k_current)
+            if self.attn.rope is not None:
+                k_current = self.attn.rope(k_current, pos_input)
+            return k_current
+
         if use_cache:
+            if frontend_cache_mode:
+                attn_output, kv_info, _ = attn_residual_func(
+                    x,
+                    pos=pos,
+                    past_key_values=past_key_values,
+                    use_cache=True,
+                    cache_budget=cache_budget,
+                    importance_scores=prev_importance,
+                    defer_eviction=True,
+                    anchor_token_count_inner=anchor_token_count,
+                    importance_weight_inner=importance_weight,
+                )
+                _, _, k_current, v_current, _ = kv_info
+
+                x_after_attn = x + attn_output
+                x_before_mlp = x_after_attn
+                mlp_residual = ffn_residual_maybe_checkpoint(x_before_mlp)
+                x_after_mlp = x_before_mlp + mlp_residual
+
+                if self.eviction_strategy in ('repr_shift', 'repr_shift_spatial'):
+                    new_importance = self.importance_scorer.compute(
+                        x_before_mlp=x_before_mlp,
+                        mlp_output=mlp_residual,
+                        patch_start_idx=self.patch_start_idx,
+                        grid_size=resolved_patch_grid_size,
+                    )
+                else:
+                    new_importance = self.importance_scorer.compute(k=k_current)
+
+                score_state = (
+                    self.score_state_proj(x_after_mlp)
+                    if self.score_state_proj is not None
+                    else None
+                )
+
+                return x_after_mlp, (k_current, v_current), new_importance, score_state
+
             if use_two_stage:
                 # Two-stage eviction: defer eviction to after MLP
                 attn_output, kv_info, scores = attn_residual_func(
@@ -146,7 +217,6 @@ class Block(nn.Module):
                     importance_scores=prev_importance,
                     defer_eviction=True,
                     anchor_token_count_inner=anchor_token_count,
-                    window_token_count_inner=window_token_count,
                 )
                 k_full, v_full, k_current, v_current, past_kv = kv_info
                 kept_indices = None
@@ -155,7 +225,7 @@ class Block(nn.Module):
 
                 # MLP: compute residual and track for importance scoring
                 x_before_mlp = x_after_attn
-                mlp_residual = ffn_residual_func(x_before_mlp)
+                mlp_residual = ffn_residual_maybe_checkpoint(x_before_mlp)
                 x_after_mlp = x_before_mlp + mlp_residual
 
                 # Compute importance for NEW tokens only
@@ -164,7 +234,7 @@ class Block(nn.Module):
                         x_before_mlp=x_before_mlp,
                         mlp_output=mlp_residual,
                         patch_start_idx=self.patch_start_idx,
-                        grid_size=self.patch_grid_size,
+                        grid_size=resolved_patch_grid_size,
                     )
                 else:
                     N_new = x.shape[1]
@@ -204,7 +274,6 @@ class Block(nn.Module):
                         importance_scores=importance_pruned,
                         num_new_tokens=num_new_tokens_after_prune,
                         importance_weight=importance_weight,
-                        window_token_count=window_token_count,
                     )
 
                 new_kv = (k, v)
@@ -220,7 +289,6 @@ class Block(nn.Module):
                     defer_eviction=False,
                     anchor_token_count_inner=anchor_token_count,
                     importance_weight_inner=importance_weight,
-                    window_token_count_inner=window_token_count,
                 )
                 k, v, kept_indices = new_kv_full
                 new_kv = (k, v)
@@ -229,7 +297,7 @@ class Block(nn.Module):
 
                 # MLP: compute residual and track for importance scoring
                 x_before_mlp = x_after_attn
-                mlp_residual = ffn_residual_func(x_before_mlp)
+                mlp_residual = ffn_residual_maybe_checkpoint(x_before_mlp)
                 x_after_mlp = x_before_mlp + mlp_residual
 
                 # Compute importance for NEW tokens only
@@ -238,12 +306,11 @@ class Block(nn.Module):
                         x_before_mlp=x_before_mlp,
                         mlp_output=mlp_residual,
                         patch_start_idx=self.patch_start_idx,
-                        grid_size=self.patch_grid_size,
+                        grid_size=resolved_patch_grid_size,
                     )
                 else:
-                    # Baseline: compute from keys of current layer (new tokens only)
-                    N_new = x.shape[1]
-                    k_new = k[:, :, -N_new:, :]
+                    # Baseline: compute from the current-frame keys before eviction.
+                    k_new = current_frame_keys(x, pos_input=pos)
                     new_importance = self.importance_scorer.compute(k=k_new)
 
             return x_after_mlp, new_kv, scores, new_importance, kept_indices
@@ -263,10 +330,21 @@ class Block(nn.Module):
             )
         elif self.training and self.sample_drop_ratio > 0.0:
             x = x + self.drop_path1(attn_residual_func(x, pos=pos, attn_mask=attn_mask))
-            x = x + self.drop_path1(ffn_residual_func(x))  # FIXME: drop_path2
+            x = x + self.drop_path2(ffn_residual_maybe_checkpoint(x))
         else:
-            x = x + attn_residual_func(x, pos=pos, attn_mask=attn_mask)
-            x = x + ffn_residual_func(x)
+            if self.use_checkpoint and self.training:
+                def attn_no_cache_func(x_in: Tensor) -> Tensor:
+                    return attn_residual_func(x_in, pos=pos, attn_mask=attn_mask)
+
+                x = x + checkpoint(
+                    attn_no_cache_func,
+                    x,
+                    use_reentrant=False,
+                    determinism_check="none",
+                )
+            else:
+                x = x + attn_residual_func(x, pos=pos, attn_mask=attn_mask)
+            x = x + ffn_residual_maybe_checkpoint(x)
         return x
 
 def drop_add_residual_stochastic_depth(
