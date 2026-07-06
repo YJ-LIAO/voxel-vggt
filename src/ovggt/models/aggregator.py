@@ -243,16 +243,20 @@ class Aggregator(nn.Module):
         frontend_cache_config=None,
         total_budget=0,
         window_token_count: int = 0,
-    ) -> Tuple[List[torch.Tensor], int]:
+    ) -> Union[
+        Tuple[List[torch.Tensor], int],
+        Tuple[List[torch.Tensor], int, Any],
+        Tuple[List[torch.Tensor], int, Any, List[Optional[PendingLayerUpdate]], None],
+    ]:
         """
         Args:
             images (torch.Tensor): Input images with shape [B, S, 3, H, W], in range [0, 1].
                 B: batch size, S: sequence length, 3: RGB channels, H: height, W: width
 
         Returns:
-            (list[torch.Tensor], int):
-                The list of outputs from the attention blocks,
-                and the patch_start_idx indicating where patch tokens begin.
+            Without cache: (output_list, patch_start_idx).
+            Legacy cache mode: (output_list, patch_start_idx, past_key_values).
+            Frontend cache mode: (output_list, patch_start_idx, cache_states, pending_updates, None).
         """
         B, S, C_in, H, W = images.shape
 
@@ -266,6 +270,8 @@ class Aggregator(nn.Module):
                 block.patch_grid_size = current_patch_grid_size
 
         frontend_cache_mode = use_cache and frontend_cache_config is not None and frontend_cache_config.enabled
+        if frontend_cache_mode and cache_states is not None and len(cache_states) != self.depth:
+            raise ValueError(f"cache_states must have length {self.depth}, got {len(cache_states)}")
         if (per_layer_budget is None or int(per_layer_budget) == 0) and total_budget not in (None, 0):
             per_layer_budget = int(total_budget) // self.depth
         
