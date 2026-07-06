@@ -337,15 +337,20 @@ class Aggregator(nn.Module):
                     )
                 elif attn_type == "global":
                     if frontend_cache_mode:
-                        layer_budget = None if current_budgets is None else current_budgets[global_idx].item()
-                        tokens, global_idx, global_intermediates, pending_update, new_importance, score_state = self._process_global_attention(
+                        cache_state_values = (
+                            [
+                                state.as_past_key_values() if state is not None else None
+                                for state in cache_states
+                            ]
+                            if cache_states is not None
+                            else None
+                        )
+                        tokens, global_idx, global_intermediates, layer_pending_updates, new_importance = self._process_global_attention(
                             tokens, B, S, P, C, global_idx, pos=pos,
-                            past_key_values_block=cache_states[global_idx].as_past_key_values()
-                            if cache_states is not None and cache_states[global_idx] is not None
-                            else None,
+                            past_key_values_blocks=cache_state_values,
                             use_cache=True,
                             past_frame_idx=past_frame_idx,
-                            cache_budget=layer_budget,
+                            cache_budgets=current_budgets,
                             prev_importance=prev_importance,
                             intra_frame_keep_ratio=self.intra_frame_keep_ratio,
                             anchor_token_count=anchor_token_count,
@@ -355,12 +360,17 @@ class Aggregator(nn.Module):
                         )
 
                         prev_importance = new_importance
-                        layer_idx = global_idx - 1
-                        if pending_update is not None:
+                        for (
+                            layer_idx,
+                            pending_update,
+                            layer_importance,
+                            score_state,
+                            layer_budget,
+                        ) in layer_pending_updates:
                             pending_updates[layer_idx] = PendingLayerUpdate(
                                 k_current=pending_update[0],
                                 v_current=pending_update[1],
-                                importance_current=new_importance,
+                                importance_current=layer_importance,
                                 frame_id=past_frame_idx,
                                 cache_budget=layer_budget,
                                 score_state_current=score_state,
@@ -452,9 +462,11 @@ class Aggregator(nn.Module):
         global_idx,
         pos=None,
         past_key_values_block=None,
+        past_key_values_blocks=None,
         use_cache=False,
         past_frame_idx=0,
         cache_budget=None,
+        cache_budgets=None,
         prev_importance=None,
         intra_frame_keep_ratio=1.0,
         anchor_token_count: int = None,
@@ -486,8 +498,19 @@ class Aggregator(nn.Module):
         kept_indices = None
         pending_update = None
         score_state = None
+        layer_pending_updates = []
 
         for _ in range(self.aa_block_size):
+            layer_idx = global_idx
+            layer_budget = cache_budget
+            if cache_budgets is not None:
+                layer_budget = cache_budgets[layer_idx].item()
+            layer_past_key_values = (
+                past_key_values_blocks[layer_idx]
+                if past_key_values_blocks is not None
+                else past_key_values_block
+            )
+
             if not use_cache:
                 L = S * P
                 frame_ids = torch.arange(L, device=tokens.device) // P  # [0,0,...,1,1,...,S-1]
@@ -502,9 +525,9 @@ class Aggregator(nn.Module):
                     tokens,
                     pos=pos,
                     attn_mask=attn_mask,
-                    past_key_values=past_key_values_block,
+                    past_key_values=layer_past_key_values,
                     use_cache=True,
-                    cache_budget=cache_budget,
+                    cache_budget=layer_budget,
                     prev_importance=prev_importance,
                     intra_frame_keep_ratio=intra_frame_keep_ratio,
                     anchor_token_count=anchor_token_count,
@@ -513,6 +536,11 @@ class Aggregator(nn.Module):
                     frontend_cache_mode=True,
                     patch_grid_size=patch_grid_size,
                 )
+                if pending_update is not None:
+                    layer_pending_updates.append(
+                        (layer_idx, pending_update, new_importance, score_state, layer_budget)
+                    )
+                prev_importance = new_importance
             elif use_cache:
                 # Skip intra-frame pruning for anchor frame (first frame)
                 effective_keep_ratio = 1.0 if past_frame_idx == 0 else intra_frame_keep_ratio
@@ -520,9 +548,9 @@ class Aggregator(nn.Module):
                     tokens,
                     pos=pos,
                     attn_mask=attn_mask,
-                    past_key_values=past_key_values_block,
+                    past_key_values=layer_past_key_values,
                     use_cache=True,
-                    cache_budget=cache_budget,
+                    cache_budget=layer_budget,
                     prev_importance=prev_importance,
                     intra_frame_keep_ratio=effective_keep_ratio,
                     anchor_token_count=anchor_token_count,
@@ -544,7 +572,7 @@ class Aggregator(nn.Module):
             # if self.use_causal_global:
             #     del attn_mask
         if frontend_cache_mode:
-            return tokens, global_idx, intermediates, pending_update, new_importance, score_state
+            return tokens, global_idx, intermediates, layer_pending_updates, new_importance
         if use_cache:
             return tokens, global_idx, intermediates, block_kv, scores, new_importance, kept_indices
         return tokens, global_idx, intermediates

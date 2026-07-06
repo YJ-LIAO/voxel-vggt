@@ -20,6 +20,7 @@ def test_aggregator_frontend_cache_mode_returns_pending_updates_with_conv_patch_
         num_heads=4,
         num_register_tokens=1,
         patch_embed="conv",
+        aa_block_size=2,
     )
     cache_states = [LayerCacheState() for _ in range(model.depth)]
     images = torch.rand(1, 1, 3, 28, 28)
