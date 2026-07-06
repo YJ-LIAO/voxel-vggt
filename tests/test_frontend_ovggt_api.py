@@ -68,18 +68,29 @@ def test_frontend_mode_respects_explicit_disabled_cache_config_and_routes_legacy
     calls = []
 
     def frontend_stub(*args, **kwargs):
-        calls.append("frontend")
+        calls.append(("frontend", kwargs))
         return "frontend"
 
     def legacy_stub(*args, **kwargs):
-        calls.append("legacy")
+        calls.append(("legacy", kwargs))
         return "legacy"
 
     model._inference_frontend = frontend_stub
     model._inference_legacy = legacy_stub
 
     assert model.inference([]) == "legacy"
-    assert calls == ["legacy"]
+    assert len(calls) == 1
+    call_name, call_kwargs = calls[0]
+    assert call_name == "legacy"
+    assert call_kwargs["history_anchor_strategy"] == "coverage"
+    assert call_kwargs["anchor_interval"] == 250
+
+    calls.clear()
+    assert model.inference([], history_anchor_strategy="fixed_interval", anchor_interval=12) == "legacy"
+    assert len(calls) == 1
+    _, explicit_kwargs = calls[0]
+    assert explicit_kwargs["history_anchor_strategy"] == "fixed_interval"
+    assert explicit_kwargs["anchor_interval"] == 12
 
 
 def test_legacy_mode_defaults_to_coverage_history_anchor_strategy():

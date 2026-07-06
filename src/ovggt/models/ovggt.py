@@ -416,9 +416,13 @@ class OVGGT(nn.Module, PyTorchModelHubMixin):
         move_to_cpu: bool = True,
         return_views: bool = True,
     ):
-        resolved_history_anchor_strategy = self._resolve_history_anchor_strategy(history_anchor_strategy)
-        resolved_anchor_interval = self._resolve_anchor_interval(anchor_interval)
-        if self.mode in {"frontend_train", "frontend_eval"} and self.frontend_cache_config.enabled:
+        use_frontend_cache = (
+            self.mode in {"frontend_train", "frontend_eval"}
+            and self.frontend_cache_config.enabled
+        )
+        if use_frontend_cache:
+            resolved_history_anchor_strategy = self._resolve_history_anchor_strategy(history_anchor_strategy)
+            resolved_anchor_interval = self._resolve_anchor_interval(anchor_interval)
             return self._inference_frontend(
                 frames=frames,
                 query_points=query_points,
@@ -432,6 +436,10 @@ class OVGGT(nn.Module, PyTorchModelHubMixin):
                 export_keyframe_packets=None,
                 return_views=return_views,
             )
+        resolved_history_anchor_strategy = (
+            history_anchor_strategy if history_anchor_strategy is not None else "coverage"
+        )
+        resolved_anchor_interval = anchor_interval if anchor_interval is not None else 250
         return self._inference_legacy(
             frames=frames,
             query_points=query_points,
