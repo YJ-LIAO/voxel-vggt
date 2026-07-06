@@ -25,100 +25,9 @@ from ovggt.utils.history_anchor import HistoryAnchorConfig, HistoryAnchorManager
 from ovggt.utils.pose_enc import (
     ABS_POSE_ENCODING,
     REL_POSE_ENCODING,
-    extri_intri_to_pose_encoding,
-    pose_encoding_to_extri_intri,
-    pose_encoding_to_world_to_camera,
+    compose_absolute_from_relative,
+    relative_from_absolute_pose_encoding,
 )
-
-try:
-    from ovggt.utils.pose_enc import (
-        compose_absolute_from_relative,
-        relative_from_absolute_pose_encoding,
-    )
-except ImportError:
-    def _inverse_se3(matrix_4x4: torch.Tensor) -> torch.Tensor:
-        rot = matrix_4x4[..., :3, :3]
-        trans = matrix_4x4[..., :3, 3:]
-        rot_t = rot.transpose(-1, -2)
-        inv = torch.eye(
-            4,
-            dtype=matrix_4x4.dtype,
-            device=matrix_4x4.device,
-        ).expand(matrix_4x4.shape[:-2] + (4, 4)).clone()
-        inv[..., :3, :3] = rot_t
-        inv[..., :3, 3:] = -torch.matmul(rot_t, trans)
-        return inv
-
-    def _world_to_camera_to_pose_encoding(
-        world_to_camera: torch.Tensor,
-        intrinsics: torch.Tensor,
-        image_size_hw,
-        pose_encoding_type: str,
-    ) -> torch.Tensor:
-        return extri_intri_to_pose_encoding(
-            world_to_camera[..., :3, :4],
-            intrinsics,
-            image_size_hw=image_size_hw,
-            pose_encoding_type=pose_encoding_type,
-        )
-
-    def compose_absolute_from_relative(
-        anchor_abs_pose_encoding: torch.Tensor,
-        relative_pose_encoding: torch.Tensor,
-        image_size_hw,
-    ) -> torch.Tensor:
-        anchor_w2c = pose_encoding_to_world_to_camera(
-            anchor_abs_pose_encoding,
-            image_size_hw=image_size_hw,
-            pose_encoding_type=ABS_POSE_ENCODING,
-        )
-        relative_w2c = pose_encoding_to_world_to_camera(
-            relative_pose_encoding,
-            image_size_hw=image_size_hw,
-            pose_encoding_type=REL_POSE_ENCODING,
-        )
-        _, intrinsics = pose_encoding_to_extri_intri(
-            relative_pose_encoding,
-            image_size_hw=image_size_hw,
-            pose_encoding_type=REL_POSE_ENCODING,
-            build_intrinsics=True,
-        )
-        current_w2c = torch.matmul(relative_w2c, anchor_w2c)
-        return _world_to_camera_to_pose_encoding(
-            current_w2c,
-            intrinsics=intrinsics,
-            image_size_hw=image_size_hw,
-            pose_encoding_type=ABS_POSE_ENCODING,
-        )
-
-    def relative_from_absolute_pose_encoding(
-        anchor_abs_pose_encoding: torch.Tensor,
-        current_abs_pose_encoding: torch.Tensor,
-        image_size_hw,
-    ) -> torch.Tensor:
-        anchor_w2c = pose_encoding_to_world_to_camera(
-            anchor_abs_pose_encoding,
-            image_size_hw=image_size_hw,
-            pose_encoding_type=ABS_POSE_ENCODING,
-        )
-        current_w2c = pose_encoding_to_world_to_camera(
-            current_abs_pose_encoding,
-            image_size_hw=image_size_hw,
-            pose_encoding_type=ABS_POSE_ENCODING,
-        )
-        _, intrinsics = pose_encoding_to_extri_intri(
-            current_abs_pose_encoding,
-            image_size_hw=image_size_hw,
-            pose_encoding_type=ABS_POSE_ENCODING,
-            build_intrinsics=True,
-        )
-        relative_w2c = torch.matmul(current_w2c, _inverse_se3(anchor_w2c))
-        return _world_to_camera_to_pose_encoding(
-            relative_w2c,
-            intrinsics=intrinsics,
-            image_size_hw=image_size_hw,
-            pose_encoding_type=REL_POSE_ENCODING,
-        )
 
 
 @dataclass
@@ -179,6 +88,11 @@ class OVGGT(nn.Module, PyTorchModelHubMixin):
         self.frontend_cache_config = frontend_cache_config or FrontendCacheConfig()
         if self.mode in {"frontend_train", "frontend_eval"} and not frontend_cache_config_provided:
             self.frontend_cache_config.enabled = True
+        if self.frontend_cache_config.learned_fifo_keep_count:
+            raise ValueError(
+                "learned_fifo_keep_count=True requires a count head, "
+                "which is not available in this OVGGT build"
+            )
         self.keyframe_switch_config = keyframe_switch_config
         self._keyframe_switch_config_provided = keyframe_switch_config is not None
 
@@ -296,7 +210,7 @@ class OVGGT(nn.Module, PyTorchModelHubMixin):
         cache_results: bool = True,
         return_views: bool = False,
     ):
-        if self.mode == "frontend_train":
+        if self.mode == "frontend_train" and self.frontend_cache_config.enabled:
             return self.forward_frontend_train(
                 views=views,
                 query_points=query_points,
@@ -584,24 +498,13 @@ class OVGGT(nn.Module, PyTorchModelHubMixin):
                     rel_pose_enc_batch.append(pose_enc_dict_b["rel_pose_enc"][:, 0, :])
                 abs_pose_enc = torch.cat(pose_enc_batch, dim=0)
                 rel_pose_enc = torch.cat(rel_pose_enc_batch, dim=0)
-                if i == 0 or self.frontend_pose_encoding_type == ABS_POSE_ENCODING:
-                    camera_pose = abs_pose_enc
-                    camera_pose_rel = relative_from_absolute_pose_encoding(
-                        camera_pose.unsqueeze(1),
-                        camera_pose.unsqueeze(1),
-                        image_size_hw=(img_h, img_w),
-                    )[:, 0, :]
-                else:
-                    active_poses = torch.stack(
-                        [km.get_active_pose_encoding() for km in keyframe_managers],
-                        dim=0,
-                    )
-                    camera_pose = compose_absolute_from_relative(
-                        active_poses.unsqueeze(1),
-                        rel_pose_enc.unsqueeze(1),
-                        image_size_hw=(img_h, img_w),
-                    )[:, 0, :]
-                    camera_pose_rel = rel_pose_enc
+                camera_pose, camera_pose_rel = self._resolve_frontend_camera_pose(
+                    frame_idx=i,
+                    keyframe_managers=keyframe_managers,
+                    abs_pose_enc=abs_pose_enc,
+                    rel_pose_enc=rel_pose_enc,
+                    image_size_hw=(img_h, img_w),
+                )
 
             def depth_head_forward(*layer_tokens):
                 return self.depth_head(
@@ -677,11 +580,6 @@ class OVGGT(nn.Module, PyTorchModelHubMixin):
                         demoted_slot = getattr(events[b], "demoted_slot", None)
                         if demoted_slot is not None:
                             cache_state = cache_states[b][layer_idx]
-                            if self.frontend_cache_config.learned_fifo_keep_count:
-                                raise ValueError(
-                                    "learned_fifo_keep_count=True requires a count head, "
-                                    "which is not available in this OVGGT build"
-                                )
                             keep_count = int(self.frontend_cache_config.fifo_keep_topk)
                             cache_state.protect_topk_on_demotion_(
                                 demoted_slot=demoted_slot,
@@ -816,11 +714,11 @@ class OVGGT(nn.Module, PyTorchModelHubMixin):
                     else {}
                 ),
             }
+            res_out = self._maybe_move_dict_to_cpu(res_gpu) if move_to_cpu else res_gpu
             if frame_writer is not None:
-                frame_writer(i, frame, res_gpu)
+                frame_writer(i, frame, res_out)
 
             if cache_results:
-                res_out = self._maybe_move_dict_to_cpu(res_gpu) if move_to_cpu else res_gpu
                 all_ress.append(res_out)
                 if return_views:
                     processed_frames.append(self._maybe_move_dict_to_cpu(frame) if move_to_cpu else frame)
@@ -836,6 +734,43 @@ class OVGGT(nn.Module, PyTorchModelHubMixin):
             keyframe_schedule=keyframe_schedule,
             distill_loss=total_distill_loss,
         )
+
+    def _resolve_frontend_camera_pose(
+        self,
+        frame_idx: int,
+        keyframe_managers,
+        abs_pose_enc: torch.Tensor,
+        rel_pose_enc: torch.Tensor,
+        image_size_hw,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        if frame_idx == 0:
+            camera_pose = abs_pose_enc
+            camera_pose_rel = relative_from_absolute_pose_encoding(
+                camera_pose.unsqueeze(1),
+                camera_pose.unsqueeze(1),
+                image_size_hw=image_size_hw,
+            )[:, 0, :]
+            return camera_pose, camera_pose_rel
+
+        active_poses = torch.stack(
+            [km.get_active_pose_encoding() for km in keyframe_managers],
+            dim=0,
+        )
+        if self.frontend_pose_encoding_type == ABS_POSE_ENCODING:
+            camera_pose = abs_pose_enc
+            camera_pose_rel = relative_from_absolute_pose_encoding(
+                active_poses.unsqueeze(1),
+                camera_pose.unsqueeze(1),
+                image_size_hw=image_size_hw,
+            )[:, 0, :]
+            return camera_pose, camera_pose_rel
+
+        camera_pose = compose_absolute_from_relative(
+            active_poses.unsqueeze(1),
+            rel_pose_enc.unsqueeze(1),
+            image_size_hw=image_size_hw,
+        )[:, 0, :]
+        return camera_pose, rel_pose_enc
 
     def _inference_legacy(
         self,

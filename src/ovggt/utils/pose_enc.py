@@ -186,3 +186,77 @@ def pose_encoding_to_camera_to_world(
             pose_encoding_type=pose_encoding_type,
         )
     )
+
+
+def world_to_camera_to_pose_encoding(
+    world_to_camera: torch.Tensor,
+    intrinsics: torch.Tensor,
+    image_size_hw,
+    pose_encoding_type: str = ABS_POSE_ENCODING,
+) -> torch.Tensor:
+    return extri_intri_to_pose_encoding(
+        world_to_camera[..., :3, :4],
+        intrinsics,
+        image_size_hw=image_size_hw,
+        pose_encoding_type=pose_encoding_type,
+    )
+
+
+def compose_absolute_from_relative(
+    anchor_abs_pose_encoding: torch.Tensor,
+    relative_pose_encoding: torch.Tensor,
+    image_size_hw,
+) -> torch.Tensor:
+    anchor_w2c = pose_encoding_to_world_to_camera(
+        anchor_abs_pose_encoding,
+        image_size_hw=image_size_hw,
+        pose_encoding_type=ABS_POSE_ENCODING,
+    )
+    relative_w2c = pose_encoding_to_world_to_camera(
+        relative_pose_encoding,
+        image_size_hw=image_size_hw,
+        pose_encoding_type=REL_POSE_ENCODING,
+    )
+    _, intrinsics = pose_encoding_to_extri_intri(
+        relative_pose_encoding,
+        image_size_hw=image_size_hw,
+        pose_encoding_type=REL_POSE_ENCODING,
+        build_intrinsics=True,
+    )
+    current_w2c = torch.matmul(relative_w2c, anchor_w2c)
+    return world_to_camera_to_pose_encoding(
+        current_w2c,
+        intrinsics=intrinsics,
+        image_size_hw=image_size_hw,
+        pose_encoding_type=ABS_POSE_ENCODING,
+    )
+
+
+def relative_from_absolute_pose_encoding(
+    anchor_abs_pose_encoding: torch.Tensor,
+    current_abs_pose_encoding: torch.Tensor,
+    image_size_hw,
+) -> torch.Tensor:
+    anchor_w2c = pose_encoding_to_world_to_camera(
+        anchor_abs_pose_encoding,
+        image_size_hw=image_size_hw,
+        pose_encoding_type=ABS_POSE_ENCODING,
+    )
+    current_w2c = pose_encoding_to_world_to_camera(
+        current_abs_pose_encoding,
+        image_size_hw=image_size_hw,
+        pose_encoding_type=ABS_POSE_ENCODING,
+    )
+    _, intrinsics = pose_encoding_to_extri_intri(
+        current_abs_pose_encoding,
+        image_size_hw=image_size_hw,
+        pose_encoding_type=ABS_POSE_ENCODING,
+        build_intrinsics=True,
+    )
+    relative_w2c = torch.matmul(current_w2c, _inverse_se3(anchor_w2c))
+    return world_to_camera_to_pose_encoding(
+        relative_w2c,
+        intrinsics=intrinsics,
+        image_size_hw=image_size_hw,
+        pose_encoding_type=REL_POSE_ENCODING,
+    )
