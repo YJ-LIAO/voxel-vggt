@@ -44,3 +44,57 @@ def test_frame_image_to_sequence_accepts_single_frame_and_batch():
     batch = torch.rand(2, 3, 28, 28)
     assert OVGGT._frame_image_to_sequence(single).shape == (1, 1, 3, 28, 28)
     assert OVGGT._frame_image_to_sequence(batch).shape == (2, 1, 3, 28, 28)
+
+
+def test_frontend_mode_respects_explicit_disabled_cache_config_and_routes_legacy():
+    model = OVGGT(
+        img_size=28,
+        patch_size=14,
+        embed_dim=32,
+        total_budget=384,
+        mode="frontend_eval",
+        frontend_cache_config=FrontendCacheConfig(enabled=False, dedup_enabled=False),
+        aggregator_kwargs={
+            "depth": 2,
+            "num_heads": 4,
+            "num_register_tokens": 1,
+            "patch_embed": "conv",
+        },
+        camera_head_kwargs={"trunk_depth": 1, "num_heads": 4},
+        enable_track_head=False,
+    )
+    assert model.frontend_cache_config.enabled is False
+
+    calls = []
+
+    def frontend_stub(*args, **kwargs):
+        calls.append("frontend")
+        return "frontend"
+
+    def legacy_stub(*args, **kwargs):
+        calls.append("legacy")
+        return "legacy"
+
+    model._inference_frontend = frontend_stub
+    model._inference_legacy = legacy_stub
+
+    assert model.inference([]) == "legacy"
+    assert calls == ["legacy"]
+
+
+def test_legacy_mode_defaults_to_coverage_history_anchor_strategy():
+    model = OVGGT(
+        img_size=28,
+        patch_size=14,
+        embed_dim=32,
+        total_budget=384,
+        aggregator_kwargs={
+            "depth": 2,
+            "num_heads": 4,
+            "num_register_tokens": 1,
+            "patch_embed": "conv",
+        },
+        camera_head_kwargs={"trunk_depth": 1, "num_heads": 4},
+        enable_track_head=False,
+    )
+    assert model._resolve_history_anchor_strategy(None) == "coverage"

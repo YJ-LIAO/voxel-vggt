@@ -175,8 +175,9 @@ class OVGGT(nn.Module, PyTorchModelHubMixin):
         self.spatial_alpha = spatial_alpha
         self.mode = mode
         self.frontend_pose_encoding_type = frontend_pose_encoding_type
+        frontend_cache_config_provided = frontend_cache_config is not None
         self.frontend_cache_config = frontend_cache_config or FrontendCacheConfig()
-        if self.mode in {"frontend_train", "frontend_eval"}:
+        if self.mode in {"frontend_train", "frontend_eval"} and not frontend_cache_config_provided:
             self.frontend_cache_config.enabled = True
         self.keyframe_switch_config = keyframe_switch_config
         self._keyframe_switch_config_provided = keyframe_switch_config is not None
@@ -1134,7 +1135,7 @@ class OVGGT(nn.Module, PyTorchModelHubMixin):
             return history_anchor_strategy
         if self.mode in {"frontend_train", "frontend_eval"}:
             return "fixed_interval"
-        return "none"
+        return "coverage"
 
     def _resolve_anchor_interval(self, anchor_interval: Optional[int]) -> int:
         if anchor_interval is not None:
