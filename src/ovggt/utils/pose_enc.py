@@ -8,6 +8,32 @@ import torch
 from .rotation import quat_to_mat, mat_to_quat
 
 
+ABS_POSE_ENCODING = "absT_quaR_FoV"
+REL_POSE_ENCODING = "relT_quaR_FoV"
+SUPPORTED_POSE_ENCODINGS = {ABS_POSE_ENCODING, REL_POSE_ENCODING}
+
+
+def _validate_pose_encoding_type(pose_encoding_type: str) -> None:
+    if pose_encoding_type not in SUPPORTED_POSE_ENCODINGS:
+        raise NotImplementedError(
+            f"Unsupported pose encoding type: {pose_encoding_type}"
+        )
+
+
+def _inverse_se3(matrix_4x4: torch.Tensor) -> torch.Tensor:
+    rot = matrix_4x4[..., :3, :3]
+    trans = matrix_4x4[..., :3, 3:]
+    rot_t = rot.transpose(-1, -2)
+    inv = torch.eye(
+        4,
+        dtype=matrix_4x4.dtype,
+        device=matrix_4x4.device,
+    ).expand(matrix_4x4.shape[:-2] + (4, 4)).clone()
+    inv[..., :3, :3] = rot_t
+    inv[..., :3, 3:] = -torch.matmul(rot_t, trans)
+    return inv
+
+
 def extri_intri_to_pose_encoding(
     extrinsics,
     intrinsics,
@@ -46,7 +72,8 @@ def extri_intri_to_pose_encoding(
     # extrinsics: BxSx3x4
     # intrinsics: BxSx3x3
 
-    if pose_encoding_type == "absT_quaR_FoV":
+    _validate_pose_encoding_type(pose_encoding_type)
+    if pose_encoding_type in SUPPORTED_POSE_ENCODINGS:
         R = extrinsics[:, :, :3, :3]  # BxSx3x3
         T = extrinsics[:, :, :3, 3]  # BxSx3
 
@@ -56,8 +83,6 @@ def extri_intri_to_pose_encoding(
         fov_h = 2 * torch.atan((H / 2) / intrinsics[..., 1, 1])
         fov_w = 2 * torch.atan((W / 2) / intrinsics[..., 0, 0])
         pose_encoding = torch.cat([T, quat, fov_h[..., None], fov_w[..., None]], dim=-1).float()
-    else:
-        raise NotImplementedError
 
     return pose_encoding
 
@@ -105,7 +130,8 @@ def pose_encoding_to_extri_intri(
 
     intrinsics = None
 
-    if pose_encoding_type == "absT_quaR_FoV":
+    _validate_pose_encoding_type(pose_encoding_type)
+    if pose_encoding_type in SUPPORTED_POSE_ENCODINGS:
         T = pose_encoding[..., :3]
         quat = pose_encoding[..., 3:7]
         fov_h = pose_encoding[..., 7]
@@ -124,7 +150,39 @@ def pose_encoding_to_extri_intri(
             intrinsics[..., 0, 2] = W / 2
             intrinsics[..., 1, 2] = H / 2
             intrinsics[..., 2, 2] = 1.0  # Set the homogeneous coordinate to 1
-    else:
-        raise NotImplementedError
 
     return extrinsics, intrinsics
+
+
+def pose_encoding_to_world_to_camera(
+    pose_encoding: torch.Tensor,
+    image_size_hw=None,
+    pose_encoding_type: str = ABS_POSE_ENCODING,
+) -> torch.Tensor:
+    extrinsics, _ = pose_encoding_to_extri_intri(
+        pose_encoding,
+        image_size_hw=image_size_hw,
+        pose_encoding_type=pose_encoding_type,
+        build_intrinsics=False,
+    )
+    out = torch.eye(
+        4,
+        dtype=extrinsics.dtype,
+        device=extrinsics.device,
+    ).expand(extrinsics.shape[:-2] + (4, 4)).clone()
+    out[..., :3, :4] = extrinsics
+    return out
+
+
+def pose_encoding_to_camera_to_world(
+    pose_encoding: torch.Tensor,
+    image_size_hw=None,
+    pose_encoding_type: str = ABS_POSE_ENCODING,
+) -> torch.Tensor:
+    return _inverse_se3(
+        pose_encoding_to_world_to_camera(
+            pose_encoding,
+            image_size_hw=image_size_hw,
+            pose_encoding_type=pose_encoding_type,
+        )
+    )
