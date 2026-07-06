@@ -89,6 +89,35 @@ class CameraHead(nn.Module):
         )
         self.rel_pose_branch.load_state_dict(self.pose_branch.state_dict())
 
+    def _load_from_state_dict(
+        self,
+        state_dict,
+        prefix,
+        local_metadata,
+        strict,
+        missing_keys,
+        unexpected_keys,
+        error_msgs,
+    ):
+        pose_prefix = prefix + "pose_branch."
+        rel_pose_prefix = prefix + "rel_pose_branch."
+        for key in list(state_dict.keys()):
+            if not key.startswith(pose_prefix):
+                continue
+            rel_key = rel_pose_prefix + key[len(pose_prefix):]
+            if rel_key not in state_dict:
+                state_dict[rel_key] = state_dict[key].clone()
+
+        super()._load_from_state_dict(
+            state_dict,
+            prefix,
+            local_metadata,
+            strict,
+            missing_keys,
+            unexpected_keys,
+            error_msgs,
+        )
+
     def forward(
         self,
         aggregated_tokens_list: list,
