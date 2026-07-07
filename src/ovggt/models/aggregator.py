@@ -76,8 +76,6 @@ class Aggregator(nn.Module):
         self.eviction_strategy = eviction_strategy
         self.intra_frame_keep_ratio = intra_frame_keep_ratio
         self.spatial_alpha = spatial_alpha
-        self.token_scorers = None
-        self.score_state_projs = None
 
         # Patch tokens start after camera(1) + register tokens
         self._patch_start_idx = 1 + num_register_tokens
@@ -164,30 +162,6 @@ class Aggregator(nn.Module):
                 persistent=False,
             )
         self.last_scores = torch.zeros(self.depth)
-
-    def init_token_scorers(
-        self,
-        embed_dim: int,
-        bottleneck_dim: int = None,
-        score_state_dim: int = 128,
-    ):
-        from ovggt.layers.token_scorer import TokenScorer
-
-        self.score_state_projs = nn.ModuleList([
-            nn.Linear(embed_dim, score_state_dim)
-            for _ in range(self.depth)
-        ])
-        self.token_scorers = nn.ModuleList([
-            TokenScorer(
-                score_state_dim=score_state_dim,
-                bottleneck_dim=bottleneck_dim,
-                num_layers=self.depth,
-            )
-            for _ in range(self.depth)
-        ])
-        for idx, block in enumerate(self.global_blocks):
-            block.token_scorer = self.token_scorers[idx]
-            block.score_state_proj = self.score_state_projs[idx]
 
     def __build_patch_embed__(
         self,
@@ -351,6 +325,14 @@ class Aggregator(nn.Module):
                             if cache_states is not None
                             else None
                         )
+                        cache_anchor_counts = (
+                            [
+                                int(state.protected_count) if state is not None else 0
+                                for state in cache_states
+                            ]
+                            if cache_states is not None
+                            else None
+                        )
                         tokens, global_idx, global_intermediates, layer_pending_updates, new_importance = self._process_global_attention(
                             tokens, B, S, P, C, global_idx, pos=pos,
                             past_key_values_blocks=cache_state_values,
@@ -360,7 +342,9 @@ class Aggregator(nn.Module):
                             prev_importance=prev_importance,
                             intra_frame_keep_ratio=self.intra_frame_keep_ratio,
                             anchor_token_count=anchor_token_count,
+                            anchor_token_counts=cache_anchor_counts,
                             importance_weight=importance_weight,
+                            window_token_count=window_token_count,
                             frontend_cache_mode=True,
                             patch_grid_size=current_patch_grid_size,
                         )
@@ -370,7 +354,6 @@ class Aggregator(nn.Module):
                             layer_idx,
                             pending_update,
                             layer_importance,
-                            score_state,
                             layer_budget,
                         ) in layer_pending_updates:
                             pending_updates[layer_idx] = PendingLayerUpdate(
@@ -379,7 +362,9 @@ class Aggregator(nn.Module):
                                 importance_current=layer_importance,
                                 frame_id=past_frame_idx,
                                 cache_budget=layer_budget,
-                                score_state_current=score_state,
+                                attention_kept_indices=(
+                                    pending_update[2] if len(pending_update) > 2 else None
+                                ),
                             )
                     elif use_cache:
                         if past_key_values[global_idx] is not None:
@@ -476,6 +461,7 @@ class Aggregator(nn.Module):
         prev_importance=None,
         intra_frame_keep_ratio=1.0,
         anchor_token_count: int = None,
+        anchor_token_counts: Optional[List[int]] = None,
         importance_weight: float = 0.5,
         window_token_count: int = 0,
         frontend_cache_mode: bool = False,
@@ -503,7 +489,6 @@ class Aggregator(nn.Module):
         new_importance = None
         kept_indices = None
         pending_update = None
-        score_state = None
         layer_pending_updates = []
 
         for _ in range(self.aa_block_size):
@@ -527,7 +512,12 @@ class Aggregator(nn.Module):
 
             scores = None
             if frontend_cache_mode:
-                tokens, pending_update, new_importance, score_state = self.global_blocks[global_idx](
+                layer_anchor_token_count = (
+                    int(anchor_token_counts[layer_idx])
+                    if anchor_token_counts is not None
+                    else anchor_token_count
+                )
+                tokens, pending_update, new_importance = self.global_blocks[global_idx](
                     tokens,
                     pos=pos,
                     attn_mask=attn_mask,
@@ -536,7 +526,7 @@ class Aggregator(nn.Module):
                     cache_budget=layer_budget,
                     prev_importance=prev_importance,
                     intra_frame_keep_ratio=intra_frame_keep_ratio,
-                    anchor_token_count=anchor_token_count,
+                    anchor_token_count=layer_anchor_token_count,
                     importance_weight=importance_weight,
                     window_token_count=window_token_count,
                     frontend_cache_mode=True,
@@ -544,7 +534,7 @@ class Aggregator(nn.Module):
                 )
                 if pending_update is not None:
                     layer_pending_updates.append(
-                        (layer_idx, pending_update, new_importance, score_state, layer_budget)
+                        (layer_idx, pending_update, new_importance, layer_budget)
                     )
                 prev_importance = new_importance
             elif use_cache:

@@ -44,7 +44,7 @@ def drive_manager_to_fifo_swap():
     import ovggt.utils.frontend_keyframe as fkmod
 
     orig = fkmod.pose_encoding_to_c2w
-    frame_to_tx = {0: 0.0, 1: 10.0, 2: 20.0, 3: 30.0, 4: 40.0}
+    frame_to_tx = {0: 0.0, 1: 10.0, 2: 20.0, 3: 30.0, 4: 40.0, 5: 50.0}
 
     def fake_c2w(pose_enc, image_size_hw):
         # pose_enc carries the frame idx at [0,0,0] (we set it below)
@@ -121,6 +121,55 @@ def test_protected_token_projects_correctly_after_fifo():
     print(f"Protected token projection after FIFO_SWAP: {got}  (expected {expected})")
     for g, e in zip(got, expected):
         assert abs(g - e) < 1e-3, f"P5 BUG: projection {got} != expected {expected}"
+
+
+def test_demoted_keyframe_transform_is_recomputed_on_later_promotion():
+    """A demoted keyframe transform must stay valid when a later keyframe becomes active."""
+    mgr, fifo_ev, _ = drive_manager_to_fifo_swap()
+    demoted_kf_id = 1
+
+    meta = TokenMetadata(
+        token_kind=torch.tensor([[2]]),
+        frame_id=torch.tensor([[1]]),
+        anchor_slot=torch.tensor([[-1]]),
+        keyframe_id=torch.tensor([[demoted_kf_id]]),
+        slot_id=torch.tensor([[demoted_kf_id]]),
+        slot_local_xyz=torch.tensor([[[1.0, 0.0, 0.0]]]),
+        importance=torch.tensor([[0.9]]),
+        depth_conf=torch.tensor([[1.0]]),
+    )
+    cs = LayerCacheState(max_history_anchors=3)
+    cs.k = torch.randn(1, 4, 1, 8)
+    cs.v = torch.randn(1, 4, 1, 8)
+    cs.metadata = meta
+    cs._cached_protected_count = cs._compute_protected_count_raw()
+    cs.protected_count = cs._cached_protected_count
+    cs.apply_keyframe_event_(fifo_ev)
+
+    import ovggt.utils.frontend_keyframe as fkmod
+
+    orig = fkmod.pose_encoding_to_c2w
+
+    def fake_c2w(pose_enc, image_size_hw):
+        fi = int(pose_enc[0, 0, 0].item())
+        return make_l2w({5: 50.0}[fi])
+
+    fkmod.pose_encoding_to_c2w = fake_c2w
+    try:
+        mgr.config.forced_keyframe_frames = tuple(mgr.config.forced_keyframe_frames) + (5,)
+        depth = torch.ones(1, 1, 100, 100)
+        pose_abs_enc = torch.zeros(3, 100, 100)
+        pose_abs_enc[0, 0, 0] = 5.0
+        promote_ev = mgr.update(5, depth, pose_abs_enc, (100, 100))
+    finally:
+        fkmod.pose_encoding_to_c2w = orig
+
+    cs.apply_keyframe_event_(promote_ev)
+    proj = cs._project_slot_local_xyz_to_active(cs.metadata.slot_local_xyz, cs.metadata.slot_id)
+    got = proj[0, 0].tolist()
+    expected = [-39.0, 0.0, 0.0]
+    for g, e in zip(got, expected):
+        assert abs(g - e) < 1e-3, f"expected later promotion projection {expected}, got {got}"
 
 
 if __name__ == "__main__":

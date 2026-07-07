@@ -9,7 +9,7 @@ Migrate the production frontend cache path from `/path/to/mount/lyj/voxel-vggt` 
 The migration includes:
 
 - Keyframe event scheduling and FIFO history-anchor maintenance.
-- Per-layer cache state with K/V tensors, score state, token metadata, protected-region ordering, FIFO rescued-token ring, and voxel deduplication.
+- Per-layer cache state with K/V tensors, token metadata, protected-region ordering, FIFO rescued-token ring, and voxel deduplication.
 - Frontend inference path that commits current-frame K/V only after pose/depth heads produce geometry metadata.
 - Aggregator support for deferred cache updates via `PendingLayerUpdate`.
 - Block/attention support needed by the deferred update path and anchor overflow policy.
@@ -18,7 +18,7 @@ The migration includes:
 The migration excludes:
 
 - Oracle data collection tools.
-- TokenScorer and FifoCountHead training pipelines.
+- Learned TokenScorer/FifoCountHead retention routes.
 - Full training loss/config migration unless a compile-time dependency is required.
 - Replacing unrelated `vggt` or `dust3r` code.
 
@@ -104,7 +104,7 @@ The first tests should be small CPU tests that do not require model checkpoints:
 
 - `FrontendKeyframeManager` emits initial promotion, fixed-interval promotion, and FIFO swap events with expected slot ids and pose-update retention.
 - `voxel_hash_collision_free()` does not collide for large positive/negative voxel coordinates.
-- `LayerCacheState` keeps K/V, score state, and metadata aligned after gather/reorder.
+- `LayerCacheState` keeps K/V and metadata aligned after gather/reorder.
 - FIFO rescued-ring capacity revokes old rescued tokens before protecting new demoted tokens.
 - `FrontendCacheConfig` rejects invalid ring/dynamic-budget combinations.
 
@@ -116,6 +116,6 @@ Full model inference with checkpoints is out of scope for the first migration ve
 
 The main risk is partial migration: copying utility modules without the deferred commit path would leave keyframe/voxel logic unused. The implementation must wire `OVGGT._inference_frontend()`, aggregator pending updates, and cache commit together in one coherent path.
 
-The second risk is bringing in unrelated learned-retention training dependencies. Keep learned `TokenScorer` and `FifoCountHead` hooks optional and avoid requiring their training modules for frontend inference.
+The second risk is reintroducing unrelated learned-retention training dependencies. The migrated frontend inference path intentionally excludes the learned `TokenScorer` and `FifoCountHead` routes after local validation showed that route is not usable for this migration.
 
 The third risk is budget semantic drift. The target repo currently uses `total_budget`; the production branch uses `per_layer_budget`. The implementation should preserve old call sites while making frontend mode use the production per-layer semantics.

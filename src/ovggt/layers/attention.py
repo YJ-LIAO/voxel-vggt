@@ -16,20 +16,25 @@ def _normalize_scores(scores: Tensor, neutral_value: float = 0.5) -> Tensor:
     Normalize scores to [0, 1] while keeping equal-score groups neutral instead of
     collapsing them to zeros, which would bias eviction decisions.
     """
-    score_min = scores.min(dim=-1, keepdim=True)[0]
-    score_max = scores.max(dim=-1, keepdim=True)[0]
-    denom = score_max - score_min
-    normalized = (scores - score_min) / (denom + 1e-8)
     if scores.shape[-1] == 0:
-        return normalized
+        return scores.clone()
+    finite_mask = torch.isfinite(scores)
+    score_min = torch.where(finite_mask, scores, torch.full_like(scores, float("inf"))).min(dim=-1, keepdim=True)[0]
+    score_max = torch.where(finite_mask, scores, torch.full_like(scores, float("-inf"))).max(dim=-1, keepdim=True)[0]
+    valid_rows = finite_mask.any(dim=-1, keepdim=True)
+    score_min = torch.where(valid_rows, score_min, torch.zeros_like(score_min))
+    score_max = torch.where(valid_rows, score_max, torch.ones_like(score_max))
+    denom = score_max - score_min
+    safe_scores = torch.where(finite_mask, scores, torch.zeros_like(scores))
+    normalized = (safe_scores - score_min) / denom.clamp(min=1e-8)
     equal_mask = denom <= 1e-8
     if equal_mask.any():
         normalized = torch.where(
-            equal_mask.expand_as(normalized),
+            (equal_mask & valid_rows).expand_as(normalized),
             torch.full_like(normalized, neutral_value),
             normalized,
         )
-    return normalized
+    return torch.where(finite_mask, normalized, torch.zeros_like(normalized))
 
 
 
@@ -328,6 +333,7 @@ class Attention(nn.Module):
         importance_scores=None,
         intra_frame_keep_ratio=1.0,
         defer_eviction=False,
+        evict_for_attention: bool = False,
         anchor_token_count: int = None,
         importance_weight: float = 0.5,
         window_token_count: int = 0,
@@ -338,9 +344,11 @@ class Attention(nn.Module):
         Args:
             intra_frame_keep_ratio: Ratio of current frame tokens to keep (1.0 = keep all)
             defer_eviction: If True, skip inter-frame eviction here (handled by Block)
+            evict_for_attention: When deferring cache maintenance, optionally apply
+                budget eviction to a temporary K/V used only for attention output.
 
         When defer_eviction=True, returns additional info for Block to handle eviction:
-            (output, (k_full, v_full, k_current, v_current, past_kv_or_none), scores)
+            (output, (k_full, v_full, k_current, v_current, past_kv_or_none, attention_kept_indices), scores)
         """
         B, N, C = x.shape
         num_new_tokens = N  # Number of new tokens from current frame
@@ -386,7 +394,23 @@ class Attention(nn.Module):
             else:
                 # Two-stage path: return info for Block to handle eviction
                 # Block will apply: 1) intra-frame pruning, 2) inter-frame eviction
-                new_kv = (k, v, k_current, v_current, past_kv_for_block)
+                attention_kept_indices = None
+                if evict_for_attention and cache_budget is not None and k.shape[2] > cache_budget:
+                    effective_anchor_count = anchor_token_count if anchor_token_count is not None else self.num_anchor_tokens
+                    k_attn, v_attn, scores, attention_kept_indices = self.eviction(
+                        k,
+                        v,
+                        cache_budget,
+                        effective_anchor_count,
+                        importance_scores=importance_scores,
+                        num_new_tokens=num_new_tokens,
+                        importance_weight=importance_weight,
+                        window_token_count=window_token_count,
+                    )
+                else:
+                    k_attn, v_attn = k, v
+                new_kv = (k, v, k_current, v_current, past_kv_for_block, attention_kept_indices)
+                k, v = k_attn, v_attn
 
         if self.fused_attn:
             x = F.scaled_dot_product_attention(

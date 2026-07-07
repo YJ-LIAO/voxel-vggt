@@ -252,7 +252,7 @@ PYTHONPATH=src python -m pytest -q \
   tests/test_p5_fifo_swap_transform_retention.py
 ```
 
-Expected: PASS. If import fails for `TokenScorer`, keep the token scorer path optional by adding the minimal `src/ovggt/layers/token_scorer.py` from production in a later task before rerunning.
+Expected: PASS. Do not add `TokenScorer`; the learned retention route is intentionally excluded from this migration.
 
 - [ ] **Step 7: Commit**
 
@@ -350,15 +350,13 @@ Required behavior:
 def forward(..., frontend_cache_mode: bool = False, patch_grid_size: Optional[Tuple[int, int]] = None):
     if frontend_cache_mode:
         # Run attention with defer_eviction=True.
-        # Return x_after_mlp, (k_current, v_current), new_importance, score_state.
+        # Return x_after_mlp, (k_current, v_current), new_importance.
 ```
 
 Also add:
 
 ```python
 from torch.utils.checkpoint import checkpoint
-self.token_scorer = None
-self.score_state_proj = None
 self.use_checkpoint = False
 ```
 

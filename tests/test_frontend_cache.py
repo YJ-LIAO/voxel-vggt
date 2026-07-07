@@ -8,15 +8,15 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src"))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
-from ovggt.layers.attention import Attention
+from ovggt.layers.attention import Attention, _normalize_scores
 from ovggt.layers.block import Block
 from ovggt.utils.frontend_cache import (
     FrontendCacheConfig,
     LayerCacheState,
     PendingLayerUpdate,
-    TOKEN_METADATA_FEATURE_DIM,
     TokenKind,
     TokenMetadata,
+    _normalize_with_mask_batch,
 )
 from ovggt.utils.frontend_keyframe import KeyframeEvent, KeyframeEventType
 
@@ -57,6 +57,29 @@ def make_metadata(
         importance=torch.tensor([importance], dtype=torch.float32),
         depth_conf=torch.tensor([depth_conf], dtype=torch.float32),
     )
+
+
+def test_masked_normalization_ignores_non_finite_values():
+    values = torch.tensor(
+        [
+            [1.0, float("inf"), 3.0, float("nan")],
+            [float("inf"), float("nan"), 5.0, 0.0],
+        ],
+        dtype=torch.float32,
+    )
+    mask = torch.tensor(
+        [
+            [True, True, True, True],
+            [True, True, False, False],
+        ],
+        dtype=torch.bool,
+    )
+
+    normalized = _normalize_with_mask_batch(values, mask)
+
+    assert torch.isfinite(normalized).all()
+    assert torch.allclose(normalized[0], torch.tensor([0.0, 0.0, 1.0, 0.0]))
+    assert torch.equal(normalized[1], torch.zeros(4))
 
 
 class FrontendCacheTests(unittest.TestCase):
@@ -120,7 +143,139 @@ class FrontendCacheTests(unittest.TestCase):
         self.assertTrue(torch.equal(state.metadata.slot_id[1], torch.tensor([21, 23])))
         self.assertTrue(torch.equal(state.k[1, 0, :, 0], k[1, 0, [1, 3], 0]))
 
-    def test_empty_demoted_slot_helpers_preserve_dtype_and_device(self):
+    def test_gather_per_batch_rejects_unequal_keep_lengths_without_fake_padding(self):
+        k = torch.arange(2 * 1 * 4 * 1, dtype=torch.float32).reshape(2, 1, 4, 1)
+        v = k + 100.0
+        metadata = TokenMetadata(
+            token_kind=torch.full((2, 4), int(TokenKind.PATCH), dtype=torch.long),
+            frame_id=torch.tensor([[10, 11, 12, 13], [20, 21, 22, 23]], dtype=torch.long),
+            anchor_slot=torch.full((2, 4), -1, dtype=torch.long),
+            keyframe_id=torch.tensor([[10, 11, 12, 13], [20, 21, 22, 23]], dtype=torch.long),
+            slot_id=torch.tensor([[10, 11, 12, 13], [20, 21, 22, 23]], dtype=torch.long),
+            slot_local_xyz=torch.zeros(2, 4, 3),
+            importance=torch.rand(2, 4),
+            depth_conf=torch.rand(2, 4),
+        )
+        state = LayerCacheState(k=k, v=v, metadata=metadata)
+
+        with self.assertRaisesRegex(ValueError, "same number of tokens"):
+            state.gather_per_batch_([
+                torch.tensor([0, 2], dtype=torch.long),
+                torch.tensor([1], dtype=torch.long),
+            ])
+
+    def test_protected_count_rejects_mismatched_batch_anchor_counts(self):
+        metadata = TokenMetadata(
+            token_kind=torch.full((2, 3), int(TokenKind.PATCH), dtype=torch.long),
+            frame_id=torch.zeros((2, 3), dtype=torch.long),
+            anchor_slot=torch.tensor([[0, -1, -1], [0, 1, -1]], dtype=torch.long),
+            keyframe_id=torch.zeros((2, 3), dtype=torch.long),
+            slot_id=torch.zeros((2, 3), dtype=torch.long),
+            slot_local_xyz=torch.zeros(2, 3, 3),
+            importance=torch.zeros(2, 3),
+            depth_conf=torch.zeros(2, 3),
+        )
+        state = LayerCacheState(metadata=metadata)
+
+        with self.assertRaisesRegex(ValueError, "same protected token count"):
+            state._compute_protected_count_raw()
+
+    def test_override_indices_ignore_out_of_range_values(self):
+        metadata = make_metadata(anchor_slots=[-1, -1, -1])
+        state = LayerCacheState(
+            k=torch.zeros(1, 1, 3, 1),
+            v=torch.zeros(1, 1, 3, 1),
+            metadata=metadata,
+        )
+
+        rows = state._override_indices_per_batch(torch.tensor([-4, 1, 99], dtype=torch.long))
+
+        self.assertEqual(len(rows), 1)
+        self.assertTrue(torch.equal(rows[0], torch.tensor([1], dtype=torch.long)))
+
+    def test_dedup_replay_override_preserves_per_batch_keep_indices(self):
+        k = torch.arange(2 * 1 * 4 * 1, dtype=torch.float32).reshape(2, 1, 4, 1)
+        v = k + 100.0
+        metadata = TokenMetadata(
+            token_kind=torch.full((2, 4), int(TokenKind.PATCH), dtype=torch.long),
+            frame_id=torch.tensor([[10, 11, 12, 13], [20, 21, 22, 23]], dtype=torch.long),
+            anchor_slot=torch.full((2, 4), -1, dtype=torch.long),
+            keyframe_id=torch.tensor([[10, 11, 12, 13], [20, 21, 22, 23]], dtype=torch.long),
+            slot_id=torch.tensor([[10, 11, 12, 13], [20, 21, 22, 23]], dtype=torch.long),
+            slot_local_xyz=torch.arange(2 * 4 * 3, dtype=torch.float32).reshape(2, 4, 3),
+            importance=torch.rand(2, 4),
+            depth_conf=torch.rand(2, 4),
+        )
+
+        class ReplayProbe:
+            def on_dedup_candidate(self, **kwargs):
+                return torch.tensor([[0, 2], [1, 3]], dtype=torch.long)
+
+        state = LayerCacheState(k=k.clone(), v=v.clone(), metadata=metadata)
+        state.apply_voxel_dedup_(
+            FrontendCacheConfig(enabled=True, dedup_enabled=True),
+            current_frame_id=99,
+            dedup_replay_probe=ReplayProbe(),
+        )
+
+        self.assertEqual(state.k.shape[2], 2)
+        self.assertTrue(torch.equal(state.metadata.frame_id[0], torch.tensor([10, 12])))
+        self.assertTrue(torch.equal(state.metadata.frame_id[1], torch.tensor([21, 23])))
+        self.assertTrue(torch.equal(state.k[0, 0, :, 0], k[0, 0, [0, 2], 0]))
+        self.assertTrue(torch.equal(state.k[1, 0, :, 0], k[1, 0, [1, 3], 0]))
+
+    def test_eviction_probe_override_preserves_per_batch_keep_indices(self):
+        attn = Attention(dim=1, num_heads=1)
+        k = torch.arange(2 * 1 * 3 * 1, dtype=torch.float32).reshape(2, 1, 3, 1)
+        v = k + 100.0
+        metadata = TokenMetadata(
+            token_kind=torch.full((2, 3), int(TokenKind.PATCH), dtype=torch.long),
+            frame_id=torch.zeros((2, 3), dtype=torch.long),
+            anchor_slot=torch.full((2, 3), -1, dtype=torch.long),
+            keyframe_id=torch.tensor([[10, 11, 12], [20, 21, 22]], dtype=torch.long),
+            slot_id=torch.tensor([[10, 11, 12], [20, 21, 22]], dtype=torch.long),
+            slot_local_xyz=torch.arange(2 * 3 * 3, dtype=torch.float32).reshape(2, 3, 3),
+            importance=torch.rand(2, 3),
+            depth_conf=torch.rand(2, 3),
+        )
+        current_metadata = TokenMetadata(
+            token_kind=torch.full((2, 1), int(TokenKind.PATCH), dtype=torch.long),
+            frame_id=torch.ones((2, 1), dtype=torch.long),
+            anchor_slot=torch.full((2, 1), -1, dtype=torch.long),
+            keyframe_id=torch.tensor([[13], [23]], dtype=torch.long),
+            slot_id=torch.tensor([[13], [23]], dtype=torch.long),
+            slot_local_xyz=torch.ones(2, 1, 3, dtype=torch.float32),
+            importance=torch.ones(2, 1, dtype=torch.float32),
+            depth_conf=torch.ones(2, 1, dtype=torch.float32),
+        )
+
+        class EvictionProbe:
+            def on_eviction_candidate(self, **kwargs):
+                return torch.tensor([[0, 2], [1, 3]], dtype=torch.long)
+
+        state = LayerCacheState(k=k.clone(), v=v.clone(), metadata=metadata)
+        state.commit_pending_update_(
+            pending_update=PendingLayerUpdate(
+                k_current=torch.full((2, 1, 1, 1), 9.0),
+                v_current=torch.full((2, 1, 1, 1), 109.0),
+                importance_current=torch.ones(2, 1),
+                frame_id=1,
+                cache_budget=2,
+            ),
+            current_metadata=current_metadata,
+            config=FrontendCacheConfig(enabled=True, dedup_enabled=False),
+            intra_frame_keep_ratio=1.0,
+            attn_module=attn,
+            eviction_probe=EvictionProbe(),
+        )
+
+        self.assertEqual(state.k.shape[2], 2)
+        self.assertTrue(torch.equal(state.metadata.keyframe_id[0], torch.tensor([10, 12])))
+        self.assertTrue(torch.equal(state.metadata.keyframe_id[1], torch.tensor([21, 23])))
+        self.assertTrue(torch.equal(state.k[0, 0, :, 0], torch.tensor([0.0, 2.0])))
+        self.assertTrue(torch.equal(state.k[1, 0, :, 0], torch.tensor([4.0, 9.0])))
+
+    def test_empty_demoted_slot_indices_return_empty_tensor(self):
         metadata = TokenMetadata(
             token_kind=torch.full((1, 2), int(TokenKind.PATCH), dtype=torch.long),
             frame_id=torch.tensor([[1, 2]], dtype=torch.long),
@@ -131,25 +286,20 @@ class FrontendCacheTests(unittest.TestCase):
             importance=torch.zeros(1, 2, dtype=torch.float64),
             depth_conf=torch.ones(1, 2, dtype=torch.float64),
         )
-        score_state = torch.randn(1, 2, 5, dtype=torch.float64)
         state = LayerCacheState(
-            score_state=score_state,
             metadata=metadata,
             slot_to_active={1: make_transform(0.0).to(dtype=torch.float64), 2: make_transform(0.0).to(dtype=torch.float64)},
         )
 
-        empty_score = state.get_demoted_slot_score_state(demoted_slot=99)
-        empty_features = state.get_demoted_slot_metadata_features(demoted_slot=99, current_frame_id=2)
+        empty_indices = state.get_demoted_slot_indices(demoted_slot=99)
 
-        self.assertEqual(empty_score.shape, (0, 5))
-        self.assertEqual(empty_score.dtype, torch.float64)
-        self.assertEqual(empty_score.device, score_state.device)
-        self.assertEqual(empty_features.shape, (0, TOKEN_METADATA_FEATURE_DIM))
-        self.assertEqual(empty_features.dtype, torch.float64)
-        self.assertEqual(empty_features.device, metadata.slot_local_xyz.device)
+        self.assertEqual(empty_indices.shape, (0,))
+        self.assertEqual(empty_indices.dtype, torch.long)
 
     def test_fifo_event_shifts_anchor_slots(self):
         state = LayerCacheState(metadata=make_metadata(anchor_slots=[0, 1, 2, -1], slot_ids=[0, 1, 2, 3]))
+        state._cached_protected_count = state._compute_protected_count_raw()
+        state.protected_count = state._cached_protected_count
         event = KeyframeEvent(
             event_type=KeyframeEventType.FIFO_SWAP,
             frame_idx=2,
@@ -161,6 +311,93 @@ class FrontendCacheTests(unittest.TestCase):
         )
         state.apply_keyframe_event_(event)
         self.assertTrue(torch.equal(state.metadata.anchor_slot[0], torch.tensor([0, -1, 1, -1])))
+        self.assertEqual(state.protected_count, 2)
+        self.assertEqual(state._cached_protected_count, 2)
+
+    def test_fifo_probe_override_preserves_per_batch_keep_indices(self):
+        metadata = TokenMetadata(
+            token_kind=torch.full((2, 4), int(TokenKind.PATCH), dtype=torch.long),
+            frame_id=torch.zeros((2, 4), dtype=torch.long),
+            anchor_slot=torch.ones((2, 4), dtype=torch.long),
+            keyframe_id=torch.tensor([[10, 11, 12, 13], [20, 21, 22, 23]], dtype=torch.long),
+            slot_id=torch.tensor([[10, 11, 12, 13], [20, 21, 22, 23]], dtype=torch.long),
+            slot_local_xyz=torch.zeros(2, 4, 3),
+            importance=torch.rand(2, 4),
+            depth_conf=torch.rand(2, 4),
+        )
+
+        class FifoProbe:
+            def on_fifo_topk_candidate(self, **kwargs):
+                return torch.tensor([[0, 2], [1, 3]], dtype=torch.long)
+
+        state = LayerCacheState(
+            k=torch.zeros(2, 1, 4, 1),
+            v=torch.zeros(2, 1, 4, 1),
+            metadata=metadata,
+        )
+        state.protect_topk_on_demotion_(
+            demoted_slot=1,
+            keep_count=2,
+            fifo_probe=FifoProbe(),
+        )
+
+        self.assertTrue(torch.equal(state.metadata.anchor_slot[0], torch.tensor([0, 1, 0, 1])))
+        self.assertTrue(torch.equal(state.metadata.anchor_slot[1], torch.tensor([1, 0, 1, 0])))
+
+    def test_fifo_probe_override_respects_keep_count(self):
+        metadata = TokenMetadata(
+            token_kind=torch.full((1, 4), int(TokenKind.PATCH), dtype=torch.long),
+            frame_id=torch.zeros((1, 4), dtype=torch.long),
+            anchor_slot=torch.ones((1, 4), dtype=torch.long),
+            keyframe_id=torch.arange(4, dtype=torch.long).unsqueeze(0),
+            slot_id=torch.arange(4, dtype=torch.long).unsqueeze(0),
+            slot_local_xyz=torch.zeros(1, 4, 3),
+            importance=torch.tensor([[0.1, 0.2, 0.3, 0.4]], dtype=torch.float32),
+            depth_conf=torch.ones(1, 4),
+        )
+
+        class FifoProbe:
+            def on_fifo_topk_candidate(self, **kwargs):
+                return torch.tensor([0, 1, 2, 3], dtype=torch.long)
+
+        state = LayerCacheState(
+            k=torch.zeros(1, 1, 4, 1),
+            v=torch.zeros(1, 1, 4, 1),
+            metadata=metadata,
+        )
+        state.protect_topk_on_demotion_(
+            demoted_slot=1,
+            keep_count=2,
+            fifo_probe=FifoProbe(),
+        )
+
+        self.assertEqual(int((state.metadata.anchor_slot[0] == 0).sum().item()), 2)
+
+    def test_fifo_max_protected_cap_is_applied_per_batch(self):
+        metadata = TokenMetadata(
+            token_kind=torch.full((2, 4), int(TokenKind.PATCH), dtype=torch.long),
+            frame_id=torch.zeros((2, 4), dtype=torch.long),
+            anchor_slot=torch.tensor([[0, 0, 1, 1], [1, 1, 1, 1]], dtype=torch.long),
+            keyframe_id=torch.tensor([[10, 11, 12, 13], [20, 21, 22, 23]], dtype=torch.long),
+            slot_id=torch.tensor([[10, 11, 12, 13], [20, 21, 22, 23]], dtype=torch.long),
+            slot_local_xyz=torch.zeros(2, 4, 3),
+            importance=torch.tensor([[0.1, 0.2, 0.3, 0.4], [0.4, 0.3, 0.2, 0.1]], dtype=torch.float32),
+            depth_conf=torch.rand(2, 4),
+        )
+        state = LayerCacheState(
+            k=torch.zeros(2, 1, 4, 1),
+            v=torch.zeros(2, 1, 4, 1),
+            metadata=metadata,
+        )
+
+        state.protect_topk_on_demotion_(
+            demoted_slot=1,
+            keep_count=2,
+            max_protected=2,
+        )
+
+        self.assertTrue(torch.equal(state.metadata.anchor_slot[0], torch.tensor([0, 0, 1, 1])))
+        self.assertTrue(torch.equal(state.metadata.anchor_slot[1], torch.tensor([0, 0, 1, 1])))
 
     def test_keyframe_event_keeps_slot_local_xyz_stable(self):
         metadata = make_metadata(
@@ -229,6 +466,289 @@ class FrontendCacheTests(unittest.TestCase):
         # Best from voxel (1,0,0) group is token 2 (score 0.9)
         self.assertTrue(torch.allclose(state.metadata.slot_local_xyz[0, 2], torch.tensor([1.0, 0.0, 0.0])))
 
+    def test_voxel_dedup_discards_current_patch_when_protected_score_is_higher(self):
+        k = torch.randn(1, 2, 2, 4)
+        v = torch.randn(1, 2, 2, 4)
+        metadata = make_metadata(
+            anchor_slots=[0, -1],
+            frame_ids=[0, 1],
+            slot_ids=[0, 1],
+            keyframe_ids=[0, 1],
+            importance=[1.0, 0.0],
+            depth_conf=[1.0, 0.0],
+            local_xyz=[
+                [0.0, 0.0, 0.0],
+                [0.0, 0.0, 0.0],
+            ],
+        )
+        state = LayerCacheState(
+            k=k,
+            v=v,
+            metadata=metadata,
+            slot_to_active={0: make_transform(0.0), 1: make_transform(0.0)},
+        )
+
+        state.apply_voxel_dedup_(
+            FrontendCacheConfig(
+                enabled=True,
+                voxel_size=0.5,
+                intra_frame_dedup_enabled=False,
+            ),
+            current_frame_id=1,
+        )
+
+        self.assertEqual(state.num_tokens(), 1)
+        self.assertTrue(torch.equal(state.metadata.frame_id[0], torch.tensor([0])))
+
+    def test_voxel_dedup_keeps_current_frame_anchor_patch(self):
+        k = torch.randn(1, 2, 2, 4)
+        v = torch.randn(1, 2, 2, 4)
+        metadata = make_metadata(
+            anchor_slots=[0, 1],
+            frame_ids=[0, 1],
+            slot_ids=[0, 1],
+            keyframe_ids=[0, 1],
+            importance=[1.0, 0.0],
+            depth_conf=[1.0, 0.0],
+            local_xyz=[
+                [0.0, 0.0, 0.0],
+                [0.0, 0.0, 0.0],
+            ],
+        )
+        state = LayerCacheState(
+            k=k,
+            v=v,
+            metadata=metadata,
+            slot_to_active={0: make_transform(0.0), 1: make_transform(0.0)},
+        )
+
+        state.apply_voxel_dedup_(
+            FrontendCacheConfig(
+                enabled=True,
+                voxel_size=0.5,
+                intra_frame_dedup_enabled=False,
+            ),
+            current_frame_id=1,
+        )
+
+        self.assertEqual(state.num_tokens(), 2)
+        self.assertTrue(torch.equal(state.metadata.anchor_slot[0], torch.tensor([0, 1])))
+
+    def test_voxel_dedup_keeps_all_tokens_when_current_patch_xyz_is_invalid(self):
+        k = torch.randn(1, 2, 3, 4)
+        v = torch.randn(1, 2, 3, 4)
+        metadata = make_metadata(
+            anchor_slots=[0, -1, -1],
+            frame_ids=[0, 1, 1],
+            slot_ids=[0, 1, 1],
+            keyframe_ids=[0, 1, 1],
+            local_xyz=[
+                [0.0, 0.0, 0.0],
+                [float("nan"), float("nan"), float("nan")],
+                [float("nan"), float("nan"), float("nan")],
+            ],
+        )
+        state = LayerCacheState(
+            k=k,
+            v=v,
+            metadata=metadata,
+            slot_to_active={0: make_transform(0.0), 1: make_transform(0.0)},
+        )
+
+        state.apply_voxel_dedup_(
+            FrontendCacheConfig(enabled=True, voxel_size=0.5),
+            current_frame_id=1,
+        )
+
+        self.assertEqual(state.num_tokens(), 3)
+        self.assertTrue(torch.equal(state.metadata.frame_id[0], torch.tensor([0, 1, 1])))
+
+    def test_soft_reservoir_skips_dedup_below_budget_trigger(self):
+        k = torch.randn(1, 2, 3, 4)
+        v = torch.randn(1, 2, 3, 4)
+        metadata = make_metadata(
+            anchor_slots=[-1, -1, -1],
+            frame_ids=[1, 1, 1],
+            slot_ids=[1, 1, 1],
+            importance=[0.9, 0.5, 0.1],
+            depth_conf=[0.9, 0.5, 0.1],
+            local_xyz=[
+                [0.0, 0.0, 0.0],
+                [0.0, 0.0, 0.0],
+                [0.0, 0.0, 0.0],
+            ],
+        )
+        state = LayerCacheState(k=k, v=v, metadata=metadata, slot_to_active={1: make_transform(0.0)})
+
+        state.apply_voxel_dedup_(
+            FrontendCacheConfig(
+                enabled=True,
+                voxel_size=0.5,
+                dedup_policy="soft_reservoir",
+                dedup_topk_per_voxel=1,
+                dedup_budget_trigger_ratio=0.9,
+            ),
+            current_frame_id=1,
+            cache_budget=10,
+        )
+
+        self.assertEqual(state.num_tokens(), 3)
+
+    def test_soft_reservoir_keeps_topk_current_tokens_per_voxel(self):
+        k = torch.randn(1, 2, 4, 4)
+        v = torch.randn(1, 2, 4, 4)
+        metadata = make_metadata(
+            anchor_slots=[-1, -1, -1, -1],
+            frame_ids=[1, 1, 1, 1],
+            slot_ids=[1, 1, 1, 1],
+            importance=[0.1, 0.9, 0.7, 0.2],
+            depth_conf=[0.1, 0.9, 0.7, 0.2],
+            local_xyz=[
+                [0.0, 0.0, 0.0],
+                [0.0, 0.0, 0.0],
+                [0.0, 0.0, 0.0],
+                [0.0, 0.0, 0.0],
+            ],
+        )
+        state = LayerCacheState(k=k, v=v, metadata=metadata, slot_to_active={1: make_transform(0.0)})
+
+        state.apply_voxel_dedup_(
+            FrontendCacheConfig(
+                enabled=True,
+                voxel_size=0.5,
+                dedup_policy="soft_reservoir",
+                dedup_topk_per_voxel=2,
+                dedup_budget_trigger_ratio=0.0,
+            ),
+            current_frame_id=1,
+            cache_budget=4,
+        )
+
+        self.assertEqual(state.num_tokens(), 2)
+        self.assertTrue(torch.allclose(state.metadata.importance[0], torch.tensor([0.9, 0.7])))
+
+    def test_soft_reservoir_margin_keeps_current_when_protected_not_clearly_better(self):
+        k = torch.randn(1, 2, 2, 4)
+        v = torch.randn(1, 2, 2, 4)
+        metadata = make_metadata(
+            anchor_slots=[0, -1],
+            frame_ids=[0, 1],
+            slot_ids=[0, 1],
+            keyframe_ids=[0, 1],
+            importance=[0.9, 0.9],
+            depth_conf=[0.9, 0.9],
+            local_xyz=[
+                [0.0, 0.0, 0.0],
+                [0.0, 0.0, 0.0],
+            ],
+        )
+        state = LayerCacheState(
+            k=k,
+            v=v,
+            metadata=metadata,
+            slot_to_active={0: make_transform(0.0), 1: make_transform(0.0)},
+        )
+
+        state.apply_voxel_dedup_(
+            FrontendCacheConfig(
+                enabled=True,
+                voxel_size=0.5,
+                dedup_policy="soft_reservoir",
+                dedup_topk_per_voxel=1,
+                dedup_replacement_margin=0.1,
+                dedup_budget_trigger_ratio=0.0,
+                intra_frame_dedup_enabled=False,
+            ),
+            current_frame_id=1,
+            cache_budget=2,
+        )
+
+        self.assertEqual(state.num_tokens(), 2)
+        self.assertTrue(torch.equal(state.metadata.frame_id[0], torch.tensor([0, 1])))
+
+    def test_soft_reservoir_age_decay_prevents_stale_protected_from_dropping_current(self):
+        k = torch.randn(1, 2, 2, 4)
+        v = torch.randn(1, 2, 2, 4)
+        metadata = make_metadata(
+            anchor_slots=[0, -1],
+            frame_ids=[0, 100],
+            slot_ids=[0, 100],
+            keyframe_ids=[0, 100],
+            importance=[1.0, 0.0],
+            depth_conf=[1.0, 0.0],
+            local_xyz=[
+                [0.0, 0.0, 0.0],
+                [0.0, 0.0, 0.0],
+            ],
+        )
+        state = LayerCacheState(
+            k=k,
+            v=v,
+            metadata=metadata,
+            slot_to_active={0: make_transform(0.0), 100: make_transform(0.0)},
+        )
+
+        state.apply_voxel_dedup_(
+            FrontendCacheConfig(
+                enabled=True,
+                voxel_size=0.5,
+                dedup_policy="soft_reservoir",
+                dedup_topk_per_voxel=1,
+                dedup_age_decay=0.02,
+                dedup_budget_trigger_ratio=0.0,
+                intra_frame_dedup_enabled=False,
+            ),
+            current_frame_id=100,
+            cache_budget=2,
+        )
+
+        self.assertEqual(state.num_tokens(), 2)
+        self.assertTrue(torch.equal(state.metadata.frame_id[0], torch.tensor([0, 100])))
+
+    def test_soft_reservoir_age_decay_uses_each_batch_frame_ids(self):
+        metadata = TokenMetadata(
+            token_kind=torch.full((2, 2), int(TokenKind.PATCH), dtype=torch.long),
+            frame_id=torch.tensor([[99, 100], [0, 100]], dtype=torch.long),
+            anchor_slot=torch.tensor([[0, -1], [0, -1]], dtype=torch.long),
+            keyframe_id=torch.tensor([[99, 100], [0, 100]], dtype=torch.long),
+            slot_id=torch.tensor([[99, 100], [0, 100]], dtype=torch.long),
+            slot_local_xyz=torch.zeros(2, 2, 3, dtype=torch.float32),
+            importance=torch.tensor([[1.0, 0.0], [1.0, 0.0]], dtype=torch.float32),
+            depth_conf=torch.tensor([[1.0, 0.0], [1.0, 0.0]], dtype=torch.float32),
+        )
+        state = LayerCacheState(
+            k=torch.randn(2, 2, 2, 4),
+            v=torch.randn(2, 2, 2, 4),
+            metadata=metadata,
+            slot_to_active={0: make_transform(0.0), 99: make_transform(0.0), 100: make_transform(0.0)},
+        )
+        config = FrontendCacheConfig(
+            enabled=True,
+            voxel_size=0.5,
+            dedup_policy="soft_reservoir",
+            dedup_topk_per_voxel=1,
+            dedup_age_decay=0.02,
+            dedup_budget_trigger_ratio=0.0,
+            intra_frame_dedup_enabled=False,
+        )
+        projected_xyz = state._project_slot_local_xyz_to_active(
+            state.metadata.slot_local_xyz,
+            state.metadata.slot_id,
+        )
+
+        keep_indices, _ = state._dedup_single_batch(
+            b_idx=1,
+            protected_patch_mask=torch.tensor([True, False]),
+            current_patch_mask=torch.tensor([False, True]),
+            scores=torch.tensor([1.0, 0.0]),
+            config=config,
+            total_tokens=2,
+            projected_xyz=projected_xyz[1],
+            current_frame_id=100,
+        )
+
+        self.assertTrue(torch.equal(keep_indices, torch.tensor([0, 1])))
+
     def test_commit_pending_update_keeps_metadata_in_sync(self):
         attn = Attention(dim=8, num_heads=2)
         existing_k = torch.randn(1, 2, 3, 4)
@@ -271,8 +791,102 @@ class FrontendCacheTests(unittest.TestCase):
         self.assertEqual(state.k.shape[2], state.metadata.frame_id.shape[1])
         self.assertLessEqual(state.num_tokens(), 4)
 
+    def test_commit_pending_update_forwards_window_token_count_to_eviction(self):
+        attn = Attention(dim=4, num_heads=1)
+        seen = {}
 
-# ---------------------------------------------------------------------------
+        def eviction_spy(k, v, cache_budget, num_anchor_tokens, **kwargs):
+            seen["window_token_count"] = kwargs.get("window_token_count")
+            return k, v, 0.0, None
+
+        attn.eviction = eviction_spy
+        state = LayerCacheState(
+            k=torch.randn(1, 1, 3, 4),
+            v=torch.randn(1, 1, 3, 4),
+            metadata=make_metadata(anchor_slots=[-1, -1, -1], frame_ids=[0, 0, 0], slot_ids=[0, 0, 0]),
+            slot_to_active={0: make_transform(0.0), 1: make_transform(0.0)},
+        )
+        pending = PendingLayerUpdate(
+            k_current=torch.randn(1, 1, 2, 4),
+            v_current=torch.randn(1, 1, 2, 4),
+            importance_current=torch.ones(1, 2),
+            frame_id=1,
+            cache_budget=3,
+        )
+        current_metadata = make_metadata(
+            anchor_slots=[-1, -1],
+            frame_ids=[1, 1],
+            slot_ids=[1, 1],
+            importance=[1.0, 1.0],
+            depth_conf=[1.0, 1.0],
+        )
+
+        state.commit_pending_update_(
+            pending_update=pending,
+            current_metadata=current_metadata,
+            config=FrontendCacheConfig(enabled=True, dedup_enabled=False),
+            intra_frame_keep_ratio=1.0,
+            attn_module=attn,
+            window_token_count=2,
+        )
+
+        self.assertEqual(seen["window_token_count"], 2)
+
+    def test_commit_pending_update_reuses_attention_time_keep_indices(self):
+        attn = Attention(dim=1, num_heads=1)
+        seen = {"eviction_called": False}
+
+        def eviction_spy(k, v, cache_budget, num_anchor_tokens, **kwargs):
+            seen["eviction_called"] = True
+            kept_indices = torch.tensor([[2, 3, 4]], dtype=torch.long, device=k.device)
+            expanded = kept_indices.view(1, 1, 3, 1).expand(1, 1, 3, 1)
+            return (
+                torch.gather(k, 2, expanded),
+                torch.gather(v, 2, expanded),
+                0.0,
+                kept_indices,
+            )
+
+        attn.eviction = eviction_spy
+        state = LayerCacheState(
+            k=torch.arange(3, dtype=torch.float32).reshape(1, 1, 3, 1),
+            v=torch.arange(100, 103, dtype=torch.float32).reshape(1, 1, 3, 1),
+            metadata=make_metadata(
+                anchor_slots=[-1, -1, -1],
+                frame_ids=[0, 0, 0],
+                slot_ids=[0, 0, 0],
+            ),
+            slot_to_active={0: make_transform(0.0), 1: make_transform(0.0)},
+        )
+        pending = PendingLayerUpdate(
+            k_current=torch.tensor([[[[10.0], [11.0]]]], dtype=torch.float32),
+            v_current=torch.tensor([[[[110.0], [111.0]]]], dtype=torch.float32),
+            importance_current=torch.ones(1, 2),
+            frame_id=1,
+            cache_budget=3,
+            attention_kept_indices=torch.tensor([[0, 3, 4]], dtype=torch.long),
+        )
+        current_metadata = make_metadata(
+            anchor_slots=[-1, -1],
+            frame_ids=[1, 1],
+            slot_ids=[1, 1],
+            importance=[1.0, 1.0],
+            depth_conf=[1.0, 1.0],
+        )
+
+        state.commit_pending_update_(
+            pending_update=pending,
+            current_metadata=current_metadata,
+            config=FrontendCacheConfig(enabled=True, dedup_enabled=False),
+            intra_frame_keep_ratio=1.0,
+            attn_module=attn,
+        )
+
+        self.assertFalse(seen["eviction_called"])
+        self.assertTrue(torch.equal(state.k[0, 0, :, 0], torch.tensor([0.0, 10.0, 11.0])))
+        self.assertTrue(torch.equal(state.metadata.frame_id[0], torch.tensor([0, 1, 1])))
+
+    # ---------------------------------------------------------------------------
 # Phase 1 Decision 2 instrumentation: apply_voxel_dedup_() must expose
 # scores and policy_keep_indices to the probe callback BEFORE the gather.
 # ---------------------------------------------------------------------------
@@ -290,7 +904,6 @@ def _make_dedup_cache_state(num_tokens: int = 10) -> LayerCacheState:
     return LayerCacheState(
         k=torch.randn(B, 2, num_tokens, 4),
         v=torch.randn(B, 2, num_tokens, 4),
-        score_state=torch.randn(B, num_tokens, 128),
         metadata=TokenMetadata(
             token_kind=torch.tensor([[int(TokenKind.PATCH)] * num_tokens], dtype=torch.long),
             frame_id=torch.tensor([[1] * num_tokens], dtype=torch.long),
@@ -450,6 +1063,15 @@ def test_attention_eviction_accepts_legacy_window_token_count_kwarg():
     assert final_v.shape[2] <= 3
 
 
+def test_attention_normalize_scores_ignores_non_finite_values():
+    scores = torch.tensor([[1.0, float("inf"), float("nan"), 3.0]], dtype=torch.float32)
+
+    normalized = _normalize_scores(scores)
+
+    assert torch.isfinite(normalized).all()
+    assert torch.allclose(normalized, torch.tensor([[0.0, 0.0, 0.0, 1.0]]))
+
+
 def test_attention_eviction_reserves_newest_window_tokens():
     torch.manual_seed(2)
     attn = Attention(dim=8, num_heads=2)
@@ -467,6 +1089,115 @@ def test_attention_eviction_reserves_newest_window_tokens():
     assert kept.tolist() == [[0, 4, 5]]
     assert torch.equal(final_k, k[:, :, [0, 4, 5], :])
     assert torch.equal(final_v, v[:, :, [0, 4, 5], :])
+
+
+def test_deferred_attention_can_evict_for_attention_without_pruning_returned_current_kv():
+    torch.manual_seed(3)
+    attn = Attention(dim=4, num_heads=1, qkv_bias=False, proj_bias=False, fused_attn=False)
+    x = torch.randn(1, 2, 4)
+    past_k = torch.randn(1, 1, 3, 4)
+    past_v = torch.randn(1, 1, 3, 4)
+    calls = []
+
+    def fake_eviction(k, v, cache_budget, num_anchor_tokens, **kwargs):
+        calls.append(
+            {
+                "input_tokens": k.shape[2],
+                "cache_budget": cache_budget,
+                "num_anchor_tokens": num_anchor_tokens,
+                "num_new_tokens": kwargs.get("num_new_tokens"),
+            }
+        )
+        kept_indices = torch.zeros((k.shape[0], 1), dtype=torch.long, device=k.device)
+        return k[:, :, :1, :], torch.zeros_like(v[:, :, :1, :]), 0.0, kept_indices
+
+    attn.eviction = fake_eviction
+
+    output, kv_info, _ = attn(
+        x,
+        past_key_values=(past_k, past_v),
+        use_cache=True,
+        cache_budget=1,
+        defer_eviction=True,
+        evict_for_attention=True,
+        anchor_token_count=0,
+    )
+
+    k_full, v_full, k_current, v_current, past_kv, attention_kept_indices = kv_info
+    assert calls == [
+        {
+            "input_tokens": 5,
+            "cache_budget": 1,
+            "num_anchor_tokens": 0,
+            "num_new_tokens": 2,
+        }
+    ]
+    assert torch.allclose(output, torch.zeros_like(output), atol=1e-6)
+    assert k_full.shape[2] == 5
+    assert v_full.shape[2] == 5
+    assert k_current.shape[2] == 2
+    assert v_current.shape[2] == 2
+    assert past_kv[0] is past_k
+    assert past_kv[1] is past_v
+    assert attention_kept_indices.shape == (1, 1)
+
+
+def test_deferred_attention_returns_attention_time_keep_indices():
+    torch.manual_seed(11)
+    attn = Attention(dim=4, num_heads=1, qkv_bias=False, proj_bias=False, fused_attn=False)
+    x = torch.randn(1, 2, 4)
+    past_k = torch.randn(1, 1, 3, 4)
+    past_v = torch.randn(1, 1, 3, 4)
+    expected_kept = torch.tensor([[0, 3, 4]], dtype=torch.long)
+
+    def fake_eviction(k, v, cache_budget, num_anchor_tokens, **kwargs):
+        expanded = expected_kept.to(k.device).view(1, 1, 3, 1).expand(1, 1, 3, 4)
+        return torch.gather(k, 2, expanded), torch.gather(v, 2, expanded), 0.0, expected_kept.to(k.device)
+
+    attn.eviction = fake_eviction
+
+    _, kv_info, _ = attn(
+        x,
+        past_key_values=(past_k, past_v),
+        use_cache=True,
+        cache_budget=3,
+        defer_eviction=True,
+        evict_for_attention=True,
+        anchor_token_count=0,
+    )
+
+    assert torch.equal(kv_info[5].cpu(), expected_kept)
+
+
+def test_frontend_block_evicts_for_attention_while_deferring_cache_commit():
+    block = Block(dim=8, num_heads=2)
+    x = torch.randn(1, 2, 8)
+    past_k = torch.randn(1, 2, 3, 4)
+    past_v = torch.randn(1, 2, 3, 4)
+    seen = {}
+
+    def forward_spy(x_in, **kwargs):
+        seen["defer_eviction"] = kwargs.get("defer_eviction")
+        seen["evict_for_attention"] = kwargs.get("evict_for_attention")
+        k_current = torch.randn(1, 2, x_in.shape[1], 4)
+        v_current = torch.randn(1, 2, x_in.shape[1], 4)
+        k_full = torch.cat([past_k, k_current], dim=2)
+        v_full = torch.cat([past_v, v_current], dim=2)
+        return torch.zeros_like(x_in), (k_full, v_full, k_current, v_current, (past_k, past_v)), None
+
+    block.attn.forward = forward_spy
+
+    block(
+        x,
+        past_key_values=(past_k, past_v),
+        use_cache=True,
+        cache_budget=1,
+        frontend_cache_mode=True,
+        anchor_token_count=0,
+    )
+
+    assert seen["defer_eviction"] is True
+    assert seen["evict_for_attention"] is True
 
 
 def test_block_forwards_window_token_count_to_attention_eviction():

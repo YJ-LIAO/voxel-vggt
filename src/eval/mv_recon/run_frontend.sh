@@ -26,4 +26,5 @@ echo "${OUTPUT_DIR}"
     --ovggt_mode "frontend_eval" \
     --data_root "${DATA_ROOT}" \
     --frontend_anchor_interval "${FRONTEND_ANCHOR_INTERVAL}" \
-    --max_frames "${MAX_FRAMES}"
+    --max_frames "${MAX_FRAMES}" \
+    "$@"

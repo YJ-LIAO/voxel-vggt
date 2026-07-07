@@ -69,7 +69,9 @@ class FrontendKeyframeManager:
         self.global_anchor: Optional[dict] = None
         self.latest_anchor_depth: Optional[torch.Tensor] = None
         self.latest_anchor_pose: Optional[torch.Tensor] = None
+        self.latest_anchor_frame_idx: Optional[int] = None
         self.history_slots: List[dict] = []
+        self.retired_keyframes: Dict[int, torch.Tensor] = {}
 
     def get_num_anchor_frames(self) -> int:
         if not self.initialized:
@@ -107,6 +109,7 @@ class FrontendKeyframeManager:
             self.active_pose_encoding = pose_abs_enc.clone()
             self.latest_anchor_depth = depth.clone()
             self.latest_anchor_pose = pose_abs_enc.clone()
+            self.latest_anchor_frame_idx = int(frame_idx)
             self.global_anchor = {
                 "frame_idx": frame_idx,
                 "keyframe_id": keyframe_id,
@@ -144,8 +147,26 @@ class FrontendKeyframeManager:
 
         keyframe_id = self.next_keyframe_id
         self.next_keyframe_id += 1
+        max_history_anchors = max(int(self.config.max_history_anchors), 0)
 
-        if len(self.history_slots) < self.config.max_history_anchors:
+        if max_history_anchors <= 0:
+            anchor_slot = -1
+            reorder_indices = torch.tensor(
+                [0, -1],
+                dtype=torch.long,
+                device=current_local_to_world.device,
+            )
+            event_type = KeyframeEventType.PROMOTE_KEYFRAME
+            demoted_slot = None
+            demoted_record = None
+            if (
+                self.active_keyframe_id >= 0
+                and self.global_anchor is not None
+                and self.active_keyframe_id != int(self.global_anchor["keyframe_id"])
+                and self.active_local_to_world is not None
+            ):
+                self.retired_keyframes[self.active_keyframe_id] = self.active_local_to_world.clone()
+        elif len(self.history_slots) < max_history_anchors:
             anchor_slot = len(self.history_slots) + 1
             reorder_indices = torch.tensor(
                 [0] + [slot["anchor_slot"] for slot in self.history_slots] + [-1],
@@ -177,32 +198,30 @@ class FrontendKeyframeManager:
                 }
                 for new_anchor_slot, slot in enumerate(remaining_slots, start=1)
             ]
-            anchor_slot = self.config.max_history_anchors
+            anchor_slot = max_history_anchors
             event_type = KeyframeEventType.FIFO_SWAP
 
-        self.history_slots.append(
-            {
-                "frame_idx": frame_idx,
-                "keyframe_id": keyframe_id,
-                "anchor_slot": anchor_slot,
-                "local_to_world": current_local_to_world,
-            }
-        )
+        if demoted_record is not None:
+            demoted_kf_id = int(demoted_record["keyframe_id"])
+            self.retired_keyframes[demoted_kf_id] = demoted_record["local_to_world"].clone()
+
+        if anchor_slot >= 0:
+            self.history_slots.append(
+                {
+                    "frame_idx": frame_idx,
+                    "keyframe_id": keyframe_id,
+                    "anchor_slot": anchor_slot,
+                    "local_to_world": current_local_to_world,
+                }
+            )
         self.active_keyframe_id = keyframe_id
         self.active_local_to_world = current_local_to_world
         self.active_pose_encoding = pose_abs_enc.clone()
         self.latest_anchor_depth = depth.clone()
         self.latest_anchor_pose = pose_abs_enc.clone()
+        self.latest_anchor_frame_idx = int(frame_idx)
 
         slot_pose_updates = self._build_slot_pose_updates(current_local_to_world)
-        # P5 fix: retain the demoted keyframe's transform, recomputed for the new
-        # active frame, so tokens still referencing it (slot_id == demoted keyframe)
-        # project correctly instead of falling back to identity.
-        if demoted_record is not None:
-            demoted_kf_id = int(demoted_record["keyframe_id"])
-            demoted_l2w = demoted_record["local_to_world"]
-            world_to_active = closed_form_inverse_se3(current_local_to_world.unsqueeze(0))[0]
-            slot_pose_updates[demoted_kf_id] = world_to_active @ demoted_l2w
 
         return KeyframeEvent(
             event_type=event_type,
@@ -224,6 +243,8 @@ class FrontendKeyframeManager:
             updates[self.global_anchor["keyframe_id"]] = world_to_active @ self.global_anchor["local_to_world"]
         for slot in self.history_slots:
             updates[slot["keyframe_id"]] = world_to_active @ slot["local_to_world"]
+        for keyframe_id, local_to_world in self.retired_keyframes.items():
+            updates[int(keyframe_id)] = world_to_active @ local_to_world
         if self.active_keyframe_id not in updates:
             updates[self.active_keyframe_id] = torch.eye(
                 4,
@@ -249,6 +270,10 @@ class FrontendKeyframeManager:
             if (
                 self.latest_anchor_depth is not None
                 and self.latest_anchor_pose is not None
+                and (
+                    self.latest_anchor_frame_idx is None
+                    or frame_idx - int(self.latest_anchor_frame_idx) >= max(int(self.config.interval), 1)
+                )
             ):
                 coverage = compute_coverage(
                     self.latest_anchor_depth,

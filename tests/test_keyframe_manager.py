@@ -3,6 +3,7 @@ import sys
 import unittest
 
 import torch
+import ovggt.utils.frontend_keyframe as frontend_keyframe
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src"))
 if ROOT not in sys.path:
@@ -58,6 +59,38 @@ class FrontendKeyframeManagerTests(unittest.TestCase):
         self.assertEqual(event2.demoted_slot, 1)
         self.assertEqual(manager.get_num_anchor_frames(), 2)
         self.assertIn(event2.keyframe_id, event2.slot_pose_updates)
+
+    def test_zero_history_keeps_single_anchor_frame(self):
+        config = KeyframeSwitchConfig(strategy="fixed_interval", interval=1, max_history_anchors=0)
+        manager = FrontendKeyframeManager(config)
+        manager.update(0, torch.ones(8, 8), make_pose(0.0), (8, 8))
+        event = manager.update(1, torch.ones(8, 8), make_pose(1.0), (8, 8))
+        self.assertEqual(event.event_type, KeyframeEventType.PROMOTE_KEYFRAME)
+        self.assertEqual(event.anchor_slot, -1)
+        self.assertEqual(manager.get_num_anchor_frames(), 1)
+        self.assertEqual(len(manager.history_slots), 0)
+
+    def test_coverage_strategy_respects_interval_gate(self):
+        original_compute_coverage = frontend_keyframe.compute_coverage
+        frontend_keyframe.compute_coverage = lambda *args, **kwargs: 0.0
+        try:
+            config = KeyframeSwitchConfig(
+                strategy="coverage",
+                coverage_monitor_only=False,
+                coverage_threshold=0.5,
+                interval=4,
+            )
+            manager = FrontendKeyframeManager(config)
+            manager.update(0, torch.ones(8, 8), make_pose(0.0), (8, 8))
+
+            early_event = manager.update(1, torch.ones(8, 8), make_pose(0.1), (8, 8))
+            self.assertEqual(early_event.event_type, KeyframeEventType.NOOP)
+
+            interval_event = manager.update(4, torch.ones(8, 8), make_pose(0.4), (8, 8))
+            self.assertEqual(interval_event.event_type, KeyframeEventType.PROMOTE_KEYFRAME)
+            self.assertEqual(interval_event.anchor_slot, 1)
+        finally:
+            frontend_keyframe.compute_coverage = original_compute_coverage
 
 
 if __name__ == "__main__":

@@ -95,6 +95,48 @@ def test_no_ceiling_means_default_off_backward_compat():
     print(f">>> 向后兼容: default max_protected_ratio={cfg.max_protected_ratio} (无上限)")
 
 
+def test_fifo_ring_revoke_uses_actual_demoted_token_count():
+    """Ring capacity should be sized against tokens that can actually be rescued.
+
+    If the demoted slot contains fewer tokens than fifo_keep_topk, revoking based
+    on the requested keep_count over-clears the rescued pool and leaves useful
+    history budget empty.
+    """
+    capacity = 100
+    global_count = 3
+    rescued_count = 90
+    demoted_count = 20
+    N = global_count + rescued_count + demoted_count
+    metadata = TokenMetadata(
+        token_kind=torch.full((1, N), 2, dtype=torch.long),
+        frame_id=torch.arange(N, dtype=torch.long).unsqueeze(0),
+        anchor_slot=torch.tensor(
+            [[0] * global_count + [0] * rescued_count + [1] * demoted_count],
+            dtype=torch.long,
+        ),
+        keyframe_id=torch.tensor(
+            [[0] * global_count + list(range(10, 10 + rescued_count)) + [200] * demoted_count],
+            dtype=torch.long,
+        ),
+        slot_id=torch.arange(N, dtype=torch.long).unsqueeze(0),
+        slot_local_xyz=torch.zeros(1, N, 3, dtype=torch.float32),
+        importance=torch.arange(N, dtype=torch.float32).unsqueeze(0),
+        depth_conf=torch.ones(1, N, dtype=torch.float32),
+    )
+    cs = fresh_cache(metadata)
+
+    cs.protect_topk_on_demotion_(
+        demoted_slot=1,
+        keep_count=80,
+        fifo_ring_capacity=capacity,
+        global_anchor_keyframe_id=0,
+    )
+
+    slot0 = cs.metadata.anchor_slot[0] == 0
+    non_global_rescued = slot0 & (cs.metadata.keyframe_id[0] != 0)
+    assert int(non_global_rescued.sum().item()) == capacity
+
+
 if __name__ == "__main__":
     print("="*60); print("Test 1: protect_topk respects budget ceiling"); print("="*60)
     try:

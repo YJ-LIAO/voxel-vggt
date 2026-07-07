@@ -17,6 +17,8 @@ from tqdm import tqdm
 import uuid
 import json
 from collections import defaultdict
+from datetime import timedelta
+from accelerate.utils import InitProcessGroupKwargs
 
 
 def resolve_7scenes_root(data_root: str) -> str:
@@ -31,6 +33,21 @@ def validate_model_mode(model_name: str, ovggt_mode: str) -> None:
         )
 
 
+def should_run_reconstruction_eval(model_name: str) -> bool:
+    return model_name in {"OVGGT", "VGGT", "stream3r"}
+
+
+def filter_finite_point_pairs(pred_points, gt_points, colors=None):
+    valid = np.isfinite(pred_points).all(axis=-1) & np.isfinite(gt_points).all(axis=-1)
+    if colors is None:
+        return pred_points[valid], gt_points[valid]
+    return pred_points[valid], gt_points[valid], colors[valid]
+
+
+def build_accelerator_kwargs_handlers(timeout_seconds: int = 7200):
+    return [InitProcessGroupKwargs(timeout=timedelta(seconds=int(timeout_seconds)))]
+
+
 def build_ovggt_kwargs_for_eval(args):
     if args.ovggt_mode == "legacy":
         return {"mode": "legacy"}
@@ -38,16 +55,45 @@ def build_ovggt_kwargs_for_eval(args):
     from ovggt.utils.frontend_cache import FrontendCacheConfig
     from ovggt.utils.frontend_keyframe import KeyframeSwitchConfig
 
+    frontend_keyframe_strategy = getattr(args, "frontend_keyframe_strategy", "fixed_interval")
     return {
         "mode": "frontend_eval",
+        "frontend_pose_encoding_type": getattr(
+            args,
+            "frontend_pose_encoding_type",
+            "absT_quaR_FoV",
+        ),
         "frontend_cache_config": FrontendCacheConfig(
             enabled=True,
             dedup_enabled=args.frontend_dedup_enabled,
+            voxel_size=getattr(args, "frontend_voxel_size", 0.1),
+            dedup_policy=getattr(args, "frontend_dedup_policy", "hard"),
+            dedup_budget_trigger_ratio=getattr(args, "frontend_dedup_budget_trigger_ratio", 0.9),
+            dedup_topk_per_voxel=getattr(args, "frontend_dedup_topk_per_voxel", 3),
+            dedup_replacement_margin=getattr(args, "frontend_dedup_replacement_margin", 0.05),
+            dedup_age_decay=getattr(args, "frontend_dedup_age_decay", 0.02),
+            fifo_keep_topk=getattr(args, "frontend_fifo_keep_topk", 80),
+            budget_allocation=getattr(args, "frontend_budget_allocation", "uniform"),
+            fifo_protected_ring_ratio=getattr(args, "frontend_fifo_protected_ring_ratio", 0.2),
         ),
         "keyframe_switch_config": KeyframeSwitchConfig(
-            strategy="fixed_interval",
+            strategy=frontend_keyframe_strategy,
             interval=args.frontend_anchor_interval,
+            coverage_threshold=getattr(args, "frontend_coverage_threshold", 0.2),
+            max_history_anchors=getattr(args, "frontend_max_anchors", 3),
+            coverage_monitor_only=(frontend_keyframe_strategy != "coverage"),
         ),
+    }
+
+
+def build_ovggt_inference_kwargs_for_eval(args):
+    if getattr(args, "ovggt_mode", "legacy") != "frontend_eval":
+        return {}
+    return {
+        "window_protect_frames": getattr(args, "frontend_window_protect_frames", 0),
+        "anchor_keep_ratio": getattr(args, "frontend_anchor_keep_ratio", 0.05),
+        "max_anchors": getattr(args, "frontend_max_anchors", 3),
+        "coverage_threshold": getattr(args, "frontend_coverage_threshold", 0.2),
     }
 
 
@@ -99,7 +145,42 @@ def get_args_parser():
         action=argparse.BooleanOptionalAction,
         default=True,
     )
+    parser.add_argument(
+        "--frontend_keyframe_strategy",
+        type=str,
+        default="fixed_interval",
+        choices=("fixed_interval", "coverage"),
+    )
     parser.add_argument("--frontend_anchor_interval", type=int, default=8)
+    parser.add_argument(
+        "--frontend_pose_encoding_type",
+        type=str,
+        default="absT_quaR_FoV",
+        choices=("absT_quaR_FoV", "relT_quaR_FoV"),
+    )
+    parser.add_argument(
+        "--frontend_dedup_policy",
+        type=str,
+        default="hard",
+        choices=("hard", "soft_reservoir", "pressure_only"),
+    )
+    parser.add_argument("--frontend_voxel_size", type=float, default=0.1)
+    parser.add_argument("--frontend_dedup_budget_trigger_ratio", type=float, default=0.9)
+    parser.add_argument("--frontend_dedup_topk_per_voxel", type=int, default=3)
+    parser.add_argument("--frontend_dedup_replacement_margin", type=float, default=0.05)
+    parser.add_argument("--frontend_dedup_age_decay", type=float, default=0.02)
+    parser.add_argument("--frontend_window_protect_frames", type=int, default=0)
+    parser.add_argument("--frontend_anchor_keep_ratio", type=float, default=0.05)
+    parser.add_argument("--frontend_max_anchors", type=int, default=3)
+    parser.add_argument("--frontend_coverage_threshold", type=float, default=0.2)
+    parser.add_argument("--frontend_fifo_keep_topk", type=int, default=80)
+    parser.add_argument(
+        "--frontend_budget_allocation",
+        type=str,
+        default="uniform",
+        choices=("uniform", "dynamic"),
+    )
+    parser.add_argument("--frontend_fifo_protected_ring_ratio", type=float, default=0.2)
     return parser
 
 
@@ -136,7 +217,7 @@ def main(args):
         # ),
     }
 
-    accelerator = Accelerator()
+    accelerator = Accelerator(kwargs_handlers=build_accelerator_kwargs_handlers())
     device = accelerator.device
     model_name = args.model_name
     if model_name == "OVGGT":
@@ -150,7 +231,7 @@ def main(args):
         ckpt = torch.load(args.weights, map_location=device)
         model.load_state_dict(ckpt, strict=True)
         model.eval()
-        model = model.to("cuda")
+        model = model.to(device)
     elif model_name == "VGGT":
         from vggt.models.vggt import VGGT
         from vggt.utils.pose_enc import pose_encoding_to_extri_intri
@@ -162,7 +243,7 @@ def main(args):
         ckpt = torch.load(args.weights, map_location=device)
         model.load_state_dict(ckpt, strict=True)
         model.eval()
-        model = model.to("cuda")
+        model = model.to(device)
 
     else:
         raise NotImplementedError
@@ -223,7 +304,7 @@ def main(args):
                     conf_all = []
                     in_camera1 = None  
 
-                    if model_name == "stream3r" or "VGGT":
+                    if should_run_reconstruction_eval(model_name):
                         revisit = args.revisit
                         update = not args.freeze
                         if revisit > 1:
@@ -257,7 +338,7 @@ def main(args):
 
                         with torch.cuda.amp.autocast(dtype=dtype):
                             with torch.no_grad():
-                                results = model.inference(batch)
+                                results = model.inference(batch, **build_ovggt_inference_kwargs_for_eval(args))
 
                             preds, batch = results.ress, results.views 
 
@@ -360,11 +441,11 @@ def main(args):
                     pts_gt_all_masked = pts_gt_all[masks_all > 0]
                     images_all_masked = images_all[masks_all > 0]
 
-                    mask = np.isfinite(pts_all_masked)  
-                    pts_all_masked = pts_all_masked[mask]
-
-                    mask_gt = np.isfinite(pts_gt_all_masked)
-                    pts_gt_all_masked = pts_gt_all_masked[mask]
+                    pts_all_masked, pts_gt_all_masked, images_all_masked = filter_finite_point_pairs(
+                        pts_all_masked,
+                        pts_gt_all_masked,
+                        images_all_masked,
+                    )
 
                     if args.use_proj:
                         def umeyama_alignment(src: np.ndarray, dst: np.ndarray, with_scale: bool = True):
@@ -485,43 +566,11 @@ def main(args):
             accelerator.wait_for_everyone()
             # Get depth from pcd and run TSDFusion
             if accelerator.is_main_process:
-                to_write = ""
-                # Copy the error log from each process to the main error log
-                for i in range(8):
-                    if not os.path.exists(osp.join(save_path, f"logs_{i}.txt")):
-                        break
-                    with open(osp.join(save_path, f"logs_{i}.txt"), "r") as f_sub:
-                        to_write += f_sub.read()
-
-                with open(osp.join(save_path, f"logs_all.txt"), "w") as f:
-                    log_data = to_write
-                    metrics = defaultdict(list)
-                    for line in log_data.strip().split("\n"):
-                        match = regex.match(line)
-                        if match:
-                            data = match.groupdict()
-                            # Exclude 'scene_id' from metrics as it's an identifier
-                            for key, value in data.items():
-                                if key != "scene_id":
-                                    metrics[key].append(float(value))
-                            metrics["nc"].append(
-                                (float(data["nc1"]) + float(data["nc2"])) / 2
-                            )
-                            metrics["nc_med"].append(
-                                (float(data["nc1_med"]) + float(data["nc2_med"])) / 2
-                            )
-                    mean_metrics = {
-                        metric: sum(values) / len(values)
-                        for metric, values in metrics.items()
-                    }
-
-                    c_name = "mean"
-                    print_str = f"{c_name.ljust(20)}: "
-                    for m_name in mean_metrics:
-                        print_num = np.mean(mean_metrics[m_name])
-                        print_str = print_str + f"{m_name}: {print_num:.3f} | "
-                    print_str = print_str + "\n"
-                    f.write(to_write + print_str)
+                write_merged_eval_log(
+                    save_path,
+                    expected_scene_ids=expected_scene_ids_for_dataset(dataset),
+                    num_processes=accelerator.num_processes,
+                )
 
 
 
@@ -541,6 +590,73 @@ pattern = r"""
 """
 
 regex = re.compile(pattern, re.VERBOSE)
+
+
+def expected_scene_ids_for_dataset(dataset) -> list[str] | None:
+    scene_list = getattr(dataset, "scene_list", None)
+    num_seq = int(getattr(dataset, "num_seq", 1))
+    if scene_list is None or num_seq <= 0:
+        return None
+    return [scene_list[idx // num_seq] for idx in range(len(dataset))]
+
+
+def write_merged_eval_log(
+    save_path: str,
+    expected_scene_ids: list[str] | None = None,
+    num_processes: int = 8,
+) -> dict:
+    to_write = ""
+    for i in range(int(num_processes)):
+        log_path = osp.join(save_path, f"logs_{i}.txt")
+        if not os.path.exists(log_path):
+            continue
+        with open(log_path, "r") as f_sub:
+            to_write += f_sub.read()
+
+    metrics = defaultdict(list)
+    seen_scene_ids = []
+    for line in to_write.strip().split("\n"):
+        match = regex.match(line)
+        if not match:
+            continue
+        data = match.groupdict()
+        seen_scene_ids.append(data["scene_id"])
+        for key, value in data.items():
+            if key != "scene_id":
+                metrics[key].append(float(value))
+        metrics["nc"].append((float(data["nc1"]) + float(data["nc2"])) / 2)
+        metrics["nc_med"].append((float(data["nc1_med"]) + float(data["nc2_med"])) / 2)
+
+    if expected_scene_ids is not None:
+        expected = set(expected_scene_ids)
+        seen = set(seen_scene_ids)
+        missing = sorted(expected - seen)
+        extra = sorted(seen - expected)
+        if missing or extra:
+            parts = []
+            if missing:
+                parts.append(f"Missing metrics for {missing}")
+            if extra:
+                parts.append(f"Unexpected metrics for {extra}")
+            raise RuntimeError("; ".join(parts))
+
+    if not seen_scene_ids:
+        raise RuntimeError(f"No evaluation metrics found in {save_path}")
+
+    mean_metrics = {
+        metric: sum(values) / len(values)
+        for metric, values in metrics.items()
+    }
+
+    c_name = "mean"
+    print_str = f"{c_name.ljust(20)}: "
+    for m_name in mean_metrics:
+        print_num = np.mean(mean_metrics[m_name])
+        print_str = print_str + f"{m_name}: {print_num:.3f} | "
+    print_str = print_str + "\n"
+    with open(osp.join(save_path, "logs_all.txt"), "w") as f:
+        f.write(to_write + print_str)
+    return mean_metrics
 
 
 if __name__ == "__main__":

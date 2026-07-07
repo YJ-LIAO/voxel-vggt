@@ -49,8 +49,6 @@ class Block(nn.Module):
             strategy=eviction_strategy,
             spatial_alpha=spatial_alpha,
         )
-        self.token_scorer = None  # set by Aggregator.init_token_scorers()
-        self.score_state_proj = None  # set by Aggregator.init_token_scorers()
 
         self.norm1 = norm_layer(dim)
 
@@ -114,6 +112,7 @@ class Block(nn.Module):
             cache_budget=None,
             importance_scores=None,
             defer_eviction=False,
+            evict_for_attention=False,
             anchor_token_count_inner=None,
             importance_weight_inner: float = 0.5,
             window_token_count_inner: int = 0,
@@ -127,6 +126,7 @@ class Block(nn.Module):
                     cache_budget=cache_budget,
                     importance_scores=importance_scores,
                     defer_eviction=defer_eviction,
+                    evict_for_attention=evict_for_attention,
                     anchor_token_count=anchor_token_count_inner,
                     importance_weight=importance_weight_inner,
                     window_token_count=window_token_count_inner,
@@ -180,11 +180,13 @@ class Block(nn.Module):
                     cache_budget=cache_budget,
                     importance_scores=prev_importance,
                     defer_eviction=True,
+                    evict_for_attention=True,
                     anchor_token_count_inner=anchor_token_count,
                     importance_weight_inner=importance_weight,
                     window_token_count_inner=window_token_count,
                 )
-                _, _, k_current, v_current, _ = kv_info
+                _, _, k_current, v_current, *_rest = kv_info
+                attention_kept_indices = _rest[1] if len(_rest) > 1 else None
 
                 x_after_attn = x + attn_output
                 x_before_mlp = x_after_attn
@@ -201,13 +203,7 @@ class Block(nn.Module):
                 else:
                     new_importance = self.importance_scorer.compute(k=k_current)
 
-                score_state = (
-                    self.score_state_proj(x_after_mlp)
-                    if self.score_state_proj is not None
-                    else None
-                )
-
-                return x_after_mlp, (k_current, v_current), new_importance, score_state
+                return x_after_mlp, (k_current, v_current, attention_kept_indices), new_importance
 
             if use_two_stage:
                 # Two-stage eviction: defer eviction to after MLP

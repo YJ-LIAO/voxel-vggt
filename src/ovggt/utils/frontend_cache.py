@@ -5,16 +5,11 @@ from typing import Dict, List, Literal, Optional
 import torch
 from torch import Tensor
 
-from ovggt.layers.token_scorer import TOKEN_METADATA_FEATURE_DIM, TOKEN_METADATA_FEATURE_INDEX
-
 from .geometry import closed_form_inverse_se3
 from .pose_enc import pose_encoding_to_extri_intri
 
 _TOKEN_KIND_CACHE: Dict[tuple, Tensor] = {}
 _PATCH_GRID_CACHE: Dict[tuple, tuple[Tensor, Tensor]] = {}
-_SCORER_XYZ_SCALE = 10.0
-_SCORER_FRAME_AGE_SCALE = 128.0
-_SCORER_ID_SCALE = 64.0
 
 
 def voxel_hash_collision_free(voxels: Tensor) -> Tensor:
@@ -45,6 +40,7 @@ class FrontendCacheConfig:
     enabled: bool = False
     voxel_size: float = 0.1
     dedup_enabled: bool = True
+    dedup_policy: Literal["hard", "soft_reservoir", "pressure_only"] = "hard"
     export_keyframe_packets: bool = False
     depth_conf_weight: float = 0.5
     importance_weight: float = 0.5
@@ -54,22 +50,22 @@ class FrontendCacheConfig:
     # Only the eviction call in commit_pending_update_ reads this; dedup is unaffected.
     eviction_importance_weight: float = 0.5
     dedup_cooldown_frames: int = 0
+    dedup_budget_trigger_ratio: float = 0.9
+    dedup_topk_per_voxel: int = 3
+    dedup_replacement_margin: float = 0.05
+    dedup_age_decay: float = 0.02
     intra_frame_dedup_enabled: bool = True
     # soft-merge intra dedup: "drop" (hard-drop all but best-score per 0.1m voxel, legacy behavior)
     # or "merge" (importance-weighted K/V avg of co-voxel tokens — preserves multi-view info).
     # Only takes effect when intra_frame_dedup_enabled=True (that boolean gates the whole intra block).
     intra_dedup_mode: Literal["drop", "merge"] = "drop"
-    fifo_keep_topk: int = 0  # Retain top-K tokens by score when demoting oldest anchor (0=disable)
-    # NOTE: production noIntra+fifo80 baseline sets this to 80 at the call site
+    fifo_keep_topk: int = 80  # Retain top-K tokens by score when demoting oldest anchor
+    # NOTE: production noIntra+fifo80 baseline uses 80 by default
     # (e.g. tools/test_multi_scene.py). Unbounded 80/swap protection accumulates
     # and starves eviction at long sequences; it is only safe with a bounded
     # rescued pool (see fifo_protected_ring_ratio).
-    learned_eviction_enabled: bool = False
-    score_state_dim: int = 128
     oracle_window: int = 4
     budget_allocation: Literal["dynamic", "uniform"] = "uniform"
-    learned_fifo_keep_count: bool = False
-    fifo_count_candidates: tuple = (0, 8, 16, 32, 64, 128)
     # P1 fix: cap the FIFO-protected slot-0 tokens so they cannot accumulate
     # unboundedly across swaps. max_protected_ratio * cache_budget = ceiling on
     # slot-0 count. Default 1.0 disables the cap (backward compatible).
@@ -87,6 +83,14 @@ class FrontendCacheConfig:
     fifo_protected_ring_ratio: float = 0.2
 
     def __post_init__(self):
+        if self.dedup_topk_per_voxel < 1:
+            raise ValueError("dedup_topk_per_voxel must be >= 1")
+        if self.dedup_budget_trigger_ratio < 0.0:
+            raise ValueError("dedup_budget_trigger_ratio must be >= 0")
+        if self.dedup_replacement_margin < 0.0:
+            raise ValueError("dedup_replacement_margin must be >= 0")
+        if self.dedup_age_decay < 0.0:
+            raise ValueError("dedup_age_decay must be >= 0")
         # pass-5 #4: ring and v1 max_protected are mutually exclusive — both
         # clamp the same keep_count in sequence, which is confusing. Enforce at
         # config construction so a conflicting setup fails fast.
@@ -220,21 +224,13 @@ class PendingLayerUpdate:
     importance_current: Tensor
     frame_id: int
     cache_budget: Optional[int] = None
-    score_state: Optional[Tensor] = None
-    score_state_current: Optional[Tensor] = None
-
-    def __post_init__(self) -> None:
-        if self.score_state is None and self.score_state_current is not None:
-            self.score_state = self.score_state_current
-        elif self.score_state_current is None:
-            self.score_state_current = self.score_state
+    attention_kept_indices: Optional[Tensor] = None
 
 
 @dataclass
 class LayerCacheState:
     k: Optional[Tensor] = None
     v: Optional[Tensor] = None
-    score_state: Optional[Tensor] = None
     metadata: Optional[TokenMetadata] = None
     protected_count: int = 0
     max_history_anchors: int = 3
@@ -266,10 +262,6 @@ class LayerCacheState:
         expanded = indices.unsqueeze(1).unsqueeze(-1).expand(B, H, indices.shape[1], D)
         self.k = torch.gather(self.k, 2, expanded)
         self.v = torch.gather(self.v, 2, expanded)
-        if self.score_state is not None:
-            score_dim = self.score_state.shape[-1]
-            score_indices = indices.unsqueeze(-1).expand(B, indices.shape[1], score_dim)
-            self.score_state = torch.gather(self.score_state, 1, score_indices)
         self.metadata = self.metadata.index_select(indices)
         self._cached_protected_count = self._compute_protected_count_raw()
         self.protected_count = self._cached_protected_count
@@ -282,8 +274,6 @@ class LayerCacheState:
         indices = indices.to(device=self.k.device, dtype=torch.long)
         self.k = self.k.index_select(2, indices)
         self.v = self.v.index_select(2, indices)
-        if self.score_state is not None:
-            self.score_state = self.score_state.index_select(1, indices)
         self.metadata = TokenMetadata(
             token_kind=self.metadata.token_kind.index_select(1, indices),
             frame_id=self.metadata.frame_id.index_select(1, indices),
@@ -299,227 +289,107 @@ class LayerCacheState:
 
     def gather_per_batch_(self, indices_list: List[Tensor]) -> None:
         """
-        分别处理每个batch的gather操作，支持每个batch保留不同数量的token。
+        分别处理每个batch的gather操作。
 
         Args:
             indices_list: List of [N_b] tensors, 每个batch要保留的索引
         """
         if self.k is None or self.v is None or self.metadata is None:
             return
+        batch_size = int(self.k.shape[0])
+        if len(indices_list) != batch_size:
+            raise ValueError(
+                f"indices_list length must match batch size {batch_size}, got {len(indices_list)}"
+            )
         if len(indices_list) == 1:
             self._gather_single_batch_(indices_list[0])
             return
 
-        B = len(indices_list)
-        device = self.k.device
-        dtype = self.k.dtype
-        H = self.k.shape[1]
-        D = self.k.shape[3]
-        score_dim = self.score_state.shape[-1] if self.score_state is not None else 0
-
-        # 找到每个batch需要保留的最大token数量
-        max_kept = max(idx.shape[0] for idx in indices_list) if indices_list else 0
-
-        if max_kept == 0:
-            # 所有batch都为空
-            self.k = torch.zeros((B, H, 0, D), dtype=dtype, device=device)
-            self.v = torch.zeros((B, H, 0, D), dtype=dtype, device=device)
-            if self.score_state is not None:
-                self.score_state = torch.zeros((B, 0, score_dim), dtype=dtype, device=device)
-            self.metadata = TokenMetadata.empty(B, device, dtype)
+        normalized = [
+            indices.to(device=self.k.device, dtype=torch.long).reshape(-1)
+            for indices in indices_list
+        ]
+        keep_lengths = [int(indices.numel()) for indices in normalized]
+        if len(set(keep_lengths)) != 1:
+            raise ValueError(
+                "Batched LayerCacheState gather requires every batch element to keep the "
+                "same number of tokens. Use per-sample cache states for variable-length "
+                f"dedup results; got keep lengths {keep_lengths}."
+            )
+        if keep_lengths[0] == 0:
+            self.k = self.k[:, :, :0, :]
+            self.v = self.v[:, :, :0, :]
+            self.metadata = TokenMetadata.empty(batch_size, self.k.device, self.k.dtype)
+            self._cached_protected_count = 0
             self.protected_count = 0
             return
 
-        # 对每个batch单独处理gather并padding
-        padded_k = []
-        padded_v = []
-        padded_score_state = []
-        # 直接构建完整的metadata fields
-        token_kinds = []
-        frame_ids = []
-        anchor_slots = []
-        keyframe_ids = []
-        slot_ids = []
-        slot_local_xyzs = []
-        importances = []
-        depth_confs = []
-
-        def metadata_index_select_batch(b_idx: int, indices: Tensor) -> TokenMetadata:
-            meta_indices = indices.to(device=self.metadata.frame_id.device, dtype=torch.long)
-            return TokenMetadata(
-                token_kind=self.metadata.token_kind[b_idx:b_idx + 1].index_select(1, meta_indices),
-                frame_id=self.metadata.frame_id[b_idx:b_idx + 1].index_select(1, meta_indices),
-                anchor_slot=self.metadata.anchor_slot[b_idx:b_idx + 1].index_select(1, meta_indices),
-                keyframe_id=self.metadata.keyframe_id[b_idx:b_idx + 1].index_select(1, meta_indices),
-                slot_id=self.metadata.slot_id[b_idx:b_idx + 1].index_select(1, meta_indices),
-                slot_local_xyz=self.metadata.slot_local_xyz[b_idx:b_idx + 1].index_select(1, meta_indices),
-                importance=self.metadata.importance[b_idx:b_idx + 1].index_select(1, meta_indices),
-                depth_conf=self.metadata.depth_conf[b_idx:b_idx + 1].index_select(1, meta_indices),
-            )
-
-        for b_idx, indices in enumerate(indices_list):
-            num_kept = indices.shape[0]
-
-            if num_kept == 0:
-                # 创建空的padding
-                padded_k.append(torch.zeros((1, H, max_kept, D), dtype=dtype, device=device))
-                padded_v.append(torch.zeros((1, H, max_kept, D), dtype=dtype, device=device))
-                if self.score_state is not None:
-                    padded_score_state.append(torch.zeros((1, max_kept, score_dim), dtype=dtype, device=device))
-                token_kinds.append(torch.zeros((max_kept,), dtype=torch.long, device=device))
-                frame_ids.append(torch.zeros((max_kept,), dtype=torch.long, device=device))
-                anchor_slots.append(torch.full((max_kept,), -1, dtype=torch.long, device=device))
-                keyframe_ids.append(torch.zeros((max_kept,), dtype=torch.long, device=device))
-                slot_ids.append(torch.zeros((max_kept,), dtype=torch.long, device=device))
-                slot_local_xyzs.append(torch.zeros((max_kept, 3), dtype=dtype, device=device))
-                importances.append(torch.zeros((max_kept,), dtype=dtype, device=device))
-                depth_confs.append(torch.zeros((max_kept,), dtype=dtype, device=device))
-            elif num_kept < max_kept:
-                # Gather当前batch
-                expanded = indices.unsqueeze(0).unsqueeze(-1).expand(1, H, num_kept, D)
-                k_b = torch.gather(self.k[b_idx:b_idx+1], 2, expanded)
-                v_b = torch.gather(self.v[b_idx:b_idx+1], 2, expanded)
-                if self.score_state is not None:
-                    score_indices = indices.unsqueeze(0).unsqueeze(-1).expand(1, num_kept, score_dim)
-                    score_b = torch.gather(self.score_state[b_idx:b_idx+1], 1, score_indices)
-
-                # Padding
-                pad_size = max_kept - num_kept
-                k_pad = k_b[:, :, -1:, :].expand(1, H, pad_size, D).clone()
-                v_pad = v_b[:, :, -1:, :].expand(1, H, pad_size, D).clone()
-                if self.score_state is not None:
-                    score_pad = score_b[:, -1:, :].expand(1, pad_size, score_dim).clone()
-
-                padded_k.append(torch.cat([k_b, k_pad], dim=2))
-                padded_v.append(torch.cat([v_b, v_pad], dim=2))
-                if self.score_state is not None:
-                    padded_score_state.append(torch.cat([score_b, score_pad], dim=1))
-
-                # Gather metadata并padding
-                metadata_b = metadata_index_select_batch(b_idx, indices)
-                token_kinds.append(torch.cat([
-                    metadata_b.token_kind[0],
-                    metadata_b.token_kind[0, -1:].expand(pad_size).clone()
-                ]))
-                frame_ids.append(torch.cat([
-                    metadata_b.frame_id[0],
-                    metadata_b.frame_id[0, -1:].expand(pad_size).clone()
-                ]))
-                anchor_slots.append(torch.cat([
-                    metadata_b.anchor_slot[0],
-                    torch.full((pad_size,), -1, dtype=torch.long, device=device)
-                ]))
-                keyframe_ids.append(torch.cat([
-                    metadata_b.keyframe_id[0],
-                    metadata_b.keyframe_id[0, -1:].expand(pad_size).clone()
-                ]))
-                slot_ids.append(torch.cat([
-                    metadata_b.slot_id[0],
-                    metadata_b.slot_id[0, -1:].expand(pad_size).clone()
-                ]))
-                slot_local_xyzs.append(torch.cat([
-                    metadata_b.slot_local_xyz[0],
-                    metadata_b.slot_local_xyz[0, -1:, :].expand(pad_size, 3).clone()
-                ], dim=0))
-                importances.append(torch.cat([
-                    metadata_b.importance[0],
-                    metadata_b.importance[0, -1:].expand(pad_size).clone()
-                ]))
-                depth_confs.append(torch.cat([
-                    metadata_b.depth_conf[0],
-                    metadata_b.depth_conf[0, -1:].expand(pad_size).clone()
-                ]))
-            else:
-                # num_kept == max_kept，无需padding
-                expanded = indices.unsqueeze(0).unsqueeze(-1).expand(1, H, num_kept, D)
-                k_b = torch.gather(self.k[b_idx:b_idx+1], 2, expanded)
-                v_b = torch.gather(self.v[b_idx:b_idx+1], 2, expanded)
-                if self.score_state is not None:
-                    score_indices = indices.unsqueeze(0).unsqueeze(-1).expand(1, num_kept, score_dim)
-                    score_b = torch.gather(self.score_state[b_idx:b_idx+1], 1, score_indices)
-                metadata_b = metadata_index_select_batch(b_idx, indices)
-
-                padded_k.append(k_b)
-                padded_v.append(v_b)
-                if self.score_state is not None:
-                    padded_score_state.append(score_b)
-                token_kinds.append(metadata_b.token_kind[0])
-                frame_ids.append(metadata_b.frame_id[0])
-                anchor_slots.append(metadata_b.anchor_slot[0])
-                keyframe_ids.append(metadata_b.keyframe_id[0])
-                slot_ids.append(metadata_b.slot_id[0])
-                slot_local_xyzs.append(metadata_b.slot_local_xyz[0])
-                importances.append(metadata_b.importance[0])
-                depth_confs.append(metadata_b.depth_conf[0])
-
-        # 合并K/V
-        self.k = torch.cat(padded_k, dim=0)
-        self.v = torch.cat(padded_v, dim=0)
-        if self.score_state is not None:
-            self.score_state = torch.cat(padded_score_state, dim=0)
-
-        # 合并metadata - 使用stack构建batch维度
-        self.metadata = TokenMetadata(
-            token_kind=torch.stack(token_kinds, dim=0),
-            frame_id=torch.stack(frame_ids, dim=0),
-            anchor_slot=torch.stack(anchor_slots, dim=0),
-            keyframe_id=torch.stack(keyframe_ids, dim=0),
-            slot_id=torch.stack(slot_ids, dim=0),
-            slot_local_xyz=torch.stack(slot_local_xyzs, dim=0),
-            importance=torch.stack(importances, dim=0),
-            depth_conf=torch.stack(depth_confs, dim=0),
+        self.gather_(
+            torch.stack(normalized, dim=0).to(device=self.k.device, dtype=torch.long)
         )
 
-        self._cached_protected_count = self._compute_protected_count_raw()
-        self.protected_count = self._cached_protected_count
+    def _override_indices_per_batch(self, override_indices) -> List[Tensor]:
+        if self.k is not None:
+            batch_size = int(self.k.shape[0])
+            device = self.k.device
+            max_idx = self.num_tokens() - 1
+        elif self.metadata is not None:
+            batch_size = int(self.metadata.anchor_slot.shape[0])
+            device = self.metadata.anchor_slot.device
+            max_idx = int(self.metadata.anchor_slot.shape[1]) - 1
+        else:
+            return []
+        empty = torch.empty(0, dtype=torch.long, device=device)
+        if max_idx < 0:
+            return [empty.clone() for _ in range(batch_size)]
+
+        indices = torch.as_tensor(override_indices, dtype=torch.long, device=device)
+        if indices.dim() == 0:
+            indices = indices.reshape(1)
+
+        def normalize_row(row: Tensor) -> Tensor:
+            row = row.reshape(-1)
+            row = row[(row >= 0) & (row <= max_idx)]
+            return torch.unique(row, sorted=True)
+
+        if indices.dim() == 1:
+            row = normalize_row(indices)
+            return [row.clone() for _ in range(batch_size)]
+
+        if indices.dim() != 2:
+            raise ValueError(
+                f"Override keep indices must be 1D or 2D, got shape {tuple(indices.shape)}"
+            )
+
+        if indices.shape[0] == 1:
+            row = normalize_row(indices[0])
+            return [row.clone() for _ in range(batch_size)]
+        if indices.shape[0] != batch_size:
+            raise ValueError(
+                "Override keep indices first dimension must be 1 or batch size "
+                f"{batch_size}, got {indices.shape[0]}"
+            )
+        return [normalize_row(indices[b_idx]) for b_idx in range(batch_size)]
 
     def append_(
         self,
         k_new: Tensor,
         v_new: Tensor,
         metadata_new: TokenMetadata,
-        score_state_new: Optional[Tensor] = None,
     ) -> None:
-        if score_state_new is None and self.score_state is not None:
-            score_state_new = torch.zeros(
-                k_new.shape[0],
-                k_new.shape[2],
-                self.score_state.shape[-1],
-                dtype=k_new.dtype,
-                device=k_new.device,
-            )
         if self.k is None or self.v is None or self.metadata is None:
             self.k = k_new
             self.v = v_new
             self.metadata = metadata_new
-            self.score_state = score_state_new
         else:
             self.k = torch.cat([self.k, k_new], dim=2)
             self.v = torch.cat([self.v, v_new], dim=2)
             self.metadata = self.metadata.append(metadata_new)
-            if self.score_state is not None or score_state_new is not None:
-                if self.score_state is None:
-                    self.score_state = torch.zeros(
-                        self.k.shape[0],
-                        self.k.shape[2] - k_new.shape[2],
-                        score_state_new.shape[-1],
-                        dtype=score_state_new.dtype,
-                        device=score_state_new.device,
-                    )
-                if score_state_new is None:
-                    score_state_new = torch.zeros(
-                        k_new.shape[0],
-                        k_new.shape[2],
-                        self.score_state.shape[-1],
-                        dtype=self.score_state.dtype,
-                        device=self.score_state.device,
-                    )
-                self.score_state = torch.cat([self.score_state, score_state_new], dim=1)
         self._cached_protected_count = self._compute_protected_count_raw()
         self.protected_count = self._cached_protected_count
 
     def protect_topk_on_demotion_(self, demoted_slot: int, keep_count: int,
-                                    token_scorer=None, layer_id: int = 0,
+                                    layer_id: int = 0,
                                     current_frame_id: int | None = None,
                                     fifo_probe=None, batch_index: int = 0,
                                     cache_budget: int | None = None,
@@ -528,9 +398,6 @@ class LayerCacheState:
                                     global_anchor_keyframe_id: int | None = None) -> None:
         """Before FIFO_SWAP demotion, reassign top-K tokens from the demoted
         anchor to slot 0 (global anchor) so they survive eviction.
-
-        v2: When token_scorer is available, use scorer logits instead of
-        importance for ranking tokens in the demoted slot.
 
         v3: The probe is called BEFORE any metadata mutation so it observes
         the original demoted-slot token set.  keep_count=0 is recorded by the
@@ -545,7 +412,6 @@ class LayerCacheState:
         if self.metadata is None or self.num_tokens() == 0:
             return
 
-        # v2: 当 scorer 可用时，获取当前帧ID用于构建 metadata features
         if current_frame_id is None:
             current_frame_id = int(self.metadata.frame_id.max().item()) if self.metadata.frame_id.numel() > 0 else 0
 
@@ -568,16 +434,18 @@ class LayerCacheState:
             gaid = int(global_anchor_keyframe_id) if global_anchor_keyframe_id is not None else -1
             for b_idx in range(self.metadata.anchor_slot.shape[0]):
                 requested_keep_count = int(keep_count)  # batch-local; don't reuse a clamped value across batches
+                demoted_count = int(demoted_indices_by_batch[b_idx].numel())
+                planned_keep_count = min(max(requested_keep_count, 0), demoted_count)
                 slot0_mask = self.metadata.anchor_slot[b_idx] == 0
                 slot0_indices = torch.nonzero(slot0_mask, as_tuple=False).squeeze(-1)
                 slot0_kf_ids = self.metadata.keyframe_id[b_idx, slot0_indices]
                 rotatable = slot0_kf_ids != gaid  # global anchor never rotates
                 rot_idx = slot0_indices[rotatable]
                 rot_kf = slot0_kf_ids[rotatable]
-                if rot_idx.numel() + requested_keep_count <= fifo_ring_capacity:
-                    keep_count_by_batch[b_idx] = requested_keep_count
+                if rot_idx.numel() + planned_keep_count <= fifo_ring_capacity:
+                    keep_count_by_batch[b_idx] = planned_keep_count
                     continue  # under cap, no revoke needed
-                overflow = (rot_idx.numel() + requested_keep_count) - fifo_ring_capacity
+                overflow = (rot_idx.numel() + planned_keep_count) - fifo_ring_capacity
                 k = 0
                 if rot_idx.numel() > 0:
                     k = min(overflow, rot_idx.numel())
@@ -589,7 +457,7 @@ class LayerCacheState:
                 # regardless of whether revoke fully covered the overflow.
                 remaining_after_revoke = rot_idx.numel() - k
                 keep_count_by_batch[b_idx] = min(
-                    requested_keep_count,
+                    planned_keep_count,
                     max(0, fifo_ring_capacity - remaining_after_revoke),
                 )
 
@@ -617,23 +485,28 @@ class LayerCacheState:
             self._cached_protected_count = self._compute_protected_count_raw()
             self.protected_count = self._cached_protected_count
 
+        def effective_keep_count_for_batch(b_idx: int, demoted_count: int) -> int:
+            batch_keep = keep_count_by_batch.get(b_idx, keep_count) if keep_count_by_batch else keep_count
+            if max_protected is not None and self.metadata is not None:
+                slot0_count = int((self.metadata.anchor_slot[b_idx] == 0).sum().item())
+                available = max(0, int(max_protected) - slot0_count)
+                batch_keep = min(int(batch_keep), available)
+            return min(max(int(batch_keep), 0), int(demoted_count))
+
         if keep_indices_override is not None:
-            keep_indices_override = torch.as_tensor(
-                keep_indices_override,
-                dtype=torch.long,
-                device=self.metadata.anchor_slot.device,
-            ).reshape(-1)
-            if keep_indices_override.numel() == 0:
+            keep_indices_by_batch = self._override_indices_per_batch(keep_indices_override)
+            if not keep_indices_by_batch or all(idx.numel() == 0 for idx in keep_indices_by_batch):
                 return
-            max_idx = self.num_tokens() - 1
-            if max_idx >= 0:
-                keep_indices_override = keep_indices_override.clamp(0, max_idx)
-                keep_indices_override = torch.unique(keep_indices_override, sorted=True)
             for b_idx, indices in demoted_indices_by_batch.items():
                 if indices.numel() <= 0:
                     continue
-                keep_mask = torch.isin(indices, keep_indices_override)
+                keep_mask = torch.isin(indices, keep_indices_by_batch[b_idx])
                 top_indices = indices[keep_mask]
+                effective_keep_count = effective_keep_count_for_batch(b_idx, int(indices.numel()))
+                if effective_keep_count <= 0:
+                    continue
+                if top_indices.numel() > effective_keep_count:
+                    top_indices = top_indices[:effective_keep_count]
                 if top_indices.numel() > 0:
                     self.metadata.anchor_slot[b_idx, top_indices] = 0
             self._cached_protected_count = self._compute_protected_count_raw()
@@ -644,46 +517,16 @@ class LayerCacheState:
         if keep_count <= 0:
             return
 
-        # 3.5 (P1 fix): cap keep_count so the FIFO-protected slot-0 token count
-        # does not exceed max_protected. slot 0 is the permanently-protected region
-        # that accumulates fifo_keep_topk tokens per swap; without a cap it grows
-        # unboundedly and starves eviction.
-        if max_protected is not None and self.metadata is not None:
-            try:
-                slot0_count = int((self.metadata.anchor_slot[0] == 0).sum().item())
-            except Exception:
-                slot0_count = 0
-            available = max(0, int(max_protected) - slot0_count)
-            if keep_count > available:
-                keep_count = available
-            if keep_count <= 0:
-                return
-
         # 4. Per batch: clamp count and protect tokens
         for b_idx, indices in demoted_indices_by_batch.items():
             # pass-5 #1: honor the per-batch keep_count clamped by the ring (step 2.5).
             # B=1 (frontend) collapses to the single value; B>1 keeps batches independent.
-            batch_keep = keep_count_by_batch.get(b_idx, keep_count) if keep_count_by_batch else keep_count
-            effective_keep_count = min(max(int(batch_keep), 0), int(indices.numel()))
+            effective_keep_count = effective_keep_count_for_batch(b_idx, int(indices.numel()))
             if effective_keep_count <= 0:
                 continue
             if effective_keep_count == int(indices.numel()):
                 # All demoted-slot tokens are protected
                 top_indices = indices
-            elif token_scorer is not None and self.score_state is not None:
-                # v2: 提取 demoted slot 的 score_state 和 metadata
-                slot_score_state = self.score_state[b_idx, indices]  # [K, Ds]
-                # 构建 slot 级别的 metadata features
-                full_metadata_features = self.build_scorer_metadata_features(current_frame_id, decision_context=2)
-                slot_features = full_metadata_features[b_idx, indices]  # [K, Dm]
-                logits = token_scorer(
-                    slot_score_state.unsqueeze(0),
-                    slot_features.unsqueeze(0),
-                    layer_id,
-                )
-                scores = logits[0]  # [K]
-                _, top_local = torch.topk(scores, k=effective_keep_count)
-                top_indices = indices[top_local]
             else:
                 scores = self.metadata.importance[b_idx, indices]
                 _, top_local = torch.topk(scores, k=effective_keep_count)
@@ -726,6 +569,8 @@ class LayerCacheState:
                 self.metadata.anchor_slot - 1,
                 self.metadata.anchor_slot,
             )
+            self._cached_protected_count = self._compute_protected_count_raw()
+            self.protected_count = self._cached_protected_count
 
     def reorder_by_anchor_slots_(self) -> Optional[Tensor]:
         if self.metadata is None or self.num_tokens() == 0:
@@ -752,9 +597,10 @@ class LayerCacheState:
         return indices
 
     def apply_voxel_dedup_(self, config: FrontendCacheConfig, current_frame_id: int,
-                           token_scorer=None, layer_id: int = 0,
+                           layer_id: int = 0,
                            dedup_probe=None, batch_index: int = 0,
-                           dedup_replay_probe=None) -> None:
+                           dedup_replay_probe=None,
+                           cache_budget: Optional[int] = None) -> None:
         """
         向量化体素去重实现。
 
@@ -763,7 +609,6 @@ class LayerCacheState:
         2. 批量投影3D坐标和计算分数
         3. 单batch去重逻辑完全向量化
 
-        v2: 当 token_scorer 可用时，用 scorer logits 替代启发式 composite score。
         """
         if (
             self.metadata is None
@@ -776,6 +621,12 @@ class LayerCacheState:
 
         metadata = self.metadata
         B, N = metadata.anchor_slot.shape
+        if config.dedup_policy in {"soft_reservoir", "pressure_only"}:
+            if cache_budget is None:
+                return
+            trigger_tokens = int(float(cache_budget) * config.dedup_budget_trigger_ratio)
+            if N <= trigger_tokens:
+                return
         device = metadata.anchor_slot.device
         projected_xyz = self._project_slot_local_xyz_to_active(
             metadata.slot_local_xyz,
@@ -786,10 +637,10 @@ class LayerCacheState:
         valid_xyz_mask = torch.isfinite(projected_xyz).all(dim=-1)  # [B, N]
         patch_mask = metadata.token_kind == int(TokenKind.PATCH)  # [B, N]
 
-        # 受保护的patch tokens（锚点token，非当前帧）
+        # Protected patch tokens: all anchor-slot patches are protected from
+        # dedup, including selected anchor patches from the current keyframe.
         protected_patch_mask = (
             (metadata.anchor_slot >= 0)
-            & (metadata.frame_id != current_frame_id)
             & patch_mask
             & valid_xyz_mask
         )  # [B, N]
@@ -802,25 +653,20 @@ class LayerCacheState:
         # 当前帧的patch tokens
         current_patch_mask = (
             (metadata.frame_id == current_frame_id)
+            & (metadata.anchor_slot < 0)
             & patch_mask
             & valid_xyz_mask
         )  # [B, N]
 
         # ========== 阶段2：批量计算分数 ==========
-        if token_scorer is not None and self.score_state is not None:
-            # v2: 统一 scorer：score_state + metadata → logits
-            metadata_features = self.build_scorer_metadata_features(current_frame_id, decision_context=1)
-            logits = token_scorer(self.score_state, metadata_features, layer_id=layer_id)
-            scores = logits  # [B, N]，高分 = 优先保留
-        else:
-            # fallback 到启发式 composite score
-            scores = _composite_candidate_scores_batch(
-                metadata.importance,
-                metadata.depth_conf,
-                current_patch_mask,
-                config.importance_weight,
-                config.depth_conf_weight,
-            )  # [B, N]
+        dedup_score_mask = current_patch_mask | protected_patch_mask
+        scores = _composite_candidate_scores_batch(
+            metadata.importance,
+            metadata.depth_conf,
+            dedup_score_mask,
+            config.importance_weight,
+            config.depth_conf_weight,
+        )  # [B, N]
 
         # ========== 阶段2.5：计算 policy_keep_indices（在 probe callback 之前） ==========
         if B == 1:
@@ -832,6 +678,7 @@ class LayerCacheState:
                 config=config,
                 total_tokens=N,
                 projected_xyz=projected_xyz[0],
+                current_frame_id=current_frame_id,
             )
         else:
             policy_keep_indices = None  # computed per-batch below
@@ -858,15 +705,7 @@ class LayerCacheState:
             )
             if override_indices is not None:
                 # Apply the override keep set directly
-                override_indices = torch.as_tensor(override_indices, dtype=torch.long, device=self.k.device)
-                if override_indices.dim() == 1:
-                    override_indices = override_indices.unsqueeze(0)
-                max_idx = self.num_tokens() - 1
-                if max_idx >= 0:
-                    override_indices = override_indices.clamp(0, max_idx)
-                    override_indices = torch.unique(override_indices, sorted=True)
-                    override_indices = override_indices.reshape(1, -1)
-                self.gather_(override_indices)
+                self.gather_per_batch_(self._override_indices_per_batch(override_indices))
                 return
 
         if B == 1:
@@ -887,6 +726,7 @@ class LayerCacheState:
                 config=config,
                 total_tokens=N,
                 projected_xyz=projected_xyz[b_idx],
+                current_frame_id=current_frame_id,
             )
             if merge_plan_b is not None:
                 self._apply_intra_merge_(b_idx, merge_plan_b)
@@ -895,13 +735,9 @@ class LayerCacheState:
         # ========== 阶段4：使用gather_per_batch_处理不同数量的token ==========
         self.gather_per_batch_(kept_per_batch)
 
-    # ------------------------------------------------------------------
-    # Demoted-slot helpers for count head integration
-    # ------------------------------------------------------------------
-
     def get_demoted_slot_indices(
         self, demoted_slot: int, local_batch_index: int = 0
-    ) -> Tensor:
+    ):
         """Return token indices belonging to *demoted_slot* for one batch element.
 
         Parameters
@@ -921,145 +757,6 @@ class LayerCacheState:
         slot_mask = self.metadata.anchor_slot[local_batch_index] == demoted_slot
         return torch.nonzero(slot_mask, as_tuple=False).squeeze(-1)
 
-    def get_demoted_slot_score_state(
-        self, demoted_slot: int, local_batch_index: int = 0
-    ) -> Tensor:
-        """Return the score_state rows for tokens in the demoted slot.
-
-        Parameters
-        ----------
-        demoted_slot : int
-        local_batch_index : int
-
-        Returns
-        -------
-        Tensor[K, Ds]  (empty tensor with Ds columns if no demoted tokens)
-        """
-        indices = self.get_demoted_slot_indices(demoted_slot, local_batch_index)
-        if indices.numel() == 0 or self.score_state is None:
-            Ds = self.score_state.shape[-1] if self.score_state is not None else 0
-            dtype = self.score_state.dtype if self.score_state is not None else torch.float
-            device = self.score_state.device if self.score_state is not None else torch.device("cpu")
-            return torch.empty(0, Ds, dtype=dtype, device=device)
-        # score_state is [B, N, Ds]; index via [local_batch_index, indices]
-        return self.score_state[local_batch_index, indices]
-
-    def get_demoted_slot_metadata_features(
-        self,
-        demoted_slot: int,
-        current_frame_id: int,
-        local_batch_index: int = 0,
-    ) -> Tensor:
-        """Return scorer metadata-feature rows for tokens in the demoted slot.
-
-        Builds the full metadata feature tensor first, then slices out only
-        the demoted-slot rows for the requested batch element.
-
-        Parameters
-        ----------
-        demoted_slot : int
-        current_frame_id : int
-        local_batch_index : int
-
-        Returns
-        -------
-        Tensor[K, Dm]  (empty tensor with Dm columns if no demoted tokens)
-        """
-        indices = self.get_demoted_slot_indices(demoted_slot, local_batch_index)
-        if indices.numel() == 0:
-            if self.metadata is not None:
-                dtype = self.metadata.slot_local_xyz.dtype
-                device = self.metadata.slot_local_xyz.device
-            else:
-                dtype = torch.float
-                device = torch.device("cpu")
-            return torch.empty(0, TOKEN_METADATA_FEATURE_DIM, dtype=dtype, device=device)
-        full_features = self.build_scorer_metadata_features(
-            current_frame_id, decision_context=2
-        )
-        return full_features[local_batch_index, indices]
-
-    def build_scorer_metadata_features(self, current_frame_id: int, decision_context: int = 3) -> Tensor:
-        if self.metadata is None:
-            raise ValueError("Cannot build scorer metadata features without TokenMetadata")
-        metadata = self.metadata
-        dtype = metadata.slot_local_xyz.dtype
-        device = metadata.slot_local_xyz.device
-        B, N = metadata.frame_id.shape
-        features = torch.zeros(B, N, TOKEN_METADATA_FEATURE_DIM, dtype=dtype, device=device)
-
-        xyz_valid = torch.isfinite(metadata.slot_local_xyz).all(dim=-1)
-        active_xyz = self._project_slot_local_xyz_to_active(
-            metadata.slot_local_xyz,
-            metadata.slot_id,
-        )
-        local_xyz = torch.nan_to_num(metadata.slot_local_xyz, nan=0.0, posinf=0.0, neginf=0.0)
-        active_xyz = torch.nan_to_num(active_xyz, nan=0.0, posinf=0.0, neginf=0.0)
-        local_xyz = torch.where(xyz_valid.unsqueeze(-1), local_xyz, torch.zeros_like(local_xyz))
-        active_xyz = torch.where(xyz_valid.unsqueeze(-1), active_xyz, torch.zeros_like(active_xyz))
-        local_xyz = (local_xyz / _SCORER_XYZ_SCALE).clamp(-1.0, 1.0)
-        active_xyz = (active_xyz / _SCORER_XYZ_SCALE).clamp(-1.0, 1.0)
-
-        idx = TOKEN_METADATA_FEATURE_INDEX
-        features[..., idx["depth_conf"]] = metadata.depth_conf.to(dtype).clamp(0.0, 1.0)
-        start = idx["slot_local_xyz_start"]
-        features[..., start : start + 3] = local_xyz
-        start = idx["active_xyz_start"]
-        features[..., start : start + 3] = active_xyz
-        features[..., idx["frame_age"]] = (
-            torch.as_tensor(current_frame_id, dtype=dtype, device=device) - metadata.frame_id.to(dtype)
-        ).clamp_min(0).div(_SCORER_FRAME_AGE_SCALE).clamp(0.0, 1.0)
-        features[..., idx["anchor_slot"]] = metadata.anchor_slot.to(dtype).clamp_min(0).div(_SCORER_ID_SCALE).clamp(0.0, 1.0)
-        features[..., idx["is_protected"]] = (metadata.anchor_slot >= 0).to(dtype)
-        features[..., idx["kind_camera"]] = (metadata.token_kind == int(TokenKind.CAMERA)).to(dtype)
-        features[..., idx["kind_register"]] = (metadata.token_kind == int(TokenKind.REGISTER)).to(dtype)
-        features[..., idx["kind_patch"]] = (metadata.token_kind == int(TokenKind.PATCH)).to(dtype)
-        features[..., idx["slot_id"]] = metadata.slot_id.to(dtype).clamp_min(0).div(_SCORER_ID_SCALE).clamp(0.0, 1.0)
-        features[..., idx["keyframe_id"]] = metadata.keyframe_id.to(dtype).clamp_min(0).div(_SCORER_ID_SCALE).clamp(0.0, 1.0)
-        features[..., idx["xyz_valid"]] = xyz_valid.to(dtype)
-        features[..., idx["decision_context"]] = float(decision_context) / 3.0  # normalize to [0,1]
-        return features
-
-    def _learned_eviction_(
-        self,
-        cache_budget: int,
-        token_scorer,
-        layer_id: int,
-        current_frame_id: int,
-    ) -> Optional[float]:
-        if self.k is None or self.v is None or self.metadata is None:
-            return None
-        if self.score_state is None:
-            raise ValueError("learned_eviction_enabled=True requires LayerCacheState.score_state")
-
-        B, _, N, _ = self.k.shape
-        cache_budget = max(int(cache_budget), 0)
-        protected_count = min(max(int(self.protected_count), 0), N)
-        if N <= cache_budget:
-            return None
-
-        keep_from_candidates = min(max(cache_budget - protected_count, 0), N - protected_count)
-        device = self.k.device
-        if keep_from_candidates <= 0:
-            keep_protected = min(cache_budget, protected_count)
-            start = max(protected_count - keep_protected, 0)
-            kept_indices = torch.arange(start, protected_count, device=device).unsqueeze(0).expand(B, -1)
-            self.gather_(kept_indices)
-            return None
-
-        metadata_features = self.build_scorer_metadata_features(current_frame_id=current_frame_id)
-        logits = token_scorer(self.score_state, metadata_features, layer_id=layer_id)
-        if logits.shape != (B, N):
-            raise ValueError(f"TokenScorer returned {tuple(logits.shape)}, expected {(B, N)}")
-
-        candidate_logits = logits[:, protected_count:]
-        _, top_candidate_indices = torch.topk(candidate_logits, k=keep_from_candidates, dim=-1)
-        top_candidate_indices = top_candidate_indices.sort(dim=-1).values + protected_count
-        protected_indices = torch.arange(protected_count, device=device).unsqueeze(0).expand(B, -1)
-        kept_indices = torch.cat([protected_indices, top_candidate_indices], dim=-1)
-        self.gather_(kept_indices)
-        return float(candidate_logits.mean().detach().cpu().item())
-
     def _dedup_single_batch(
         self,
         b_idx: int,
@@ -1069,6 +766,7 @@ class LayerCacheState:
         config: FrontendCacheConfig,
         total_tokens: int,
         projected_xyz: Tensor,
+        current_frame_id: int,
     ) -> Tensor:
         """
         单batch的去重逻辑，完全向量化。
@@ -1083,7 +781,19 @@ class LayerCacheState:
         current_patch_indices = torch.nonzero(current_patch_mask, as_tuple=False).squeeze(-1)
 
         if current_patch_indices.numel() == 0:
-            return torch.nonzero(keep_mask, as_tuple=False).squeeze(-1)
+            return torch.nonzero(keep_mask, as_tuple=False).squeeze(-1), None
+
+        if config.dedup_policy == "soft_reservoir":
+            return self._soft_reservoir_dedup_single_batch(
+                b_idx=b_idx,
+                current_frame_id=current_frame_id,
+                protected_patch_mask=protected_patch_mask,
+                current_patch_mask=current_patch_mask,
+                scores=scores,
+                config=config,
+                total_tokens=total_tokens,
+                projected_xyz=projected_xyz,
+            )
 
         current_patch_xyz = projected_xyz[current_patch_indices]
 
@@ -1201,10 +911,100 @@ class LayerCacheState:
 
         return torch.nonzero(keep_mask, as_tuple=False).squeeze(-1), merge_plan
 
+    def _soft_reservoir_dedup_single_batch(
+        self,
+        b_idx: int,
+        current_frame_id: int,
+        protected_patch_mask: Tensor,
+        current_patch_mask: Tensor,
+        scores: Tensor,
+        config: FrontendCacheConfig,
+        total_tokens: int,
+        projected_xyz: Tensor,
+    ) -> tuple[Tensor, None]:
+        metadata = self.metadata
+        device = metadata.anchor_slot.device
+        keep_mask = torch.ones(total_tokens, dtype=torch.bool, device=device)
+
+        current_patch_indices = torch.nonzero(current_patch_mask, as_tuple=False).squeeze(-1)
+        if current_patch_indices.numel() == 0:
+            return torch.nonzero(keep_mask, as_tuple=False).squeeze(-1), None
+
+        current_patch_xyz = projected_xyz[current_patch_indices]
+        current_patch_scores = scores[current_patch_indices]
+        current_patch_voxels = torch.floor(current_patch_xyz / config.voxel_size).to(torch.long)
+        _, current_group_ids = torch.unique(current_patch_voxels, dim=0, return_inverse=True)
+        discard_current_mask = torch.zeros(current_patch_indices.shape[0], dtype=torch.bool, device=device)
+
+        protected_patch_indices = torch.empty(0, dtype=torch.long, device=device)
+        if protected_patch_mask.any():
+            protected_patch_indices = torch.nonzero(protected_patch_mask, as_tuple=False).squeeze(-1)
+
+        if protected_patch_indices.numel() > 0:
+            protected_xyz = projected_xyz[protected_patch_indices]
+            protected_voxels = torch.floor(protected_xyz / config.voxel_size).to(torch.long)
+            protected_scores = scores[protected_patch_indices]
+            protected_age = (
+                int(current_frame_id) - metadata.frame_id[b_idx, protected_patch_indices]
+            ).clamp(min=0).to(dtype=protected_scores.dtype)
+            protected_scores = protected_scores - float(config.dedup_age_decay) * protected_age
+
+            protected_hash = voxel_hash_collision_free(protected_voxels)
+            unique_vhash, inv = torch.unique(protected_hash, return_inverse=True)
+            num_v = unique_vhash.shape[0]
+            best_protected = torch.full((num_v,), float("-inf"), device=device)
+            best_protected.scatter_reduce_(0, inv, protected_scores, reduce="amax", include_self=True)
+
+            current_hash = voxel_hash_collision_free(current_patch_voxels)
+            sort_idx = torch.searchsorted(unique_vhash, current_hash).clamp(0, num_v - 1)
+            matched = unique_vhash[sort_idx] == current_hash
+            if matched.any():
+                matched_current = torch.nonzero(matched, as_tuple=False).squeeze(-1)
+                effective_protected = best_protected[sort_idx[matched]]
+                current_scores = current_patch_scores[matched]
+                worse = effective_protected > current_scores + float(config.dedup_replacement_margin)
+                discard_current_mask[matched_current[worse]] = True
+
+        if discard_current_mask.any():
+            keep_mask[current_patch_indices[discard_current_mask]] = False
+
+        survivor_mask = ~discard_current_mask
+        survivor_indices = current_patch_indices[survivor_mask]
+        if survivor_indices.numel() == 0:
+            return torch.nonzero(keep_mask, as_tuple=False).squeeze(-1), None
+
+        survivor_group_ids = current_group_ids[survivor_mask]
+        survivor_scores = current_patch_scores[survivor_mask]
+        topk = int(config.dedup_topk_per_voxel)
+        if topk >= survivor_indices.numel():
+            return torch.nonzero(keep_mask, as_tuple=False).squeeze(-1), None
+
+        order_by_score = torch.argsort(survivor_scores, descending=True, stable=True)
+        grouped_order = torch.argsort(survivor_group_ids[order_by_score], stable=True)
+        final_order = order_by_score[grouped_order]
+        ordered_group_ids = survivor_group_ids[final_order]
+        new_group = torch.ones_like(ordered_group_ids, dtype=torch.bool)
+        if ordered_group_ids.numel() > 1:
+            new_group[1:] = ordered_group_ids[1:] != ordered_group_ids[:-1]
+        group_starts = torch.nonzero(new_group, as_tuple=False).squeeze(-1)
+        group_ends = torch.cat([
+            group_starts[1:],
+            torch.tensor([ordered_group_ids.numel()], device=device, dtype=group_starts.dtype),
+        ])
+        counts = group_ends - group_starts
+        group_start_for_member = torch.repeat_interleave(group_starts, counts)
+        rank_in_group = torch.arange(ordered_group_ids.numel(), device=device) - group_start_for_member
+        keep_topk = rank_in_group < topk
+        duplicate_indices = survivor_indices[final_order[~keep_topk]]
+        if duplicate_indices.numel() > 0:
+            keep_mask[duplicate_indices] = False
+
+        return torch.nonzero(keep_mask, as_tuple=False).squeeze(-1), None
+
     def _apply_intra_merge_(self, b_idx: int, plan: dict) -> None:
         """Apply a soft-merge plan (from _dedup_single_batch, merge mode): for each
         multi-member voxel group, write the importance-weighted average of the members'
-        K/V (+ score_state, importance, depth_conf) into the representative slot.
+        K/V (+ importance, depth_conf) into the representative slot.
         Token count is unchanged (gather afterwards drops the non-rep members; the rep
         slot already holds the merged value). Call BEFORE _gather_single_batch_."""
         rep = plan["rep_indices"]            # [G]
@@ -1230,28 +1030,6 @@ class LayerCacheState:
         acc_xyz.index_add_(0, rep_of, xyz)
         cnt.index_add_(0, rep_of, torch.ones_like(w))
         self.metadata.slot_local_xyz[b_idx, rep] = acc_xyz / cnt.unsqueeze(-1).clamp(min=1.0)
-        # score_state [B, N, Ds]: weighted average (only when present, i.e. scorer enabled)
-        if self.score_state is not None:
-            ss = self.score_state[b_idx, memb] * w.view(-1, 1)             # [M, Ds]
-            acc_ss = torch.zeros(rep.shape[0], ss.shape[-1], device=ss.device, dtype=ss.dtype)
-            acc_ss.index_add_(0, rep_of, ss)
-            self.score_state[b_idx, rep] = acc_ss
-
-    def _scorer_scores_or_importance_(
-        self,
-        token_scorer,
-        current_frame_id: int,
-        layer_id: int,
-        fallback_scores: Tensor,
-        score_state_slice: Tensor,
-    ) -> Tensor:
-        """Use scorer to produce retention scores; fall back to heuristic scores."""
-        if token_scorer is None or self.score_state is None:
-            return fallback_scores
-        # Build metadata features for the current set of tokens
-        metadata_features = self.build_scorer_metadata_features(current_frame_id)
-        logits = token_scorer(score_state_slice, metadata_features, layer_id=layer_id)
-        return logits
 
     def commit_pending_update_(
         self,
@@ -1260,62 +1038,51 @@ class LayerCacheState:
         config: FrontendCacheConfig,
         intra_frame_keep_ratio: float,
         attn_module,
-        token_scorer=None,
         layer_id: int = 0,
         eviction_probe=None,
         batch_index: int = 0,
         dedup_probe=None,
         dedup_replay_probe=None,
+        window_token_count: int = 0,
     ) -> Optional[float]:
         k_current = pending_update.k_current
         v_current = pending_update.v_current
         metadata_current = current_metadata
-        score_state_current = pending_update.score_state_current
 
         if not metadata_current.has_anchor_tokens() and intra_frame_keep_ratio < 1.0:
             keep_count = max(int(k_current.shape[2] * intra_frame_keep_ratio), 1)
             if keep_count < k_current.shape[2]:
-                # v2: Use scorer for intra-frame pruning when available
-                if token_scorer is not None and score_state_current is not None:
-                    # Build metadata features for current frame tokens only
-                    # Use a temporary cache state view to build features
-                    temp_metadata_features = _build_current_frame_metadata_features(
-                        metadata_current, pending_update.frame_id,
-                        decision_context=0,
-                    )
-                    pruning_logits = token_scorer(
-                        score_state_current, temp_metadata_features, layer_id=layer_id,
-                    )
-                    _, top_indices = torch.topk(pruning_logits, k=keep_count, dim=-1)
-                else:
-                    _, top_indices = torch.topk(metadata_current.importance, k=keep_count, dim=-1)
+                _, top_indices = torch.topk(metadata_current.importance, k=keep_count, dim=-1)
                 top_indices = top_indices.sort(dim=-1).values
                 expanded = top_indices.unsqueeze(1).unsqueeze(-1).expand(
                     k_current.shape[0], k_current.shape[1], keep_count, k_current.shape[-1]
                 )
                 k_current = torch.gather(k_current, 2, expanded)
                 v_current = torch.gather(v_current, 2, expanded)
-                if score_state_current is not None:
-                    score_dim = score_state_current.shape[-1]
-                    score_indices = top_indices.unsqueeze(-1).expand(
-                        top_indices.shape[0],
-                        top_indices.shape[1],
-                        score_dim,
-                    )
-                    score_state_current = torch.gather(score_state_current, 1, score_indices)
                 metadata_current = metadata_current.index_select(top_indices)
 
-        self.append_(k_current, v_current, metadata_current, score_state_new=score_state_current)
+        self.append_(k_current, v_current, metadata_current)
         # pass-1 #3: force reorder when the ring revoked tokens (their anchor_slot
         # changed but they're still positioned in the protected region), so the
         # subsequent eviction binary split is correct.
-        if metadata_current.has_anchor_tokens() or self._needs_reorder_after_revoke:
+        reordered_for_anchor = metadata_current.has_anchor_tokens() or self._needs_reorder_after_revoke
+        if reordered_for_anchor:
             self.reorder_by_anchor_slots_()
             self._needs_reorder_after_revoke = False
+
+        if (
+            pending_update.attention_kept_indices is not None
+            and not reordered_for_anchor
+            and intra_frame_keep_ratio >= 1.0
+        ):
+            self.gather_per_batch_(
+                self._override_indices_per_batch(pending_update.attention_kept_indices)
+            )
         self.apply_voxel_dedup_(config, current_frame_id=pending_update.frame_id,
-                                token_scorer=token_scorer, layer_id=layer_id,
+                                layer_id=layer_id,
                                 dedup_probe=dedup_probe, batch_index=batch_index,
-                                dedup_replay_probe=dedup_replay_probe)
+                                dedup_replay_probe=dedup_replay_probe,
+                                cache_budget=pending_update.cache_budget)
 
         if pending_update.cache_budget is None or self.num_tokens() <= pending_update.cache_budget:
             return None
@@ -1329,31 +1096,10 @@ class LayerCacheState:
                 batch_index=batch_index,
             )
             if keep_indices_override is not None:
-                keep_indices_override = torch.as_tensor(
-                    keep_indices_override,
-                    dtype=torch.long,
-                    device=self.k.device,
-                ).reshape(1, -1)
-                # Clamp indices to valid range: replay cache may have fewer
+                # Clamp and de-duplicate per batch: replay cache may have fewer
                 # tokens than the probe phase due to nondeterministic dedup.
-                max_idx = self.num_tokens() - 1
-                if max_idx >= 0:
-                    keep_indices_override = keep_indices_override.clamp(0, max_idx)
-                    # Remove duplicates that may result from clamping
-                    keep_indices_override = torch.unique(keep_indices_override, sorted=True)
-                    keep_indices_override = keep_indices_override.reshape(1, -1)
-                self.gather_(keep_indices_override)
+                self.gather_per_batch_(self._override_indices_per_batch(keep_indices_override))
                 return None
-
-        if config.learned_eviction_enabled:
-            if token_scorer is None:
-                raise ValueError("learned_eviction_enabled=True requires token_scorer")
-            return self._learned_eviction_(
-                cache_budget=pending_update.cache_budget,
-                token_scorer=token_scorer,
-                layer_id=layer_id,
-                current_frame_id=pending_update.frame_id,
-            )
 
         importance_scores, num_new_tokens = self._current_frame_importance(pending_update.frame_id)
 
@@ -1389,18 +1135,11 @@ class LayerCacheState:
             importance_scores=importance_scores,
             num_new_tokens=num_new_tokens,
             importance_weight=config.eviction_importance_weight,
+            window_token_count=window_token_count,
         )
         self.k = final_k
         self.v = final_v
         if kept_indices is not None:
-            if self.score_state is not None:
-                score_dim = self.score_state.shape[-1]
-                score_indices = kept_indices.unsqueeze(-1).expand(
-                    kept_indices.shape[0],
-                    kept_indices.shape[1],
-                    score_dim,
-                )
-                self.score_state = torch.gather(self.score_state, 1, score_indices)
             self.metadata = self.metadata.index_select(kept_indices)
         self._cached_protected_count = self._compute_protected_count_raw()
         self.protected_count = self._cached_protected_count
@@ -1410,7 +1149,16 @@ class LayerCacheState:
         """Original computation — called only at mutation points (has GPU sync)."""
         if self.metadata is None or self.metadata.anchor_slot.numel() == 0:
             return 0
-        return int((self.metadata.anchor_slot[0] >= 0).sum().item())
+        counts = (self.metadata.anchor_slot >= 0).sum(dim=1)
+        if counts.numel() == 0:
+            return 0
+        if counts.shape[0] > 1 and not bool((counts == counts[0]).all().item()):
+            raise ValueError(
+                "Batched LayerCacheState requires every batch element to have the "
+                "same protected token count because protected_count is a scalar. "
+                f"Use per-sample cache states for mismatched anchor layouts; got {counts.detach().cpu().tolist()}."
+            )
+        return int(counts[0].item())
 
     def _compute_protected_count(self) -> int:
         """Cached version — returns pre-computed value, no GPU sync."""
@@ -1424,7 +1172,8 @@ class LayerCacheState:
         for b_idx in range(self.metadata.frame_id.shape[0]):
             mask = (self.metadata.frame_id[b_idx] == frame_id) & (self.metadata.anchor_slot[b_idx] < 0)
             counts.append(int(mask.sum().item()))
-            batch_scores.append(self.metadata.importance[b_idx, mask])
+            scores = self.metadata.importance[b_idx, mask]
+            batch_scores.append(torch.where(torch.isfinite(scores), scores, torch.zeros_like(scores)))
         if not counts or min(counts) == 0 or len(set(counts)) != 1:
             return None, 0
         return torch.stack(batch_scores, dim=0), counts[0]
@@ -1495,49 +1244,6 @@ class LayerCacheState:
         if transform.dim() == 2:
             transform = transform.unsqueeze(0).expand(batch_size, -1, -1)
         return transform.to(device=device, dtype=dtype)
-
-
-def _build_current_frame_metadata_features(
-    metadata: TokenMetadata,
-    current_frame_id: int,
-    decision_context: int = 0,  # pruning by default
-) -> Tensor:
-    """Build scorer metadata features for a set of tokens (used in intra-frame pruning).
-
-    This is a standalone version that doesn't require a LayerCacheState, so it
-    can be called before tokens are appended to the cache.
-    """
-    dtype = metadata.slot_local_xyz.dtype
-    device = metadata.slot_local_xyz.device
-    B, N = metadata.frame_id.shape
-    features = torch.zeros(B, N, TOKEN_METADATA_FEATURE_DIM, dtype=dtype, device=device)
-
-    xyz_valid = torch.isfinite(metadata.slot_local_xyz).all(dim=-1)
-    local_xyz = torch.nan_to_num(metadata.slot_local_xyz, nan=0.0, posinf=0.0, neginf=0.0)
-    local_xyz = torch.where(xyz_valid.unsqueeze(-1), local_xyz, torch.zeros_like(local_xyz))
-    local_xyz = (local_xyz / _SCORER_XYZ_SCALE).clamp(-1.0, 1.0)
-
-    # active_xyz = slot_local_xyz for tokens not yet in cache (no transform available)
-    active_xyz = local_xyz.clone()
-
-    idx = TOKEN_METADATA_FEATURE_INDEX
-    features[..., idx["depth_conf"]] = metadata.depth_conf.to(dtype).clamp(0.0, 1.0)
-    start = idx["slot_local_xyz_start"]
-    features[..., start : start + 3] = local_xyz
-    start = idx["active_xyz_start"]
-    features[..., start : start + 3] = active_xyz
-    features[..., idx["frame_age"]] = torch.zeros(B, N, dtype=dtype, device=device)
-    features[..., idx["anchor_slot"]] = metadata.anchor_slot.to(dtype).clamp_min(0).div(_SCORER_ID_SCALE).clamp(0.0, 1.0)
-    features[..., idx["is_protected"]] = (metadata.anchor_slot >= 0).to(dtype)
-    features[..., idx["kind_camera"]] = (metadata.token_kind == int(TokenKind.CAMERA)).to(dtype)
-    features[..., idx["kind_register"]] = (metadata.token_kind == int(TokenKind.REGISTER)).to(dtype)
-    features[..., idx["kind_patch"]] = (metadata.token_kind == int(TokenKind.PATCH)).to(dtype)
-    features[..., idx["slot_id"]] = metadata.slot_id.to(dtype).clamp_min(0).div(_SCORER_ID_SCALE).clamp(0.0, 1.0)
-    features[..., idx["keyframe_id"]] = metadata.keyframe_id.to(dtype).clamp_min(0).div(_SCORER_ID_SCALE).clamp(0.0, 1.0)
-    features[..., idx["xyz_valid"]] = xyz_valid.to(dtype)
-    features[..., idx["decision_context"]] = float(decision_context) / 3.0
-    return features
-
 
 def build_token_kind_tensor(
     batch_size: int,
@@ -1705,17 +1411,18 @@ def transform_points(points: Tensor, transform: Tensor) -> Tensor:
 
 
 def _normalize_with_mask(values: Tensor, mask: Tensor) -> Tensor:
-    if not mask.any():
+    finite_mask = mask & torch.isfinite(values)
+    if not finite_mask.any():
         return torch.zeros_like(values)
-    selected = values[mask]
+    selected = values[finite_mask]
     v_min = selected.min()
     v_max = selected.max()
     if torch.isclose(v_min, v_max):
         out = torch.zeros_like(values)
-        out[mask] = 0.5
+        out[finite_mask] = 0.5
         return out
     out = torch.zeros_like(values)
-    out[mask] = (selected - v_min) / (v_max - v_min + 1e-8)
+    out[finite_mask] = (selected - v_min) / (v_max - v_min + 1e-8)
     return out
 
 
@@ -1772,17 +1479,19 @@ def _normalize_with_mask_batch(values: Tensor, mask: Tensor) -> Tensor:
     device = values.device
     dtype = values.dtype
 
+    finite_mask = mask & torch.isfinite(values)
+
     # 使用极值填充非mask位置，以便正确计算min/max
     inf = float('inf')
-    values_for_min = torch.where(mask, values, torch.full_like(values, inf))
-    values_for_max = torch.where(mask, values, torch.full_like(values, -inf))
+    values_for_min = torch.where(finite_mask, values, torch.full_like(values, inf))
+    values_for_max = torch.where(finite_mask, values, torch.full_like(values, -inf))
 
     # 计算每个batch的min/max
     v_min = values_for_min.min(dim=1, keepdim=True)[0]  # [B, 1]
     v_max = values_for_max.max(dim=1, keepdim=True)[0]  # [B, 1]
 
     # 处理全为False的mask情况
-    valid_batch = mask.any(dim=1, keepdim=True)  # [B, 1]
+    valid_batch = finite_mask.any(dim=1, keepdim=True)  # [B, 1]
     v_min = torch.where(valid_batch, v_min, torch.zeros_like(v_min))
     v_max = torch.where(valid_batch, v_max, torch.ones_like(v_max))
 
@@ -1792,7 +1501,8 @@ def _normalize_with_mask_batch(values: Tensor, mask: Tensor) -> Tensor:
 
     # 归一化
     denom = range_val.clamp(min=1e-8)
-    normalized = (values - v_min) / denom
+    safe_values = torch.where(torch.isfinite(values), values, torch.zeros_like(values))
+    normalized = (safe_values - v_min) / denom
 
     # 处理相等情况：设为中性值0.5
     normalized = torch.where(
@@ -1801,7 +1511,7 @@ def _normalize_with_mask_batch(values: Tensor, mask: Tensor) -> Tensor:
         normalized,
     )
 
-    # 非mask位置设为0
-    normalized = torch.where(mask, normalized, torch.zeros_like(normalized))
+    # 非mask或非finite位置设为0
+    normalized = torch.where(finite_mask, normalized, torch.zeros_like(normalized))
 
     return normalized
