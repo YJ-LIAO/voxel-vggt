@@ -109,6 +109,11 @@ def build_7scenes_kwargs(data_root: str, resolution, max_frames: int):
     }
 
 
+def append_eval_log_line(log_file: str, line: str) -> None:
+    with open(log_file, "a") as f:
+        print(line, file=f)
+
+
 def get_args_parser():
     parser = argparse.ArgumentParser("3D Reconstruction evaluation", add_help=False)
     parser.add_argument(
@@ -542,13 +547,12 @@ def main(args):
                     comp, comp_med, nc2, nc2_med = completion(
                         pcd_gt.points, pcd.points, gt_normal, pred_normal
                     )
-                    print(
-                        f"Idx: {scene_id}, Acc: {acc}, Comp: {comp}, NC1: {nc1}, NC2: {nc2} - Acc_med: {acc_med}, Compc_med: {comp_med}, NC1c_med: {nc1_med}, NC2c_med: {nc2_med}"
+                    log_line = (
+                        f"Idx: {scene_id}, Acc: {acc}, Comp: {comp}, NC1: {nc1}, NC2: {nc2} - "
+                        f"Acc_med: {acc_med}, Compc_med: {comp_med}, NC1c_med: {nc1_med}, NC2c_med: {nc2_med}"
                     )
-                    print(
-                        f"Idx: {scene_id}, Acc: {acc}, Comp: {comp}, NC1: {nc1}, NC2: {nc2} - Acc_med: {acc_med}, Compc_med: {comp_med}, NC1c_med: {nc1_med}, NC2c_med: {nc2_med}",
-                        file=open(log_file, "a"),
-                    )
+                    print(log_line)
+                    append_eval_log_line(log_file, log_line)
 
                     acc_all += acc
                     comp_all += comp

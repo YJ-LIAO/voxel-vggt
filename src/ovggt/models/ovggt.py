@@ -473,6 +473,8 @@ class OVGGT(nn.Module, PyTorchModelHubMixin):
         window_protect_frames: int = 0,
     ):
         self._validate_frontend_batch_size(frames)
+        if not frames:
+            return OVGGTOutput(ress=[], views=[])
         frontend_keyframe_config = self._build_frontend_keyframe_config(
             history_anchor_strategy,
             anchor_interval,

@@ -109,6 +109,18 @@ def test_frontend_mode_respects_explicit_disabled_cache_config_and_routes_legacy
     assert explicit_kwargs["anchor_interval"] == 12
 
 
+def test_frontend_inference_empty_frames_returns_empty_output():
+    model = _small_ovggt(
+        mode="frontend_eval",
+        frontend_cache_config=FrontendCacheConfig(enabled=True, dedup_enabled=False),
+    )
+
+    output = model.inference([], cache_results=False)
+
+    assert output.ress == []
+    assert output.views == []
+
+
 def test_frontend_inference_passes_anchor_keep_ratio_to_frontend_path():
     model = _small_ovggt(
         mode="frontend_eval",

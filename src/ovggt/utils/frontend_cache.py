@@ -24,6 +24,13 @@ def voxel_hash_collision_free(voxels: Tensor) -> Tensor:
     voxels = voxels.to(torch.long)
     OFFSET = 1 << 20  # shift negatives into non-negative range (±1M range)
     shifted = voxels + OFFSET
+    if shifted.numel() > 0 and not bool(((shifted >= 0) & (shifted < (1 << 21))).all().item()):
+        min_voxel = int(voxels.min().item())
+        max_voxel = int(voxels.max().item())
+        raise ValueError(
+            "voxel coordinates are outside supported packed range "
+            f"[-{OFFSET}, {OFFSET - 1}]: observed min={min_voxel}, max={max_voxel}"
+        )
     packed = (shifted[:, 0] << 42) | (shifted[:, 1] << 21) | shifted[:, 2]
     # pack into int64 stays unique because each 21-bit field is disjoint.
     return packed

@@ -17,6 +17,7 @@ from ovggt.utils.frontend_cache import (
     TokenKind,
     TokenMetadata,
     _normalize_with_mask_batch,
+    voxel_hash_collision_free,
 )
 from ovggt.utils.frontend_keyframe import KeyframeEvent, KeyframeEventType
 
@@ -83,6 +84,18 @@ def test_masked_normalization_ignores_non_finite_values():
 
 
 class FrontendCacheTests(unittest.TestCase):
+    def test_voxel_hash_rejects_coordinates_outside_packed_range(self):
+        voxels = torch.tensor(
+            [
+                [1, 0, 0],
+                [0, 1 << 21, 0],
+            ],
+            dtype=torch.long,
+        )
+
+        with self.assertRaisesRegex(ValueError, "outside supported packed range"):
+            voxel_hash_collision_free(voxels)
+
     def test_single_batch_gather_matches_generic_gather(self):
         k = torch.arange(24, dtype=torch.float32).reshape(1, 2, 6, 2)
         v = k + 100.0

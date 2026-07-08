@@ -272,3 +272,21 @@ def test_write_merged_eval_log_rejects_missing_scene_metric(tmp_path):
             expected_scene_ids=["chess/seq-03", "heads/seq-01"],
             num_processes=2,
         )
+
+
+def test_append_eval_log_line_closes_file_handle(tmp_path, monkeypatch):
+    opened_files = []
+    real_open = open
+
+    def tracking_open(*args, **kwargs):
+        handle = real_open(*args, **kwargs)
+        opened_files.append(handle)
+        return handle
+
+    monkeypatch.setattr(mv_launch, "open", tracking_open, raising=False)
+
+    mv_launch.append_eval_log_line(str(tmp_path / "logs_0.txt"), "metric line")
+
+    assert opened_files
+    assert all(handle.closed for handle in opened_files)
+    assert (tmp_path / "logs_0.txt").read_text() == "metric line\n"
