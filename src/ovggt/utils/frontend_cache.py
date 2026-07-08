@@ -357,7 +357,19 @@ class LayerCacheState:
         def normalize_row(row: Tensor) -> Tensor:
             row = row.reshape(-1)
             row = row[(row >= 0) & (row <= max_idx)]
-            return torch.unique(row, sorted=True)
+            if row.numel() <= 1:
+                return row
+            _, inverse = torch.unique(row, sorted=False, return_inverse=True)
+            first_occurrence = torch.full(
+                (int(inverse.max().item()) + 1,),
+                row.numel(),
+                dtype=torch.long,
+                device=device,
+            )
+            positions = torch.arange(row.numel(), dtype=torch.long, device=device)
+            first_occurrence.scatter_reduce_(0, inverse, positions, reduce="amin", include_self=True)
+            keep = first_occurrence[inverse] == positions
+            return row[keep]
 
         if indices.dim() == 1:
             row = normalize_row(indices)
@@ -452,8 +464,9 @@ class LayerCacheState:
         # set after a probe override.
         revoke_by_batch: dict[int, Tensor] = {}
         keep_count_by_batch: dict[int, int] = {}
-        if fifo_ring_capacity is not None and fifo_ring_capacity > 0:
+        if fifo_ring_capacity is not None:
             gaid = int(global_anchor_keyframe_id) if global_anchor_keyframe_id is not None else 0
+            ring_capacity = max(int(fifo_ring_capacity), 0)
             for b_idx in range(self.metadata.anchor_slot.shape[0]):
                 requested_keep_count = int(keep_count)  # batch-local; don't reuse a clamped value across batches
                 demoted_indices = demoted_indices_by_batch[b_idx]
@@ -470,10 +483,10 @@ class LayerCacheState:
                 rotatable = slot0_kf_ids != gaid  # global anchor never rotates
                 rot_idx = slot0_indices[rotatable]
                 rot_kf = slot0_kf_ids[rotatable]
-                if rot_idx.numel() + planned_keep_count <= fifo_ring_capacity:
+                if rot_idx.numel() + planned_keep_count <= ring_capacity:
                     keep_count_by_batch[b_idx] = planned_keep_count
                     continue  # under cap, no revoke needed
-                overflow = (rot_idx.numel() + planned_keep_count) - fifo_ring_capacity
+                overflow = (rot_idx.numel() + planned_keep_count) - ring_capacity
                 k = 0
                 if rot_idx.numel() > 0:
                     k = min(overflow, rot_idx.numel())
@@ -486,7 +499,7 @@ class LayerCacheState:
                 remaining_after_revoke = rot_idx.numel() - k
                 keep_count_by_batch[b_idx] = min(
                     planned_keep_count,
-                    max(0, fifo_ring_capacity - remaining_after_revoke),
+                    max(0, ring_capacity - remaining_after_revoke),
                 )
 
         # 3.5 (P1 mechanism C): apply the revoke plan regardless of whether the
@@ -514,8 +527,8 @@ class LayerCacheState:
             for b_idx, indices in demoted_indices_by_batch.items():
                 if indices.numel() <= 0:
                     continue
-                keep_mask = torch.isin(indices, keep_indices_by_batch[b_idx])
-                top_indices = indices[keep_mask]
+                demoted_mask = torch.isin(keep_indices_by_batch[b_idx], indices)
+                top_indices = keep_indices_by_batch[b_idx][demoted_mask]
                 effective_keep_count = effective_keep_count_for_batch(b_idx, int(indices.numel()))
                 if effective_keep_count <= 0:
                     continue
@@ -1084,14 +1097,6 @@ class LayerCacheState:
             self.reorder_by_anchor_slots_()
             self._needs_reorder_after_revoke = False
 
-        if (
-            pending_update.attention_kept_indices is not None
-            and not reordered_for_anchor
-            and intra_frame_keep_ratio >= 1.0
-        ):
-            self.gather_per_batch_(
-                self._override_indices_per_batch(pending_update.attention_kept_indices)
-            )
         self.apply_voxel_dedup_(config, current_frame_id=pending_update.frame_id,
                                 layer_id=layer_id,
                                 dedup_probe=dedup_probe, batch_index=batch_index,

@@ -270,8 +270,11 @@ class Attention(nn.Module):
 
         if use_hybrid:
             # Hybrid strategy: baseline for old, repr_shift for new
-            old_scores = baseline_diversity_avg[:, :num_old_candidates]  # [B, N_old]
-            new_importance = importance_scores  # [B, N_new]
+            num_scored = num_candidates - protected_window_count
+            scored_old_count = min(num_old_candidates, num_scored)
+            scored_new_count = max(num_scored - scored_old_count, 0)
+            old_scores = baseline_diversity_avg[:, :scored_old_count]  # [B, N_scored_old]
+            new_importance = importance_scores[:, :scored_new_count]  # [B, N_scored_new]
 
             # Normalize both to [0, 1] range for fair comparison.
             old_normalized = _normalize_scores(old_scores)

@@ -82,7 +82,7 @@ Expected pattern:
 
 Checkpoint default:
 
-- `/Train/LYJ/workspace/OVGGT/ckpt/checkpoints.pth`
+- `${REPO_ROOT}/ckpt/checkpoints.pth` (override with `MODEL_WEIGHTS=/abs/path` for local checkpoints)
 
 Dataset default:
 

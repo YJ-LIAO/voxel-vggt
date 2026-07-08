@@ -386,6 +386,59 @@ class FrontendCacheTests(unittest.TestCase):
 
         self.assertEqual(int((state.metadata.anchor_slot[0] == 0).sum().item()), 2)
 
+    def test_fifo_probe_override_preserves_probe_priority_before_keep_count_clamp(self):
+        metadata = TokenMetadata(
+            token_kind=torch.full((1, 8), int(TokenKind.PATCH), dtype=torch.long),
+            frame_id=torch.zeros((1, 8), dtype=torch.long),
+            anchor_slot=torch.ones((1, 8), dtype=torch.long),
+            keyframe_id=torch.arange(8, dtype=torch.long).unsqueeze(0),
+            slot_id=torch.arange(8, dtype=torch.long).unsqueeze(0),
+            slot_local_xyz=torch.zeros(1, 8, 3),
+            importance=torch.arange(8, dtype=torch.float32).unsqueeze(0),
+            depth_conf=torch.ones(1, 8),
+        )
+
+        class FifoProbe:
+            def on_fifo_topk_candidate(self, **kwargs):
+                return torch.tensor([7, 3, 2, 1], dtype=torch.long)
+
+        state = LayerCacheState(
+            k=torch.zeros(1, 1, 8, 1),
+            v=torch.zeros(1, 1, 8, 1),
+            metadata=metadata,
+        )
+
+        state.protect_topk_on_demotion_(
+            demoted_slot=1,
+            keep_count=2,
+            fifo_probe=FifoProbe(),
+        )
+
+        protected = torch.nonzero(state.metadata.anchor_slot[0] == 0, as_tuple=False).squeeze(-1)
+        self.assertTrue(torch.equal(protected, torch.tensor([3, 7])))
+
+    def test_fifo_ring_capacity_zero_revokes_rescued_tokens_and_prevents_new_rescue(self):
+        metadata = make_metadata(
+            anchor_slots=[0, 0, 0, 1, 1],
+            keyframe_ids=[0, 10, 11, 20, 20],
+            slot_ids=[0, 10, 11, 20, 20],
+            importance=[0.1] * 5,
+        )
+        state = LayerCacheState(
+            k=torch.zeros(1, 1, 5, 1),
+            v=torch.zeros(1, 1, 5, 1),
+            metadata=metadata,
+        )
+
+        state.protect_topk_on_demotion_(
+            demoted_slot=1,
+            keep_count=2,
+            fifo_ring_capacity=0,
+            global_anchor_keyframe_id=0,
+        )
+
+        self.assertTrue(torch.equal(state.metadata.anchor_slot[0], torch.tensor([0, -1, -1, 1, 1])))
+
     def test_fifo_ring_keeps_default_global_anchor_keyframe_out_of_rotation(self):
         metadata = make_metadata(
             anchor_slots=[0, 0, 0, 0, 0, 0, 0, 0, 1, 1],
@@ -895,7 +948,7 @@ class FrontendCacheTests(unittest.TestCase):
 
         self.assertEqual(seen["window_token_count"], 2)
 
-    def test_commit_pending_update_reuses_attention_time_keep_indices(self):
+    def test_commit_pending_update_does_not_reuse_attention_time_keep_indices(self):
         attn = Attention(dim=1, num_heads=1)
         seen = {"eviction_called": False}
 
@@ -945,9 +998,65 @@ class FrontendCacheTests(unittest.TestCase):
             attn_module=attn,
         )
 
-        self.assertFalse(seen["eviction_called"])
-        self.assertTrue(torch.equal(state.k[0, 0, :, 0], torch.tensor([0.0, 10.0, 11.0])))
+        self.assertTrue(seen["eviction_called"])
+        self.assertTrue(torch.equal(state.k[0, 0, :, 0], torch.tensor([2.0, 10.0, 11.0])))
         self.assertTrue(torch.equal(state.metadata.frame_id[0], torch.tensor([0, 1, 1])))
+
+    def test_commit_pending_update_uses_commit_importance_not_attention_keep_indices(self):
+        attn = Attention(dim=1, num_heads=1)
+        seen = {"eviction_called": False}
+
+        def eviction_spy(k, v, cache_budget, num_anchor_tokens, **kwargs):
+            seen["eviction_called"] = True
+            self.assertTrue(torch.equal(kwargs["importance_scores"], torch.tensor([[0.1, 1.0]])))
+            self.assertEqual(kwargs["num_new_tokens"], 2)
+            kept_indices = torch.tensor([[0, 2, 4]], dtype=torch.long, device=k.device)
+            expanded = kept_indices.view(1, 1, 3, 1).expand(1, 1, 3, 1)
+            return (
+                torch.gather(k, 2, expanded),
+                torch.gather(v, 2, expanded),
+                0.0,
+                kept_indices,
+            )
+
+        attn.eviction = eviction_spy
+        state = LayerCacheState(
+            k=torch.arange(3, dtype=torch.float32).reshape(1, 1, 3, 1),
+            v=torch.arange(100, 103, dtype=torch.float32).reshape(1, 1, 3, 1),
+            metadata=make_metadata(
+                anchor_slots=[-1, -1, -1],
+                frame_ids=[0, 0, 0],
+                slot_ids=[0, 0, 0],
+            ),
+            slot_to_active={0: make_transform(0.0), 1: make_transform(0.0)},
+        )
+        pending = PendingLayerUpdate(
+            k_current=torch.tensor([[[[10.0], [11.0]]]], dtype=torch.float32),
+            v_current=torch.tensor([[[[110.0], [111.0]]]], dtype=torch.float32),
+            importance_current=torch.tensor([[0.1, 1.0]], dtype=torch.float32),
+            frame_id=1,
+            cache_budget=3,
+            attention_kept_indices=torch.tensor([[0, 1, 3]], dtype=torch.long),
+        )
+        current_metadata = make_metadata(
+            anchor_slots=[-1, -1],
+            frame_ids=[1, 1],
+            slot_ids=[1, 1],
+            importance=[0.1, 1.0],
+            depth_conf=[1.0, 1.0],
+        )
+
+        state.commit_pending_update_(
+            pending_update=pending,
+            current_metadata=current_metadata,
+            config=FrontendCacheConfig(enabled=True, dedup_enabled=False),
+            intra_frame_keep_ratio=1.0,
+            attn_module=attn,
+        )
+
+        self.assertTrue(seen["eviction_called"])
+        self.assertTrue(torch.equal(state.k[0, 0, :, 0], torch.tensor([0.0, 2.0, 11.0])))
+        self.assertTrue(torch.equal(state.metadata.frame_id[0], torch.tensor([0, 0, 1])))
 
     # ---------------------------------------------------------------------------
 # Phase 1 Decision 2 instrumentation: apply_voxel_dedup_() must expose
@@ -1152,6 +1261,36 @@ def test_attention_eviction_reserves_newest_window_tokens():
     assert kept.tolist() == [[0, 4, 5]]
     assert torch.equal(final_k, k[:, :, [0, 4, 5], :])
     assert torch.equal(final_v, v[:, :, [0, 4, 5], :])
+
+
+def test_attention_hybrid_scoring_excludes_protected_window_from_normalization():
+    attn = Attention(dim=4, num_heads=1)
+    k = torch.tensor(
+        [[
+            [
+                [1.0, 0.0, 0.0, 0.0],  # anchor
+                [0.0, 1.0, 0.0, 0.0],  # old candidate
+                [0.0, 0.0, 1.0, 0.0],  # new candidate, should win scored slot
+                [0.0, 0.0, 0.0, 1.0],  # new candidate
+                [1.0, 1.0, 0.0, 0.0],  # protected window tail
+            ]
+        ]],
+        dtype=torch.float32,
+    )
+    v = torch.arange(1 * 1 * 5 * 4, dtype=torch.float32).reshape(1, 1, 5, 4)
+
+    _, _, _, kept = attn.eviction(
+        k,
+        v,
+        cache_budget=3,
+        num_anchor_tokens=1,
+        importance_scores=torch.tensor([[5.0, 4.0, 100.0]], dtype=torch.float32),
+        num_new_tokens=3,
+        importance_weight=0.5,
+        window_token_count=1,
+    )
+
+    assert kept.tolist() == [[0, 2, 4]]
 
 
 def test_deferred_attention_can_evict_for_attention_without_pruning_returned_current_kv():

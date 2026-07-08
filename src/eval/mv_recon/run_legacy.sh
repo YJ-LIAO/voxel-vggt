@@ -7,7 +7,7 @@ SRC_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 REPO_ROOT="$(cd "${SRC_DIR}/.." && pwd)"
 
 PYTHON_BIN="${PYTHON_BIN:-/Train/LYJ/miniconda3/envs/OVGGT/bin/python}"
-MODEL_WEIGHTS="${MODEL_WEIGHTS:-/Train/LYJ/workspace/OVGGT/ckpt/checkpoints.pth}"
+MODEL_WEIGHTS="${MODEL_WEIGHTS:-${REPO_ROOT}/ckpt/checkpoints.pth}"
 DATA_ROOT="${DATA_ROOT:-/path/to/mount/lyj/OpenDataLab___7-Scenes/raw}"
 OUTPUT_DIR="${OUTPUT_DIR:-${REPO_ROOT}/eval_results/mv_recon/OVGGT_checkpoints_legacy}"
 MAX_FRAMES="${MAX_FRAMES:-300}"

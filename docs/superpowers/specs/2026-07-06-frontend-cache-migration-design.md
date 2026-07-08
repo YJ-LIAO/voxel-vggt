@@ -33,7 +33,7 @@ The source production branch adds a richer frontend path where cache updates are
 The target repository will support two inference paths:
 
 - Legacy path: preserves the existing behavior based on `HistoryAnchorManager`, useful for backward compatibility.
-- Frontend path: enabled through `mode in {"frontend_train", "frontend_eval"}` or `FrontendCacheConfig.enabled`, using production keyframe and voxel cache maintenance.
+- Frontend path: selected by `mode in {"frontend_train", "frontend_eval"}` with an enabled `FrontendCacheConfig`, using production keyframe and voxel cache maintenance. `FrontendCacheConfig(enabled=True)` alone does not switch a legacy-mode model onto the frontend path.
 
 The frontend path processes frames one at a time. For each frame, `Aggregator.forward()` computes current-frame global-attention K/V and returns one `PendingLayerUpdate` per global layer. `OVGGT._inference_frontend()` then predicts camera pose and depth, asks `FrontendKeyframeManager` for the keyframe event, builds `TokenMetadata` from depth/pose, applies the event to every `LayerCacheState`, and commits the pending K/V with intra-frame pruning, voxel dedup, FIFO protected-ring policy, and final eviction.
 

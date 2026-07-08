@@ -258,6 +258,23 @@ def test_frontend_run_script_forwards_extra_cli_args():
     assert '"$@"' in script
 
 
+def test_frontend_run_script_defaults_reproduce_windowfix_best_config():
+    script = Path(ROOT, "eval", "mv_recon", "run_frontend.sh").read_text()
+
+    assert 'MODEL_WEIGHTS="${MODEL_WEIGHTS:-${REPO_ROOT}/ckpt/checkpoints.pth}"' in script
+    assert 'MAX_FRAMES="${MAX_FRAMES:-200}"' in script
+    assert 'NUM_PROCESSES="${NUM_PROCESSES:-8}"' in script
+    assert 'FRONTEND_ANCHOR_INTERVAL="${FRONTEND_ANCHOR_INTERVAL:-9}"' in script
+    assert 'FRONTEND_DEDUP_BUDGET_TRIGGER_RATIO="${FRONTEND_DEDUP_BUDGET_TRIGGER_RATIO:-1.00}"' in script
+    assert '--frontend_dedup_budget_trigger_ratio "${FRONTEND_DEDUP_BUDGET_TRIGGER_RATIO}"' in script
+
+
+def test_legacy_run_script_uses_repo_relative_checkpoint_default():
+    script = Path(ROOT, "eval", "mv_recon", "run_legacy.sh").read_text()
+
+    assert 'MODEL_WEIGHTS="${MODEL_WEIGHTS:-${REPO_ROOT}/ckpt/checkpoints.pth}"' in script
+
+
 def test_write_merged_eval_log_rejects_missing_scene_metric(tmp_path):
     save_path = tmp_path / "7scenes"
     save_path.mkdir()
