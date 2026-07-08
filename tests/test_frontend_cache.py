@@ -948,7 +948,7 @@ class FrontendCacheTests(unittest.TestCase):
 
         self.assertEqual(seen["window_token_count"], 2)
 
-    def test_commit_pending_update_does_not_reuse_attention_time_keep_indices(self):
+    def test_commit_pending_update_reuses_attention_time_keep_indices_by_default(self):
         attn = Attention(dim=1, num_heads=1)
         seen = {"eviction_called": False}
 
@@ -998,11 +998,11 @@ class FrontendCacheTests(unittest.TestCase):
             attn_module=attn,
         )
 
-        self.assertTrue(seen["eviction_called"])
-        self.assertTrue(torch.equal(state.k[0, 0, :, 0], torch.tensor([2.0, 10.0, 11.0])))
+        self.assertFalse(seen["eviction_called"])
+        self.assertTrue(torch.equal(state.k[0, 0, :, 0], torch.tensor([0.0, 10.0, 11.0])))
         self.assertTrue(torch.equal(state.metadata.frame_id[0], torch.tensor([0, 1, 1])))
 
-    def test_commit_pending_update_uses_commit_importance_not_attention_keep_indices(self):
+    def test_commit_pending_update_can_disable_attention_keep_indices_for_commit_importance(self):
         attn = Attention(dim=1, num_heads=1)
         seen = {"eviction_called": False}
 
@@ -1049,7 +1049,11 @@ class FrontendCacheTests(unittest.TestCase):
         state.commit_pending_update_(
             pending_update=pending,
             current_metadata=current_metadata,
-            config=FrontendCacheConfig(enabled=True, dedup_enabled=False),
+            config=FrontendCacheConfig(
+                enabled=True,
+                dedup_enabled=False,
+                reuse_attention_kept_indices=False,
+            ),
             intra_frame_keep_ratio=1.0,
             attn_module=attn,
         )

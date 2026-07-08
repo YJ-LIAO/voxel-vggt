@@ -56,6 +56,11 @@ class FrontendCacheConfig:
     # importance-vs-depth_conf blend). Default 0.5 = prior behavior (backward compat).
     # Only the eviction call in commit_pending_update_ reads this; dedup is unaffected.
     eviction_importance_weight: float = 0.5
+    # Reuse the attention-time temporary eviction keep set for persistent cache
+    # maintenance on non-anchor frames. This preserves the verified 7-Scenes
+    # windowfix baseline; set False to force strict commit-time eviction using
+    # post-MLP current-layer importance.
+    reuse_attention_kept_indices: bool = True
     dedup_cooldown_frames: int = 0
     dedup_budget_trigger_ratio: float = 0.9
     dedup_topk_per_voxel: int = 3
@@ -1097,6 +1102,15 @@ class LayerCacheState:
             self.reorder_by_anchor_slots_()
             self._needs_reorder_after_revoke = False
 
+        if (
+            config.reuse_attention_kept_indices
+            and pending_update.attention_kept_indices is not None
+            and not reordered_for_anchor
+            and intra_frame_keep_ratio >= 1.0
+        ):
+            self.gather_per_batch_(
+                self._override_indices_per_batch(pending_update.attention_kept_indices)
+            )
         self.apply_voxel_dedup_(config, current_frame_id=pending_update.frame_id,
                                 layer_id=layer_id,
                                 dedup_probe=dedup_probe, batch_index=batch_index,
