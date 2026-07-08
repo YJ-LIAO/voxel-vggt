@@ -386,6 +386,56 @@ class FrontendCacheTests(unittest.TestCase):
 
         self.assertEqual(int((state.metadata.anchor_slot[0] == 0).sum().item()), 2)
 
+    def test_fifo_ring_keeps_default_global_anchor_keyframe_out_of_rotation(self):
+        metadata = make_metadata(
+            anchor_slots=[0, 0, 0, 0, 0, 0, 0, 0, 1, 1],
+            keyframe_ids=[0, 0, 0, 10, 11, 12, 13, 14, 20, 20],
+            slot_ids=[0, 0, 0, 10, 11, 12, 13, 14, 20, 20],
+            importance=[0.1] * 10,
+        )
+        state = LayerCacheState(
+            k=torch.zeros(1, 1, 10, 1),
+            v=torch.zeros(1, 1, 10, 1),
+            metadata=metadata,
+        )
+
+        state.protect_topk_on_demotion_(
+            demoted_slot=1,
+            keep_count=2,
+            fifo_ring_capacity=5,
+        )
+
+        global_anchor_mask = state.metadata.keyframe_id[0] == 0
+        self.assertTrue(torch.equal(state.metadata.anchor_slot[0, global_anchor_mask], torch.zeros(3, dtype=torch.long)))
+
+    def test_fifo_probe_empty_override_does_not_revoke_for_requested_keep_count(self):
+        metadata = make_metadata(
+            anchor_slots=[0, 0, 0, 0, 0, 1, 1],
+            keyframe_ids=[0, 10, 11, 12, 13, 20, 20],
+            slot_ids=[0, 10, 11, 12, 13, 20, 20],
+            importance=[0.1] * 7,
+        )
+
+        class EmptyFifoProbe:
+            def on_fifo_topk_candidate(self, **kwargs):
+                return torch.empty(0, dtype=torch.long)
+
+        state = LayerCacheState(
+            k=torch.zeros(1, 1, 7, 1),
+            v=torch.zeros(1, 1, 7, 1),
+            metadata=metadata,
+        )
+
+        state.protect_topk_on_demotion_(
+            demoted_slot=1,
+            keep_count=2,
+            fifo_ring_capacity=4,
+            global_anchor_keyframe_id=0,
+            fifo_probe=EmptyFifoProbe(),
+        )
+
+        self.assertTrue(torch.equal(state.metadata.anchor_slot[0], torch.tensor([0, 0, 0, 0, 0, 1, 1])))
+
     def test_fifo_max_protected_cap_is_applied_per_batch(self):
         metadata = TokenMetadata(
             token_kind=torch.full((2, 4), int(TokenKind.PATCH), dtype=torch.long),

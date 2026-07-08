@@ -91,6 +91,19 @@ class FrontendKeyframeManager:
             raise RuntimeError("Active keyframe pose is not initialized")
         return self.active_pose_encoding
 
+    def prune_retired_keyframes(self, live_keyframe_ids: set[int]) -> None:
+        always_keep = set()
+        if self.global_anchor is not None:
+            always_keep.add(int(self.global_anchor["keyframe_id"]))
+        always_keep.update(int(slot["keyframe_id"]) for slot in self.history_slots)
+        if self.active_keyframe_id >= 0:
+            always_keep.add(int(self.active_keyframe_id))
+
+        keep_ids = {int(keyframe_id) for keyframe_id in live_keyframe_ids} | always_keep
+        stale_ids = [keyframe_id for keyframe_id in self.retired_keyframes if int(keyframe_id) not in keep_ids]
+        for keyframe_id in stale_ids:
+            del self.retired_keyframes[keyframe_id]
+
     def update(
         self,
         frame_idx: int,

@@ -748,6 +748,8 @@ class OVGGT(nn.Module, PyTorchModelHubMixin):
                     if score is not None:
                         aggregator_last_scores[b][layer_idx] = score
 
+            self._prune_frontend_retired_keyframes(keyframe_managers, cache_states)
+
             for b in range(B):
                 past_key_values_camera[b] = self.camera_head.apply_keyframe_event(
                     past_key_values_camera[b],
@@ -1232,6 +1234,20 @@ class OVGGT(nn.Module, PyTorchModelHubMixin):
                 "camera_last_scores": camera_last_scores,
             }
         )
+
+    @staticmethod
+    def _prune_frontend_retired_keyframes(keyframe_managers, cache_states) -> None:
+        for manager, layer_states in zip(keyframe_managers, cache_states):
+            live_keyframe_ids = set()
+            for cache_state in layer_states:
+                metadata = getattr(cache_state, "metadata", None)
+                if metadata is None:
+                    continue
+                slot_ids = getattr(metadata, "slot_id", None)
+                if slot_ids is None or slot_ids.numel() == 0:
+                    continue
+                live_keyframe_ids.update(int(value) for value in torch.unique(slot_ids).detach().cpu().tolist())
+            manager.prune_retired_keyframes(live_keyframe_ids)
 
     def _build_frontend_keyframe_config(
         self,

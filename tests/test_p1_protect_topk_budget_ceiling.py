@@ -87,12 +87,15 @@ def test_protect_topk_respects_budget_ceiling():
     print(f">>> P1 fix verified: slot0 (FIFO 累积) 始终 <= {max_protected}")
 
 
-def test_no_ceiling_means_default_off_backward_compat():
-    """When max_protected_ratio is not set (default), behavior is unchanged (no cap)."""
+def test_v1_max_protected_ceiling_defaults_off_backward_compat():
+    """The legacy v1 max_protected cap stays disabled by default."""
     cfg = FrontendCacheConfig(enabled=True, fifo_keep_topk=80)
-    # default max_protected_ratio should be 1.0 (no cap) for backward compat
     assert cfg.max_protected_ratio >= 1.0, "default must not cap (backward compat)"
-    print(f">>> 向后兼容: default max_protected_ratio={cfg.max_protected_ratio} (无上限)")
+    assert cfg.fifo_protected_ring_ratio > 0.0
+    print(
+        f">>> 向后兼容: default max_protected_ratio={cfg.max_protected_ratio} (v1 cap off), "
+        f"fifo_protected_ring_ratio={cfg.fifo_protected_ring_ratio} (production ring on)"
+    )
 
 
 def test_fifo_ring_revoke_uses_actual_demoted_token_count():

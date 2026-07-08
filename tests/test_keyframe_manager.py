@@ -92,6 +92,21 @@ class FrontendKeyframeManagerTests(unittest.TestCase):
         finally:
             frontend_keyframe.compute_coverage = original_compute_coverage
 
+    def test_prune_retired_keyframes_keeps_only_live_or_active_transforms(self):
+        config = KeyframeSwitchConfig(strategy="fixed_interval", interval=1, max_history_anchors=1)
+        manager = FrontendKeyframeManager(config)
+        manager.update(0, torch.ones(8, 8), make_pose(0.0), (8, 8))
+        manager.update(1, torch.ones(8, 8), make_pose(1.0), (8, 8))
+        manager.update(2, torch.ones(8, 8), make_pose(2.0), (8, 8))
+        manager.update(3, torch.ones(8, 8), make_pose(3.0), (8, 8))
+        self.assertIn(1, manager.retired_keyframes)
+        self.assertIn(2, manager.retired_keyframes)
+
+        manager.prune_retired_keyframes({1})
+
+        self.assertIn(1, manager.retired_keyframes)
+        self.assertNotIn(2, manager.retired_keyframes)
+
 
 if __name__ == "__main__":
     unittest.main()

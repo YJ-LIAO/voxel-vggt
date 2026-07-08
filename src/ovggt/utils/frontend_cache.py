@@ -429,20 +429,41 @@ class LayerCacheState:
             indices = torch.nonzero(slot_mask, as_tuple=False).squeeze(-1)
             demoted_indices_by_batch[b_idx] = indices
 
+        # 2. Fire probe BEFORE any metadata mutation (even if keep_count=0)
+        keep_indices_override = None
+        keep_indices_by_batch = None
+        if fifo_probe is not None:
+            keep_indices_override = fifo_probe.on_fifo_topk_candidate(
+                cache_state=self,
+                demoted_slot=demoted_slot,
+                keep_count=keep_count,
+                layer_id=layer_id,
+                frame_id=current_frame_id if current_frame_id is not None else 0,
+                batch_index=batch_index,
+                demoted_indices_by_batch=demoted_indices_by_batch,
+            )
+            if keep_indices_override is not None:
+                keep_indices_by_batch = self._override_indices_per_batch(keep_indices_override)
+
         # 2.5 (P1 mechanism C): if the FIFO rescued pool is enabled and the new
         # protection would exceed its capacity, compute a revoke plan for the
-        # oldest non-global rescued tokens. The plan is computed here (before the
-        # probe) but applied after (step 3.5), so the probe still observes the
-        # original demoted-slot candidate set and the override early-return cannot
-        # bypass the revoke.
+        # oldest non-global rescued tokens. The probe still observes the original
+        # demoted-slot candidate set, but revocation is sized to the actual keep
+        # set after a probe override.
         revoke_by_batch: dict[int, Tensor] = {}
         keep_count_by_batch: dict[int, int] = {}
         if fifo_ring_capacity is not None and fifo_ring_capacity > 0:
-            gaid = int(global_anchor_keyframe_id) if global_anchor_keyframe_id is not None else -1
+            gaid = int(global_anchor_keyframe_id) if global_anchor_keyframe_id is not None else 0
             for b_idx in range(self.metadata.anchor_slot.shape[0]):
                 requested_keep_count = int(keep_count)  # batch-local; don't reuse a clamped value across batches
-                demoted_count = int(demoted_indices_by_batch[b_idx].numel())
-                planned_keep_count = min(max(requested_keep_count, 0), demoted_count)
+                demoted_indices = demoted_indices_by_batch[b_idx]
+                demoted_count = int(demoted_indices.numel())
+                if keep_indices_by_batch is not None:
+                    override_mask = torch.isin(demoted_indices, keep_indices_by_batch[b_idx])
+                    override_count = int(override_mask.sum().item())
+                    planned_keep_count = min(max(requested_keep_count, 0), override_count)
+                else:
+                    planned_keep_count = min(max(requested_keep_count, 0), demoted_count)
                 slot0_mask = self.metadata.anchor_slot[b_idx] == 0
                 slot0_indices = torch.nonzero(slot0_mask, as_tuple=False).squeeze(-1)
                 slot0_kf_ids = self.metadata.keyframe_id[b_idx, slot0_indices]
@@ -468,19 +489,6 @@ class LayerCacheState:
                     max(0, fifo_ring_capacity - remaining_after_revoke),
                 )
 
-        # 2. Fire probe BEFORE any metadata mutation (even if keep_count=0)
-        keep_indices_override = None
-        if fifo_probe is not None:
-            keep_indices_override = fifo_probe.on_fifo_topk_candidate(
-                cache_state=self,
-                demoted_slot=demoted_slot,
-                keep_count=keep_count,
-                layer_id=layer_id,
-                frame_id=current_frame_id if current_frame_id is not None else 0,
-                batch_index=batch_index,
-                demoted_indices_by_batch=demoted_indices_by_batch,
-            )
-
         # 3.5 (P1 mechanism C): apply the revoke plan regardless of whether the
         # probe overrode the keep set — the override early-return must not bypass
         # the pool-capacity revoke.
@@ -501,7 +509,6 @@ class LayerCacheState:
             return min(max(int(batch_keep), 0), int(demoted_count))
 
         if keep_indices_override is not None:
-            keep_indices_by_batch = self._override_indices_per_batch(keep_indices_override)
             if not keep_indices_by_batch or all(idx.numel() == 0 for idx in keep_indices_by_batch):
                 return
             for b_idx, indices in demoted_indices_by_batch.items():

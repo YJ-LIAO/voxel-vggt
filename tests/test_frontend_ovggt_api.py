@@ -9,7 +9,7 @@ if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
 from ovggt.models.ovggt import OVGGT
-from ovggt.utils.frontend_cache import FrontendCacheConfig
+from ovggt.utils.frontend_cache import FrontendCacheConfig, LayerCacheState, TokenMetadata
 from ovggt.utils.frontend_keyframe import KeyframeSwitchConfig
 from ovggt.utils.pose_enc import (
     ABS_POSE_ENCODING,
@@ -384,6 +384,33 @@ def test_frontend_keyframe_schedule_keeps_each_batch_event():
     assert isinstance(output.keyframe_schedule[0], list)
     assert len(output.keyframe_schedule[0]) == 2
     assert all(event.frame_idx == 0 for event in output.keyframe_schedule[0])
+
+
+def test_frontend_prunes_retired_keyframes_from_live_cache_metadata():
+    model = _small_ovggt(
+        mode="frontend_eval",
+        frontend_cache_config=FrontendCacheConfig(enabled=True, dedup_enabled=False),
+    )
+    metadata = TokenMetadata(
+        token_kind=torch.full((1, 4), 2, dtype=torch.long),
+        frame_id=torch.zeros((1, 4), dtype=torch.long),
+        anchor_slot=torch.full((1, 4), -1, dtype=torch.long),
+        keyframe_id=torch.tensor([[1, 2, 2, 3]], dtype=torch.long),
+        slot_id=torch.tensor([[1, 2, 2, 3]], dtype=torch.long),
+        slot_local_xyz=torch.zeros(1, 4, 3),
+        importance=torch.ones(1, 4),
+        depth_conf=torch.ones(1, 4),
+    )
+    cache_states = [[LayerCacheState(metadata=metadata)]]
+    calls = []
+
+    class ManagerStub:
+        def prune_retired_keyframes(self, live_keyframe_ids):
+            calls.append(set(live_keyframe_ids))
+
+    model._prune_frontend_retired_keyframes([ManagerStub()], cache_states)
+
+    assert calls == [{1, 2, 3}]
 
 
 def test_frontend_coverage_strategy_is_not_monitor_only_by_default():
